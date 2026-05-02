@@ -1,44 +1,53 @@
 # Xel's Combat AI
 
-Small Dalamud plugin for personal BossMod Reborn combat AI helpers. The first helper mirrors the useful part of AutoDuty's passive BMR setup:
+A Dalamud plugin that automatically manages your BossMod Reborn movement and positioning settings during combat so you don't have to think about them.
 
-- reads Avarice shared data key `Avarice.PositionalStatus`
-- maps `1` to `Rear`, `2` to `Flank`, otherwise `Any`
-- pushes `BossMod.Autorotation.MiscAI.GoToPositional` transient strategy into a BMR preset
-- creates and activates the `Xel's Combat AI` preset
-- sets `NormalMovement.Destination = Pathfind`
-- adjusts `StayCloseToTarget.range` using separate melee, physical ranged, healer, magic ranged, and role-aware AoE target-count rules
-- adjusts `NormalMovement.ForbiddenZoneCushion` from a configurable preferred forbidden-zone distance, defaulting to `1.0`
-- adjusts `StayCloseToPartyRole.Role` to `None` for targets with a BMR boss module and `Tank` otherwise
-- exposes `/xcai` commands for toggling, status, and config
+## Requirements
 
-BossMod preset name: `Xel's Combat AI`.
+- [BossMod Reborn](https://github.com/FFXIV-CombatReborn/BossmodReborn)
+- [Avarice](https://github.com/ToxicStar8/Avarice) (for positional management)
 
-Commands:
+## What it does
 
-- `/xcai` toggles the plugin
-- `/xcai on`
-- `/xcai off`
-- `/xcai toggle`
-- `/xcai status`
-- `/xcai config`
+While you are in combat, the plugin automatically:
 
-The plugin only pushes runtime BMR strategy changes while the player is in combat. Out of combat, it does not follow party members or targets and sets BMR movement to `None` when combat ends.
+- **Moves you to the correct positional** (rear/flank) based on your autorotation
+- **Keeps you at the right distance** from your target based on your role
+- **Switches to AoE distance** when there are multiple enemies nearby
+- **Stays close to a tank** when your target doesn't have a boss module
+- **Manages your Ley Lines** — returns to them when safe, uses Between the Lines and Retrace if available
+- **Stays clear of forbidden zones** with a configurable buffer distance
 
-The config window lets users adjust the range values, forbidden-zone distance, and behavior toggles. Use `Reset ranges` to restore only distance/range values, or `Reset all` to restore the full plugin configuration.
+Out of combat, the plugin stops managing movement entirely and hands control back to you.
 
-## Custom Repository
+## Installation
 
-After pushing this repo to GitHub as `xeltor/XelsCombatAI` and publishing a release with `XelsCombatAI.zip`, add this URL to Dalamud's custom plugin repositories:
+Add the following URL to Dalamud's custom plugin repositories:
 
-```text
-https://raw.githubusercontent.com/xeltor/XelsCombatAI/main/pluginmaster.json
+```
+https://raw.githubusercontent.com/Xeltor/XelsCombatAI/master/pluginmaster.json
 ```
 
-If the GitHub owner or repository name changes, update the URLs in `pluginmaster.json` before publishing.
+## Commands
 
-To build the zip locally:
+| Command | Description |
+|---|---|
+| `/xcai` | Toggle the plugin on/off |
+| `/xcai on` | Enable |
+| `/xcai off` | Disable |
+| `/xcai config` | Open settings |
+| `/xcai status` | Print current state to chat |
 
-```bash
-scripts/package-release.sh
-```
+## Configuration
+
+Open the settings window with `/xcai config` or through the Dalamud plugin list.
+
+**Single target distance** — Set your preferred max distance per role (melee, physical ranged, healer, magic ranged). If disabled, all roles use the melee distance.
+
+**AoE target distance** — When multiple enemies are nearby, the plugin switches to these distances instead. You can also set WHM/SCH/SGE to use melee distance during AoE so they stay in range of their ground targets.
+
+**Manage forbidden-zone distance** — Keeps you a set distance back from forbidden zones to avoid clipping into them.
+
+**Manage Ley Lines** — Helps you stay on your Ley Lines and use Between the Lines / Retrace when available. Does not place Ley Lines for you.
+
+Use **Reset ranges** to restore all distance values to defaults, or **Reset all** to restore the full configuration.
