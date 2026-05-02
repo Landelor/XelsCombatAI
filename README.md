@@ -5,7 +5,7 @@ A Dalamud plugin that automatically manages your BossMod Reborn movement and pos
 ## Requirements
 
 - [BossMod Reborn](https://github.com/FFXIV-CombatReborn/BossmodReborn)
-- [Avarice](https://github.com/ToxicStar8/Avarice) (for positional management)
+- [Avarice](https://puni.sh/api/repository/veyn) (for positional management)
 
 ## What it does
 
