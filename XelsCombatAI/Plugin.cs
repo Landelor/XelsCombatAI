@@ -170,6 +170,7 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
+        this.initializedPreset = false;
         this.lastPositional = Positional.Any;
         this.lastRange = -1f;
         this.lastPartyRole = null;
@@ -321,9 +322,18 @@ public sealed class Plugin : IDalamudPlugin
             var enemyCount = ObjectFunctions.GetAttackableEnemyCountAroundPoint(TargetManager.Target.Position, this.config.EnemyCountRadius);
             if (enemyCount > this.config.AoEEnemyThreshold)
             {
-                return rangeRole != RangeRole.Melee
-                    ? this.config.AoERangedRange
-                    : this.config.AoEMeleeRange;
+                var classJobId = ObjectTable.LocalPlayer?.ClassJob.RowId ?? 0;
+                if (rangeRole == RangeRole.Melee || (this.config.AoEHealerMeleeRange && classJobId is 24 or 28 or 40))
+                    return this.config.AoEMeleeRange;
+                if (!this.config.RoleBasedRange)
+                    return this.config.AoERangedRange;
+                return rangeRole switch
+                {
+                    RangeRole.PhysicalRanged => this.config.AoEPhysicalRangedRange,
+                    RangeRole.Healer => this.config.AoEHealerRange,
+                    RangeRole.MagicRanged => this.config.AoEMagicRangedRange,
+                    _ => this.config.AoERangedRange
+                };
             }
         }
 
