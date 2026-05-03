@@ -21,7 +21,7 @@ public sealed class Configuration : IPluginConfiguration
     public const float DefaultAoEMagicRangedRange = 20f;
     public const int DefaultAoEEnemyThreshold = 2;
     public const float DefaultPreferredForbiddenZoneDistance = 1f;
-    public const float EnemyCountRadius = 5f;
+    public const float EnemyCountRadius = 10f;
 
     public int Version { get; set; } = 4;
 

@@ -2,7 +2,7 @@
   <PropertyGroup>
     <Authors>xeltor</Authors>
     <Company></Company>
-    <Version>1.1.4.0</Version>
+    <Version>1.1.5.0</Version>
     <Description>Updates a dedicated BossMod Reborn preset during combat using Avarice and current combat state.</Description>
     <PackageProjectUrl></PackageProjectUrl>
   </PropertyGroup>
