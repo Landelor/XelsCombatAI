@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
 
@@ -54,6 +55,7 @@ internal sealed class BossModIpc
     private readonly ICallGateSubscriber<string, string, string, string, bool> addTransientStrategy;
     private readonly ICallGateSubscriber<float> nextDamageIn;
     private readonly ICallGateSubscriber<float> specialModeIn;
+    private readonly ICallGateSubscriber<Vector3, Vector3, bool> isDashToPositionSafe;
 
     public BossModIpc(IDalamudPluginInterface pluginInterface)
     {
@@ -67,6 +69,7 @@ internal sealed class BossModIpc
         this.addTransientStrategy = pluginInterface.GetIpcSubscriber<string, string, string, string, bool>("BossMod.Presets.AddTransientStrategy");
         this.nextDamageIn = pluginInterface.GetIpcSubscriber<float>("BossMod.Hints.NextDamageIn");
         this.specialModeIn = pluginInterface.GetIpcSubscriber<float>("BossMod.Hints.SpecialModeIn");
+        this.isDashToPositionSafe = pluginInterface.GetIpcSubscriber<Vector3, Vector3, bool>("BossMod.Hints.IsDashToPositionSafe");
     }
 
     public bool EnsurePreset()
@@ -181,6 +184,18 @@ internal sealed class BossModIpc
         catch
         {
             return true;
+        }
+    }
+
+    public bool IsDashToPositionSafe(Vector3 from, Vector3 to)
+    {
+        try
+        {
+            return this.isDashToPositionSafe.InvokeFunc(from, to);
+        }
+        catch
+        {
+            return this.IsSafeToEngage();
         }
     }
 

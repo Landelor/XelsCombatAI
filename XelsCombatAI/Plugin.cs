@@ -439,7 +439,7 @@ public sealed class Plugin : IDalamudPlugin
 
         if (ActionManager.Instance()->AnimationLock > 0) return;
         if (player.IsCasting) return;
-        if (!this.bossMod.IsSafeToEngage()) return;
+        if (!this.bossMod.IsDashToPositionSafe(player.Position, target.Position)) return;
 
         var jobId = player.ClassJob.RowId;
         var targetId = target.GameObjectId;
