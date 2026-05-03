@@ -21,6 +21,7 @@ public sealed class Plugin : IDalamudPlugin
     private const string CommandName = "/xcai";
     private const string AvaricePositionalStatusKey = "Avarice.PositionalStatus";
     private const float GapCloserSafetyWindowSeconds = 8f;
+    private const float MeleeActionRange = 3f;
     private const uint TrueNorthActionId = 7546;
     private const uint TrueNorthStatusId = 1250;
 
@@ -46,6 +47,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly Configuration config;
     private readonly BossModIpc bossMod;
+    private readonly RotationSolverIpc rotationSolver;
     private readonly WindowSystem windowSystem = new("XelsCombatAI");
     private readonly ConfigWindow configWindow;
     private readonly IDtrBarEntry dtrEntry;
@@ -58,6 +60,7 @@ public sealed class Plugin : IDalamudPlugin
     private bool? lastLeylinesBetweenTheLines;
     private bool? lastLeylinesRetrace;
     private bool? lastLeylinesGoal;
+    private bool? rsrTrueNorthDisabled;
     private bool initializedPreset;
     private DateTime nextRuntimeUpdate = DateTime.MinValue;
 
@@ -69,7 +72,12 @@ public sealed class Plugin : IDalamudPlugin
         this.config.Migrate();
         this.config.Clamp();
         this.bossMod = new BossModIpc(PluginInterface);
-        this.configWindow = new ConfigWindow(this.config, this.SaveConfig, this.ResetRuntimeCache, enabled => this.TrySetEnabled(enabled), this.GetDependencyWarning);
+        this.rotationSolver = new RotationSolverIpc();
+        this.configWindow = new ConfigWindow(this.config, this.SaveConfig, this.ResetRuntimeCache, enabled => this.TrySetEnabled(enabled), this.GetDependencyWarning, this.GetTrueNorthWarning, this.EnsureRsrTrueNorthDisabled);
+        if (this.config.ManagePositionals && this.config.ManageTrueNorth)
+        {
+            this.EnsureRsrTrueNorthDisabled();
+        }
         this.windowSystem.AddWindow(this.configWindow);
         this.dtrEntry = DtrBar.Get("XelsCombatAI");
         this.dtrEntry.OnClick = this.OnDtrClick;
@@ -183,6 +191,7 @@ public sealed class Plugin : IDalamudPlugin
         this.lastPositional = Positional.Any;
         this.lastRange = -1f;
         this.lastPartyRole = null;
+        this.rsrTrueNorthDisabled = null;
     }
 
     private void DeactivateBossModPreset()
@@ -238,7 +247,17 @@ public sealed class Plugin : IDalamudPlugin
 
             if (this.config.ManagePositionals)
             {
-                this.SetPositional(HasTrueNorthCoverage() ? Positional.Any : ReadAvaricePositional());
+                if (this.config.ManageTrueNorth)
+                {
+                    this.EnsureRsrTrueNorthDisabled();
+                    var positional = ReadAvaricePositional();
+                    TryUseTrueNorth(positional);
+                    this.SetPositional(HasActiveTrueNorth() ? Positional.Any : positional);
+                }
+                else
+                {
+                    this.SetPositional(HasTrueNorthCoverage() ? Positional.Any : ReadAvaricePositional());
+                }
             }
 
             this.SetLeylines(
@@ -267,6 +286,49 @@ public sealed class Plugin : IDalamudPlugin
         {
             this.lastPositional = positional;
         }
+    }
+
+    private void EnsureRsrTrueNorthDisabled()
+    {
+        if (this.rsrTrueNorthDisabled != null)
+        {
+            return;
+        }
+
+        try
+        {
+            this.rotationSolver.DisableAutoTrueNorth();
+            this.rsrTrueNorthDisabled = true;
+            Log.Verbose("Disabled Rotation Solver Reborn Auto True North.");
+        }
+        catch (Exception ex)
+        {
+            this.rsrTrueNorthDisabled = false;
+            Log.Verbose(ex, "Could not disable Rotation Solver Reborn Auto True North.");
+            this.Print("Warning: Manage True North is enabled, but Rotation Solver Reborn Auto True North could not be disabled.");
+            this.UpdateDtr();
+        }
+    }
+
+    private static unsafe void TryUseTrueNorth(Positional positional)
+    {
+        if (positional == Positional.Any) return;
+        if (GetCurrentRangeRole() != RangeRole.Melee) return;
+        if (HasActiveTrueNorth()) return;
+        if (GetTrueNorthCharges() == 0) return;
+
+        var player = ObjectTable.LocalPlayer;
+        var target = TargetManager.Target;
+        if (player == null || target == null) return;
+
+        var dist = Vector3.Distance(player.Position, target.Position) - player.HitboxRadius - target.HitboxRadius;
+        if (dist > MeleeActionRange) return;
+
+        if (ActionManager.Instance()->AnimationLock > 0) return;
+        if (player.IsCasting) return;
+        if (ActionManager.Instance()->GetActionStatus(ActionType.Action, TrueNorthActionId) != 0) return;
+
+        ActionManager.Instance()->UseAction(ActionType.Action, TrueNorthActionId);
     }
 
     private void SetRange(float range)
@@ -462,7 +524,7 @@ public sealed class Plugin : IDalamudPlugin
         if (player == null || target == null) return;
 
         var dist = Vector3.Distance(player.Position, target.Position) - player.HitboxRadius - target.HitboxRadius;
-        if (dist <= 3f) return;
+        if (dist <= MeleeActionRange) return;
 
         if (ActionManager.Instance()->AnimationLock > 0) return;
         if (player.IsCasting) return;
@@ -552,7 +614,7 @@ public sealed class Plugin : IDalamudPlugin
                 this.TrySetEnabled(!this.config.Enabled);
                 break;
             case "status":
-                this.Print($"Enabled={this.config.Enabled}, Dependencies={(this.GetDependencyWarning() ?? "OK")}, Preset={BossModIpc.DefaultPresetName}, LastPositional={this.lastPositional}, TrueNorthCharges={GetTrueNorthCharges()}, TrueNorthActive={HasActiveTrueNorth()}, Range={this.lastRange:0.0}, Movement={this.lastMovement}, MovementRange={this.lastMovementRangeStrategy}, Cushion={this.lastForbiddenZoneCushion}, Role={this.lastPartyRole}, LeylinesBTL={this.lastLeylinesBetweenTheLines}, LeylinesRetrace={this.lastLeylinesRetrace}, LeylinesGoal={this.lastLeylinesGoal}, Initialized={this.initializedPreset}");
+                this.Print($"Enabled={this.config.Enabled}, Dependencies={(this.GetDependencyWarning() ?? "OK")}, TrueNorthManagement={(this.GetTrueNorthWarning() ?? this.rsrTrueNorthDisabled?.ToString() ?? "NotManaged")}, Preset={BossModIpc.DefaultPresetName}, LastPositional={this.lastPositional}, TrueNorthCharges={GetTrueNorthCharges()}, TrueNorthActive={HasActiveTrueNorth()}, Range={this.lastRange:0.0}, Movement={this.lastMovement}, MovementRange={this.lastMovementRangeStrategy}, Cushion={this.lastForbiddenZoneCushion}, Role={this.lastPartyRole}, LeylinesBTL={this.lastLeylinesBetweenTheLines}, LeylinesRetrace={this.lastLeylinesRetrace}, LeylinesGoal={this.lastLeylinesGoal}, Initialized={this.initializedPreset}");
                 break;
             case "config":
                 this.OpenConfig();
@@ -584,9 +646,14 @@ public sealed class Plugin : IDalamudPlugin
     {
         this.dtrEntry.Text = $"XCAI: {(this.config.Enabled ? "On" : "Off")}";
         var dependencyWarning = this.GetDependencyWarning();
+        var trueNorthWarning = this.GetTrueNorthWarning();
         this.dtrEntry.Tooltip = dependencyWarning == null
             ? "Left click: toggle Xel's Combat AI\nRight click: open config"
             : $"Cannot enable: {dependencyWarning}\nRight click: open config";
+        if (trueNorthWarning != null)
+        {
+            this.dtrEntry.Tooltip += $"\nWarning: {trueNorthWarning}";
+        }
         this.dtrEntry.Shown = true;
     }
 
@@ -614,6 +681,7 @@ public sealed class Plugin : IDalamudPlugin
         this.lastLeylinesBetweenTheLines = null;
         this.lastLeylinesRetrace = null;
         this.lastLeylinesGoal = null;
+        this.rsrTrueNorthDisabled = null;
     }
 
     private bool TrySetEnabled(bool enabled, bool warn = true)
@@ -662,6 +730,26 @@ public sealed class Plugin : IDalamudPlugin
         return this.DependenciesAvailable(out var missing) ? null : missing;
     }
 
+    private string? GetTrueNorthWarning()
+    {
+        if (!this.config.ManagePositionals || !this.config.ManageTrueNorth)
+        {
+            return null;
+        }
+
+        if (!this.IsRotationSolverAvailable())
+        {
+            return "Manage True North is enabled, but Rotation Solver Reborn is not loaded or its IPC is unavailable. XCAI will continue without disabling RSR Auto True North.";
+        }
+
+        if (this.rsrTrueNorthDisabled == false)
+        {
+            return "Manage True North is enabled, but XCAI could not disable Rotation Solver Reborn Auto True North.";
+        }
+
+        return null;
+    }
+
     private bool DependenciesAvailable(out string missing)
     {
         var missingParts = new List<string>();
@@ -688,6 +776,11 @@ public sealed class Plugin : IDalamudPlugin
     private bool IsAvariceAvailable()
     {
         return this.HasLoadedPlugin("Avarice");
+    }
+
+    private bool IsRotationSolverAvailable()
+    {
+        return this.rotationSolver.IsAvailable(PluginInterface);
     }
 
     private bool HasLoadedPlugin(params string[] names)

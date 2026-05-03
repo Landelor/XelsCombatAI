@@ -15,12 +15,14 @@ internal sealed class ConfigWindow : Window, IDisposable
     private readonly Action resetRuntimeState;
     private readonly Action<bool> setEnabled;
     private readonly Func<string?> dependencyWarning;
+    private readonly Func<string?> trueNorthWarning;
+    private readonly Action manageTrueNorthEnabled;
     private readonly HashSet<string> editingSliders = [];
     private readonly HashSet<string> openSections = [];
     private bool backspacePressedThisFrame;
     private bool wasBackspaceDown;
 
-    public ConfigWindow(Configuration config, Action save, Action resetRuntimeState, Action<bool> setEnabled, Func<string?> dependencyWarning)
+    public ConfigWindow(Configuration config, Action save, Action resetRuntimeState, Action<bool> setEnabled, Func<string?> dependencyWarning, Func<string?> trueNorthWarning, Action manageTrueNorthEnabled)
         : base("Xel's Combat AI Configuration###XelsCombatAIConfig")
     {
         this.config = config;
@@ -28,6 +30,8 @@ internal sealed class ConfigWindow : Window, IDisposable
         this.resetRuntimeState = resetRuntimeState;
         this.setEnabled = setEnabled;
         this.dependencyWarning = dependencyWarning;
+        this.trueNorthWarning = trueNorthWarning;
+        this.manageTrueNorthEnabled = manageTrueNorthEnabled;
         this.SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = new(420, 280),
@@ -43,6 +47,7 @@ internal sealed class ConfigWindow : Window, IDisposable
     {
         var changed = false;
         var dependencyWarningText = this.dependencyWarning();
+        var trueNorthWarningText = this.trueNorthWarning();
         var backspaceDown = Plugin.KeyState[VirtualKey.BACK];
         this.backspacePressedThisFrame = backspaceDown && !this.wasBackspaceDown;
         this.wasBackspaceDown = backspaceDown;
@@ -50,6 +55,12 @@ internal sealed class ConfigWindow : Window, IDisposable
         if (dependencyWarningText != null)
         {
             ImGui.TextColored(0xff4040ff, $"Cannot enable: {dependencyWarningText}");
+            ImGui.Separator();
+        }
+
+        if (trueNorthWarningText != null)
+        {
+            ImGui.TextColored(0xff40a0ff, $"Warning: {trueNorthWarningText}");
             ImGui.Separator();
         }
 
@@ -105,7 +116,17 @@ internal sealed class ConfigWindow : Window, IDisposable
         }
 
         changed |= this.Checkbox("Follow tank on trash", this.config.ManagePartyRoleFollow, this.defaultConfig.ManagePartyRoleFollow, v => this.config.ManagePartyRoleFollow = v, "Stays close to the tank when your target has no boss module. Automatically disabled on boss encounters.");
-        changed |= this.Checkbox("Manage positionals", this.config.ManagePositionals, this.defaultConfig.ManagePositionals, v => this.config.ManagePositionals = v);
+        if (this.CollapsingCheckbox("Manage positionals", this.config.ManagePositionals, this.defaultConfig.ManagePositionals, v => { this.config.ManagePositionals = v; changed = true; }))
+        {
+            ImGui.Indent();
+            changed |= this.Checkbox(
+                "Manage True North",
+                this.config.ManageTrueNorth,
+                this.defaultConfig.ManageTrueNorth,
+                v => { this.config.ManageTrueNorth = v; if (v) this.manageTrueNorthEnabled(); },
+                "XCAI will use True North and disable RSR's Auto True North via IPC to prevent conflicts. The RSR setting is not restored when this is disabled.");
+            ImGui.Unindent();
+        }
         changed |= this.Combo("Combat style", this.config.CombatStyle, this.defaultConfig.CombatStyle, v => this.config.CombatStyle = v, "Normal keeps BossMod moving directly to its destination. Greed lets BossMod balance uptime against mechanic safety.");
         if (this.CollapsingCheckbox("Use gap closer to re-engage", this.config.UseGapCloser, this.defaultConfig.UseGapCloser, v => { this.config.UseGapCloser = v; changed = true; }, tooltip: "Holes in the floor will absolutely kill you.", icon: FontAwesomeIcon.SkullCrossbones))
         {

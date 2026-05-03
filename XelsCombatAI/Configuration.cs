@@ -1,6 +1,7 @@
 using System;
 using Dalamud.Configuration;
 using Dalamud.Plugin;
+using Newtonsoft.Json;
 
 namespace XelsCombatAI;
 
@@ -22,7 +23,7 @@ public sealed class Configuration : IPluginConfiguration
     public const float DefaultEnemyCountRadius = 15f;
     public const float DefaultPreferredForbiddenZoneDistance = 1f;
 
-    public int Version { get; set; } = 3;
+    public int Version { get; set; } = 4;
 
     public bool Enabled { get; set; } = false;
     public bool ManageMovement { get; set; } = true;
@@ -30,6 +31,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool ManageForbiddenZoneDistance { get; set; } = true;
     public bool ManagePartyRoleFollow { get; set; } = true;
     public bool ManagePositionals { get; set; } = true;
+    public bool ManageTrueNorth { get; set; } = false;
     public bool ManageLeylines { get; set; } = true;
     public bool UseBetweenTheLines { get; set; } = true;
     public bool UseRetrace { get; set; } = true;
@@ -59,6 +61,12 @@ public sealed class Configuration : IPluginConfiguration
     public float EnemyCountRadius { get; set; } = DefaultEnemyCountRadius;
     public float PreferredForbiddenZoneDistance { get; set; } = DefaultPreferredForbiddenZoneDistance;
 
+    [JsonProperty("ManageTrueNorthInRsr")]
+    private bool ManageTrueNorthInRsrCompatibility
+    {
+        set => this.ManageTrueNorth = value;
+    }
+
     internal void Migrate()
     {
         if (this.Version < 2)
@@ -75,6 +83,12 @@ public sealed class Configuration : IPluginConfiguration
             this.AoEHealerRange = this.AoERangedRange;
             this.AoEMagicRangedRange = this.AoERangedRange;
             this.Version = 3;
+        }
+
+        if (this.Version < 4)
+        {
+            this.ManageTrueNorth = false;
+            this.Version = 4;
         }
     }
 
@@ -121,6 +135,7 @@ public sealed class Configuration : IPluginConfiguration
         this.ManageForbiddenZoneDistance = true;
         this.ManagePartyRoleFollow = true;
         this.ManagePositionals = true;
+        this.ManageTrueNorth = false;
         this.ManageLeylines = true;
         this.UseBetweenTheLines = true;
         this.UseRetrace = true;
