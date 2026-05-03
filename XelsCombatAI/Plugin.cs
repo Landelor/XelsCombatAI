@@ -49,7 +49,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly RotationSolverIpc rotationSolver;
     private readonly WindowSystem windowSystem = new("XelsCombatAI");
     private readonly ConfigWindow configWindow;
-    private readonly IDtrBarEntry dtrEntry;
+    private readonly IDtrBarEntry? dtrEntry;
     private Positional lastPositional = Positional.Any;
     private float lastRange = -1f;
     private bool? lastMovement;
@@ -79,13 +79,13 @@ public sealed class Plugin : IDalamudPlugin
         this.bossMod = new BossModIpc(PluginInterface);
         this.rotationSolver = new RotationSolverIpc();
         this.configWindow = new ConfigWindow(this.config, this.SaveConfig, this.ResetRuntimeCache, enabled => this.TrySetEnabled(enabled), this.GetDependencyWarning, this.GetTrueNorthWarning, this.EnsureRsrTrueNorthDisabled);
+        this.dtrEntry = DtrBar.Get("XelsCombatAI");
+        this.dtrEntry.OnClick = this.OnDtrClick;
         if (this.config.ManagePositionals && this.config.ManageTrueNorth)
         {
             this.EnsureRsrTrueNorthDisabled();
         }
         this.windowSystem.AddWindow(this.configWindow);
-        this.dtrEntry = DtrBar.Get("XelsCombatAI");
-        this.dtrEntry.OnClick = this.OnDtrClick;
         this.UpdateDtr();
 
         CommandManager.AddHandler(CommandName, new CommandInfo(this.OnCommand)
@@ -110,7 +110,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi -= this.OpenConfig;
         PluginInterface.UiBuilder.Draw -= this.windowSystem.Draw;
         CommandManager.RemoveHandler(CommandName);
-        this.dtrEntry.Remove();
+        this.dtrEntry?.Remove();
         this.windowSystem.RemoveAllWindows();
         this.configWindow.Dispose();
         ECommonsMain.Dispose();
@@ -651,6 +651,11 @@ public sealed class Plugin : IDalamudPlugin
 
     private void UpdateDtr()
     {
+        if (this.dtrEntry == null)
+        {
+            return;
+        }
+
         this.dtrEntry.Text = $"XCAI: {(this.config.Enabled ? "On" : "Off")}";
         var dependencyWarning = this.GetDependencyWarning();
         var trueNorthWarning = this.GetTrueNorthWarning();
