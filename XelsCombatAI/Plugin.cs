@@ -61,6 +61,7 @@ public sealed class Plugin : IDalamudPlugin
     private bool? lastLeylinesRetrace;
     private bool? lastLeylinesGoal;
     private bool? rsrTrueNorthDisabled;
+    private bool? trueNorthStrategy;
     private bool initializedPreset;
     private DateTime nextRuntimeUpdate = DateTime.MinValue;
 
@@ -158,11 +159,6 @@ public sealed class Plugin : IDalamudPlugin
                 return false;
             }
 
-            if (this.config.ManageMovement && !this.bossMod.SetMovement(BossModIpc.DefaultPresetName, true))
-            {
-                return false;
-            }
-
             this.initializedPreset = true;
             return true;
         }
@@ -175,23 +171,11 @@ public sealed class Plugin : IDalamudPlugin
 
     private void HandleOutOfCombat()
     {
-        if (this.initializedPreset && this.lastMovement != false)
+        if (this.initializedPreset)
         {
-            try
-            {
-                this.SetMovement(false);
-            }
-            catch (Exception ex)
-            {
-                Log.Verbose(ex, "Could not disable BossMod movement out of combat.");
-            }
+            this.DeactivateBossModPreset();
+            this.ResetRuntimeCache();
         }
-
-        this.initializedPreset = false;
-        this.lastPositional = Positional.Any;
-        this.lastRange = -1f;
-        this.lastPartyRole = null;
-        this.rsrTrueNorthDisabled = null;
     }
 
     private void DeactivateBossModPreset()
@@ -223,11 +207,6 @@ public sealed class Plugin : IDalamudPlugin
     {
         try
         {
-            if (this.config.ManageMovement)
-            {
-                this.SetMovement(true);
-            }
-
             if (this.config.ManageRange)
             {
                 this.SetRange(this.CalculateDesiredRange());
@@ -251,13 +230,37 @@ public sealed class Plugin : IDalamudPlugin
                 {
                     this.EnsureRsrTrueNorthDisabled();
                     var positional = ReadAvaricePositional();
-                    TryUseTrueNorth(positional);
-                    this.SetPositional(HasActiveTrueNorth() ? Positional.Any : positional);
+                    if (positional == Positional.Any)
+                    {
+                        this.trueNorthStrategy = null;
+                        this.SetPositional(Positional.Any);
+                    }
+                    else
+                    {
+                        if (this.trueNorthStrategy == null)
+                            this.trueNorthStrategy = HasActiveTrueNorth() || GetTrueNorthCharges() > 0;
+                        if (this.trueNorthStrategy == true)
+                        {
+                            TryUseTrueNorth(positional);
+                            var pending = !HasActiveTrueNorth() && !IsOutsideMeleeRange();
+                            this.SetPositional(Positional.Any);
+                            if (pending && IsOutsideMeleeRange()) return;
+                        }
+                        else
+                        {
+                            this.SetPositional(positional);
+                        }
+                    }
                 }
                 else
                 {
                     this.SetPositional(HasTrueNorthCoverage() ? Positional.Any : ReadAvaricePositional());
                 }
+            }
+
+            if (this.config.ManageMovement)
+            {
+                this.SetMovement(true);
             }
 
             this.SetLeylines(
@@ -310,25 +313,20 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private static unsafe void TryUseTrueNorth(Positional positional)
+    private static unsafe bool TryUseTrueNorth(Positional positional)
     {
-        if (positional == Positional.Any) return;
-        if (GetCurrentRangeRole() != RangeRole.Melee) return;
-        if (HasActiveTrueNorth()) return;
-        if (GetTrueNorthCharges() == 0) return;
+        if (positional == Positional.Any) return false;
+        if (GetCurrentRangeRole() != RangeRole.Melee) return false;
+        if (HasActiveTrueNorth()) return false;
+        if (GetTrueNorthCharges() == 0) return false;
+        if (IsOutsideMeleeRange()) return false;
 
-        var player = ObjectTable.LocalPlayer;
-        var target = TargetManager.Target;
-        if (player == null || target == null) return;
-
-        var dist = Vector3.Distance(player.Position, target.Position) - player.HitboxRadius - target.HitboxRadius;
-        if (dist > MeleeActionRange) return;
-
-        if (ActionManager.Instance()->AnimationLock > 0) return;
-        if (player.IsCasting) return;
-        if (ActionManager.Instance()->GetActionStatus(ActionType.Action, TrueNorthActionId) != 0) return;
+        if (ActionManager.Instance()->AnimationLock > 0) return false;
+        if (ObjectTable.LocalPlayer?.IsCasting == true) return false;
+        if (ActionManager.Instance()->GetActionStatus(ActionType.Action, TrueNorthActionId) != 0) return false;
 
         ActionManager.Instance()->UseAction(ActionType.Action, TrueNorthActionId);
+        return true;
     }
 
     private void SetRange(float range)
@@ -564,6 +562,14 @@ public sealed class Plugin : IDalamudPlugin
         };
     }
 
+    private static bool IsOutsideMeleeRange()
+    {
+        var player = ObjectTable.LocalPlayer;
+        var target = TargetManager.Target;
+        if (player == null || target == null) return false;
+        return Vector3.Distance(player.Position, target.Position) - player.HitboxRadius - target.HitboxRadius > MeleeActionRange;
+    }
+
     private static bool HasTrueNorthCoverage()
     {
         return HasActiveTrueNorth() || GetTrueNorthCharges() > 0;
@@ -682,6 +688,7 @@ public sealed class Plugin : IDalamudPlugin
         this.lastLeylinesRetrace = null;
         this.lastLeylinesGoal = null;
         this.rsrTrueNorthDisabled = null;
+        this.trueNorthStrategy = null;
     }
 
     private bool TrySetEnabled(bool enabled, bool warn = true)
