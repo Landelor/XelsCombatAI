@@ -23,7 +23,7 @@ public sealed class Configuration : IPluginConfiguration
     public const float DefaultPreferredForbiddenZoneDistance = 1f;
     public const float EnemyCountRadius = 10f;
 
-    public int Version { get; set; } = 4;
+    public int Version { get; set; } = 5;
 
     public bool Enabled { get; set; } = false;
     public bool ManageMovement { get; set; } = true;
@@ -43,7 +43,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool GapCloserMNK { get; set; } = true;
     public bool GapCloserDRG { get; set; } = true;
     public bool GapCloserNIN { get; set; } = true;
-    public bool GapCloserSAM { get; set; } = true;
+    public bool GapCloserSAM { get; set; } = false;
     public bool GapCloserVPR { get; set; } = true;
     public bool EchoStatusToChat { get; set; } = true;
     public CombatStyle CombatStyle { get; set; } = CombatStyle.Normal;
@@ -88,6 +88,12 @@ public sealed class Configuration : IPluginConfiguration
         {
             this.ManageTrueNorth = false;
             this.Version = 4;
+        }
+
+        if (this.Version < 5)
+        {
+            this.GapCloserSAM = false;
+            this.Version = 5;
         }
     }
 
@@ -143,7 +149,7 @@ public sealed class Configuration : IPluginConfiguration
         this.GapCloserMNK = true;
         this.GapCloserDRG = true;
         this.GapCloserNIN = true;
-        this.GapCloserSAM = true;
+        this.GapCloserSAM = false;
         this.GapCloserVPR = true;
         this.EchoStatusToChat = true;
         this.CombatStyle = CombatStyle.Normal;

@@ -127,13 +127,12 @@ internal sealed class ConfigWindow : Window, IDisposable
             ImGui.Unindent();
         }
 
-        if (this.CollapsingCheckbox("Use gap closer to re-engage", this.config.UseGapCloser, this.defaultConfig.UseGapCloser, v => { this.config.UseGapCloser = v; changed = true; }, tooltip: "Holes in the floor will absolutely kill you.", icon: FontAwesomeIcon.SkullCrossbones))
+        if (this.CollapsingCheckbox("Use BMR-managed gap closer to re-engage", this.config.UseGapCloser, this.defaultConfig.UseGapCloser, v => { this.config.UseGapCloser = v; changed = true; }, tooltip: "Uses only BossMod utility modules with BossMod dash safety checks.", icon: FontAwesomeIcon.SkullCrossbones))
         {
             ImGui.Indent();
             changed |= this.Checkbox("MNK — Thunderclap", this.config.GapCloserMNK, this.defaultConfig.GapCloserMNK, v => this.config.GapCloserMNK = v);
-            changed |= this.Checkbox("DRG — Jump / High Jump", this.config.GapCloserDRG, this.defaultConfig.GapCloserDRG, v => this.config.GapCloserDRG = v);
-            changed |= this.Checkbox("NIN — Forked Raiju", this.config.GapCloserNIN, this.defaultConfig.GapCloserNIN, v => this.config.GapCloserNIN = v);
-            changed |= this.Checkbox("SAM — Hissatsu: Gyoten", this.config.GapCloserSAM, this.defaultConfig.GapCloserSAM, v => this.config.GapCloserSAM = v);
+            changed |= this.Checkbox("DRG — Winged Glide", this.config.GapCloserDRG, this.defaultConfig.GapCloserDRG, v => this.config.GapCloserDRG = v);
+            changed |= this.Checkbox("NIN — Shukuchi", this.config.GapCloserNIN, this.defaultConfig.GapCloserNIN, v => this.config.GapCloserNIN = v);
             changed |= this.Checkbox("VPR — Slither", this.config.GapCloserVPR, this.defaultConfig.GapCloserVPR, v => this.config.GapCloserVPR = v);
             ImGui.Unindent();
         }

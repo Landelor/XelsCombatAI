@@ -20,7 +20,6 @@ public sealed class Plugin : IDalamudPlugin
 {
     private const string CommandName = "/xcai";
     private const string AvaricePositionalStatusKey = "Avarice.PositionalStatus";
-    private const float GapCloserSafetyWindowSeconds = 8f;
     private const float MeleeActionRange = 3f;
     private const uint TrueNorthActionId = 7546;
     private const uint TrueNorthStatusId = 1250;
@@ -60,6 +59,10 @@ public sealed class Plugin : IDalamudPlugin
     private bool? lastLeylinesBetweenTheLines;
     private bool? lastLeylinesRetrace;
     private bool? lastLeylinesGoal;
+    private bool? lastMonkThunderclap;
+    private bool? lastDragoonWingedGlide;
+    private bool? lastNinjaShukuchi;
+    private bool? lastViperSlither;
     private bool? rsrTrueNorthDisabled;
     private bool? trueNorthStrategy;
     private bool initializedPreset;
@@ -199,6 +202,10 @@ public sealed class Plugin : IDalamudPlugin
             this.bossMod.SetLeylinesBetweenTheLines(presetName, false);
             this.bossMod.SetLeylinesRetrace(presetName, false);
             this.bossMod.SetLeylinesGoal(presetName, false);
+            this.bossMod.SetMonkThunderclap(presetName, false);
+            this.bossMod.SetDragoonWingedGlide(presetName, false);
+            this.bossMod.SetNinjaShukuchi(presetName, false);
+            this.bossMod.SetViperSlither(presetName, false);
 
             if (this.bossMod.GetActive() == presetName)
             {
@@ -276,8 +283,7 @@ public sealed class Plugin : IDalamudPlugin
                 this.config.ManageLeylines && this.config.UseRetrace,
                 this.config.ManageLeylines && this.config.ReturnToLeylines);
 
-            if (this.config.UseGapCloser)
-                this.TryUseGapCloser();
+            this.SetGapClosers();
         }
         catch (Exception ex)
         {
@@ -443,6 +449,30 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private void SetGapClosers()
+    {
+        var enabled = this.config.UseGapCloser;
+        var presetName = BossModIpc.DefaultPresetName;
+
+        this.SetGapCloser(ref this.lastMonkThunderclap, enabled && this.config.GapCloserMNK, value => this.bossMod.SetMonkThunderclap(presetName, value));
+        this.SetGapCloser(ref this.lastDragoonWingedGlide, enabled && this.config.GapCloserDRG, value => this.bossMod.SetDragoonWingedGlide(presetName, value));
+        this.SetGapCloser(ref this.lastNinjaShukuchi, enabled && this.config.GapCloserNIN, value => this.bossMod.SetNinjaShukuchi(presetName, value));
+        this.SetGapCloser(ref this.lastViperSlither, enabled && this.config.GapCloserVPR, value => this.bossMod.SetViperSlither(presetName, value));
+    }
+
+    private void SetGapCloser(ref bool? last, bool enabled, Func<bool, bool> setter)
+    {
+        if (last == enabled)
+        {
+            return;
+        }
+
+        if (setter(enabled))
+        {
+            last = enabled;
+        }
+    }
+
     private float CalculateDesiredRange()
     {
         var rangeRole = GetCurrentRangeRole();
@@ -523,38 +553,6 @@ public sealed class Plugin : IDalamudPlugin
                                 : RangeRole.Melee;
     }
 
-    private unsafe void TryUseGapCloser()
-    {
-        var player = ObjectTable.LocalPlayer;
-        var target = TargetManager.Target;
-        if (player == null || target == null) return;
-
-        var dist = Vector3.Distance(player.Position, target.Position) - player.HitboxRadius - target.HitboxRadius;
-        if (dist <= MeleeActionRange) return;
-
-        if (ActionManager.Instance()->AnimationLock > 0) return;
-        if (player.IsCasting) return;
-        if (!this.bossMod.IsSafeToEngage(GapCloserSafetyWindowSeconds)) return;
-
-        var jobId = player.ClassJob.RowId;
-        var targetId = target.GameObjectId;
-
-        uint? actionId = jobId switch
-        {
-            2 or 20 when this.config.GapCloserMNK => 25762u,               // PGL/MNK: Thunderclap
-            4 or 22 when this.config.GapCloserDRG => player.Level >= 68 ? 16478u : 92u, // LNC/DRG: High Jump or Jump
-            29 or 30 when this.config.GapCloserNIN => HasStatus(2690) ? (uint?)25777u : null, // ROG/NIN: Forked Raiju
-            34 when this.config.GapCloserSAM => 7492u,                     // SAM: Hissatsu: Gyoten
-            41 when this.config.GapCloserVPR => 34646u,                    // VPR: Slither
-            _ => null
-        };
-
-        if (actionId == null) return;
-        if (ActionManager.Instance()->GetActionStatus(ActionType.Action, actionId.Value) != 0) return;
-
-        ActionManager.Instance()->UseAction(ActionType.Action, actionId.Value, targetId);
-    }
-
     private static Positional ReadAvaricePositional()
     {
         if (!EzSharedData.TryGet<uint[]>(AvaricePositionalStatusKey, out var status) || status.Length < 2)
@@ -586,11 +584,6 @@ public sealed class Plugin : IDalamudPlugin
     private static bool HasActiveTrueNorth()
     {
         return ObjectTable.LocalPlayer?.StatusList.Any(status => status.StatusId == TrueNorthStatusId && status.RemainingTime > 0) == true;
-    }
-
-    private static bool HasStatus(uint statusId)
-    {
-        return ObjectTable.LocalPlayer?.StatusList.Any(status => status.StatusId == statusId) == true;
     }
 
     private static unsafe uint GetTrueNorthCharges()
@@ -628,7 +621,7 @@ public sealed class Plugin : IDalamudPlugin
                 this.TrySetEnabled(!this.config.Enabled);
                 break;
             case "status":
-                this.Print($"Enabled={this.config.Enabled}, Dependencies={(this.GetDependencyWarning() ?? "OK")}, TrueNorthManagement={(this.GetTrueNorthWarning() ?? this.rsrTrueNorthDisabled?.ToString() ?? "NotManaged")}, Preset={BossModIpc.DefaultPresetName}, LastPositional={this.lastPositional}, TrueNorthCharges={GetTrueNorthCharges()}, TrueNorthActive={HasActiveTrueNorth()}, Range={this.lastRange:0.0}, Movement={this.lastMovement}, MovementRange={this.lastMovementRangeStrategy}, Cushion={this.lastForbiddenZoneCushion}, Role={this.lastPartyRole}, LeylinesBTL={this.lastLeylinesBetweenTheLines}, LeylinesRetrace={this.lastLeylinesRetrace}, LeylinesGoal={this.lastLeylinesGoal}, Initialized={this.initializedPreset}");
+                this.Print($"Enabled={this.config.Enabled}, Dependencies={(this.GetDependencyWarning() ?? "OK")}, TrueNorthManagement={(this.GetTrueNorthWarning() ?? this.rsrTrueNorthDisabled?.ToString() ?? "NotManaged")}, Preset={BossModIpc.DefaultPresetName}, LastPositional={this.lastPositional}, TrueNorthCharges={GetTrueNorthCharges()}, TrueNorthActive={HasActiveTrueNorth()}, Range={this.lastRange:0.0}, Movement={this.lastMovement}, MovementRange={this.lastMovementRangeStrategy}, Cushion={this.lastForbiddenZoneCushion}, Role={this.lastPartyRole}, LeylinesBTL={this.lastLeylinesBetweenTheLines}, LeylinesRetrace={this.lastLeylinesRetrace}, LeylinesGoal={this.lastLeylinesGoal}, GapMNK={this.lastMonkThunderclap}, GapDRG={this.lastDragoonWingedGlide}, GapNIN={this.lastNinjaShukuchi}, GapVPR={this.lastViperSlither}, Initialized={this.initializedPreset}");
                 break;
             case "config":
                 this.OpenConfig();
@@ -695,6 +688,10 @@ public sealed class Plugin : IDalamudPlugin
         this.lastLeylinesBetweenTheLines = null;
         this.lastLeylinesRetrace = null;
         this.lastLeylinesGoal = null;
+        this.lastMonkThunderclap = null;
+        this.lastDragoonWingedGlide = null;
+        this.lastNinjaShukuchi = null;
+        this.lastViperSlither = null;
         this.rsrTrueNorthDisabled = null;
         this.trueNorthStrategy = null;
     }

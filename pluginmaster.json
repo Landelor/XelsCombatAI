@@ -3,7 +3,7 @@
     "Author": "xeltor",
     "Name": "Xel's Combat AI",
     "InternalName": "XelsCombatAI",
-    "AssemblyVersion": "1.1.5.1",
+    "AssemblyVersion": "1.1.5.2",
     "Description": "Tired of manually babysitting your BossMod settings mid-fight? XCAI handles your positioning, distances, and Ley Lines automatically so you can focus on not dying. Results may vary on the not dying part.",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,

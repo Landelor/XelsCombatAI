@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
 
@@ -39,10 +40,47 @@ internal sealed class BossModIpc
             "Track": "ForbiddenZoneCushion",
             "Option": "Medium"
           }
+        ],
+        "BossMod.Autorotation.ClassMNKUtility": [
+          {
+            "Track": "Thunderclap",
+            "Option": "None"
+          }
+        ],
+        "BossMod.Autorotation.ClassDRGUtility": [
+          {
+            "Track": "Winged Glide",
+            "Option": "None"
+          }
+        ],
+        "BossMod.Autorotation.ClassNINUtility": [
+          {
+            "Track": "Shukuchi",
+            "Option": "None"
+          }
+        ],
+        "BossMod.Autorotation.ClassVPRUtility": [
+          {
+            "Track": "Slither",
+            "Option": "None"
+          }
         ]
       }
     }
     """;
+
+    private static readonly string[] RequiredPresetModules =
+    [
+        "BossMod.Autorotation.MiscAI.StayCloseToTarget",
+        "BossMod.Autorotation.MiscAI.StayWithinLeylines",
+        "BossMod.Autorotation.MiscAI.GoToPositional",
+        "BossMod.Autorotation.MiscAI.StayCloseToPartyRole",
+        "BossMod.Autorotation.MiscAI.NormalMovement",
+        "BossMod.Autorotation.ClassMNKUtility",
+        "BossMod.Autorotation.ClassDRGUtility",
+        "BossMod.Autorotation.ClassNINUtility",
+        "BossMod.Autorotation.ClassVPRUtility"
+    ];
 
     private readonly ICallGateSubscriber<string, string?> getPreset;
     private readonly ICallGateSubscriber<string, bool, bool> createPreset;
@@ -52,8 +90,6 @@ internal sealed class BossModIpc
     private readonly ICallGateSubscriber<uint, bool> hasModuleByDataId;
     private readonly ICallGateSubscriber<string, bool, bool> disableModule;
     private readonly ICallGateSubscriber<string, string, string, string, bool> addTransientStrategy;
-    private readonly ICallGateSubscriber<float> nextDamageIn;
-    private readonly ICallGateSubscriber<float> specialModeIn;
 
     public BossModIpc(IDalamudPluginInterface pluginInterface)
     {
@@ -65,13 +101,12 @@ internal sealed class BossModIpc
         this.hasModuleByDataId = pluginInterface.GetIpcSubscriber<uint, bool>("BossMod.HasModuleByDataId");
         this.disableModule = pluginInterface.GetIpcSubscriber<string, bool, bool>("BossMod.Configuration.DisableModule");
         this.addTransientStrategy = pluginInterface.GetIpcSubscriber<string, string, string, string, bool>("BossMod.Presets.AddTransientStrategy");
-        this.nextDamageIn = pluginInterface.GetIpcSubscriber<float>("BossMod.Hints.NextDamageIn");
-        this.specialModeIn = pluginInterface.GetIpcSubscriber<float>("BossMod.Hints.SpecialModeIn");
     }
 
     public bool EnsurePreset()
     {
-        if (this.getPreset.InvokeFunc(DefaultPresetName) != null)
+        var preset = this.getPreset.InvokeFunc(DefaultPresetName);
+        if (preset != null && RequiredPresetModules.All(preset.Contains))
         {
             return true;
         }
@@ -179,18 +214,40 @@ internal sealed class BossModIpc
             enabled ? "Enabled" : "Disabled");
     }
 
-    public bool IsSafeToEngage(float withinSeconds = 3f)
+    public bool SetMonkThunderclap(string presetName, bool enabled)
     {
-        try
-        {
-            if (this.nextDamageIn.InvokeFunc() <= withinSeconds) return false;
-            if (this.specialModeIn.InvokeFunc() <= withinSeconds) return false;
-            return true;
-        }
-        catch
-        {
-            return true;
-        }
+        return this.addTransientStrategy.InvokeFunc(
+            presetName,
+            "BossMod.Autorotation.ClassMNKUtility",
+            "Thunderclap",
+            enabled ? "GapClose" : "None");
+    }
+
+    public bool SetDragoonWingedGlide(string presetName, bool enabled)
+    {
+        return this.addTransientStrategy.InvokeFunc(
+            presetName,
+            "BossMod.Autorotation.ClassDRGUtility",
+            "Winged Glide",
+            enabled ? "GapClose" : "None");
+    }
+
+    public bool SetNinjaShukuchi(string presetName, bool enabled)
+    {
+        return this.addTransientStrategy.InvokeFunc(
+            presetName,
+            "BossMod.Autorotation.ClassNINUtility",
+            "Shukuchi",
+            enabled ? "GapClose" : "None");
+    }
+
+    public bool SetViperSlither(string presetName, bool enabled)
+    {
+        return this.addTransientStrategy.InvokeFunc(
+            presetName,
+            "BossMod.Autorotation.ClassVPRUtility",
+            "Slither",
+            enabled ? "GapClose" : "None");
     }
 
     public bool HasModuleByDataId(uint dataId) => this.hasModuleByDataId.InvokeFunc(dataId);

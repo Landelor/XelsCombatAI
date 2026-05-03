@@ -18,7 +18,7 @@ While you are in combat, the plugin automatically:
 - **Stays close to a tank** when your target doesn't have a boss module
 - **Manages your Ley Lines** — returns to them when safe, uses Between the Lines and Retrace if available
 - **Stays clear of forbidden zones** with a configurable buffer distance
-- **Uses gap closers** to re-engage after being knocked away (optional, off by default)
+- **Uses BossMod-managed gap closers** to re-engage after being knocked away (optional, off by default)
 - **Manages True North** usage and disables RSR's Auto True North to prevent conflicts (optional, requires RSR)
 
 Out of combat, the plugin stops managing movement entirely and hands control back to you. Settings are automatically re-applied after death and resurrection.
@@ -54,7 +54,7 @@ Open the settings window with `/xcai config` or through the Dalamud plugin list.
 - *Manage positionals* — Moves you to the correct rear/flank position for your rotation.
 - *Manage True North* — Uses True North automatically and disables RSR's Auto True North via IPC to prevent conflicts. Requires RSR.
 - *Manage Ley Lines* — Helps BLM stay on Ley Lines and use Between the Lines / Retrace when available. Does not place Ley Lines.
-- *Use gap closer to re-engage* — Uses a job-specific gap closer to close distance after being knocked back. Disabled by default — be aware that gap closers can kill you if you land in a mechanic.
+- *Use BMR-managed gap closer to re-engage* — Lets BossMod queue supported utility gap closers with its dash safety checks. Disabled by default. Supported actions are MNK Thunderclap, DRG Winged Glide, NIN Shukuchi, and VPR Slither.
 
 **Combat Behavior** — Choose between *Normal* (BossMod moves directly to its destination) and *Greed* (BossMod balances uptime against mechanic safety).
 
