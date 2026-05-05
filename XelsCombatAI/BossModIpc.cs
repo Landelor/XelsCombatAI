@@ -31,6 +31,28 @@ internal sealed class BossModIpc
             "Option": "20"
           }
         ],
+        "BossMod.Autorotation.xan.HealerAI": [
+          {
+            "Track": "Raise",
+            "Option": "None"
+          },
+          {
+            "Track": "Heal",
+            "Option": "Disabled"
+          },
+          {
+            "Track": "Esuna2",
+            "Option": "Disabled"
+          },
+          {
+            "Track": "Stay near party",
+            "Option": "Disabled"
+          },
+          {
+            "Track": "OutOfCombat",
+            "Option": "Disabled"
+          }
+        ],
         "BossMod.Autorotation.MiscAI.NormalMovement": [
           {
             "Track": "Destination",
@@ -75,6 +97,7 @@ internal sealed class BossModIpc
         "BossMod.Autorotation.MiscAI.StayWithinLeylines",
         "BossMod.Autorotation.MiscAI.GoToPositional",
         "BossMod.Autorotation.MiscAI.StayCloseToPartyRole",
+        "BossMod.Autorotation.xan.HealerAI",
         "BossMod.Autorotation.MiscAI.NormalMovement",
         "BossMod.Autorotation.ClassMNKUtility",
         "BossMod.Autorotation.ClassDRGUtility",
@@ -185,6 +208,51 @@ internal sealed class BossModIpc
             "BossMod.Autorotation.MiscAI.StayCloseToPartyRole",
             "Role",
             role);
+    }
+
+    public bool SetHealerStayNearParty(string presetName, bool enabled)
+    {
+        return this.addTransientStrategy.InvokeFunc(
+            presetName,
+            "BossMod.Autorotation.xan.HealerAI",
+            "Stay near party",
+            enabled ? "Enabled" : "Disabled");
+    }
+
+    public bool SetHealerHeal(string presetName, bool enabled)
+    {
+        return this.addTransientStrategy.InvokeFunc(
+            presetName,
+            "BossMod.Autorotation.xan.HealerAI",
+            "Heal",
+            enabled ? "Enabled" : "Disabled");
+    }
+
+    public bool SetHealerEsuna(string presetName, bool enabled)
+    {
+        return this.addTransientStrategy.InvokeFunc(
+            presetName,
+            "BossMod.Autorotation.xan.HealerAI",
+            "Esuna2",
+            enabled ? "Enabled" : "Disabled");
+    }
+
+    public bool SetHealerOutOfCombat(string presetName, bool enabled)
+    {
+        return this.addTransientStrategy.InvokeFunc(
+            presetName,
+            "BossMod.Autorotation.xan.HealerAI",
+            "OutOfCombat",
+            enabled ? "Enabled" : "Disabled");
+    }
+
+    public bool SetHealerRaise(string presetName, string strategy)
+    {
+        return this.addTransientStrategy.InvokeFunc(
+            presetName,
+            "BossMod.Autorotation.xan.HealerAI",
+            "Raise",
+            strategy);
     }
 
     public bool SetLeylinesBetweenTheLines(string presetName, bool enabled)

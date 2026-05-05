@@ -23,7 +23,7 @@ public sealed class Configuration : IPluginConfiguration
     public const float DefaultPreferredForbiddenZoneDistance = 1f;
     public const float EnemyCountRadius = 10f;
 
-    public int Version { get; set; } = 9;
+    public int Version { get; set; } = 10;
 
     public bool Enabled { get; set; } = false;
     public bool ManageMovement { get; set; } = true;
@@ -75,6 +75,7 @@ public sealed class Configuration : IPluginConfiguration
     public float AoEMagicRangedRange { get; set; } = DefaultAoEMagicRangedRange;
     public int AoEEnemyThreshold { get; set; } = DefaultAoEEnemyThreshold;
     public float PreferredForbiddenZoneDistance { get; set; } = DefaultPreferredForbiddenZoneDistance;
+    public bool HealerPartyCoverage { get; set; } = true;
 
     [JsonProperty("ManageTrueNorthInRsr")]
     private bool ManageTrueNorthInRsrCompatibility
@@ -147,6 +148,12 @@ public sealed class Configuration : IPluginConfiguration
             this.GapCloserDNC = true;
             this.EscapeGapCloserDNC = true;
             this.Version = 9;
+        }
+
+        if (this.Version < 10)
+        {
+            this.HealerPartyCoverage = true;
+            this.Version = 10;
         }
     }
 
@@ -222,6 +229,7 @@ public sealed class Configuration : IPluginConfiguration
         this.EscapeGapCloserBLU = true;
         this.EchoStatusToChat = true;
         this.CombatStyle = CombatStyle.Normal;
+        this.HealerPartyCoverage = true;
         this.ResetRanges();
     }
 

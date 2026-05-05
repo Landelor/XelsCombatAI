@@ -23,6 +23,7 @@ public sealed class Plugin : IDalamudPlugin
     private const string CommandName = "/xcai";
     private const string AvaricePositionalStatusKey = "Avarice.PositionalStatus";
     private const float MeleeActionRange = 3f;
+    private const float HealerCoverageAttackRange = 25f;
     private const float GapCloserMaxRange = 20f;
     private const float GapCloserDestinationMeleeRange = 2.6f;
     private const float FixedForwardGapCloserRange = 15f;
@@ -89,6 +90,11 @@ public sealed class Plugin : IDalamudPlugin
     private bool? lastDragoonWingedGlide;
     private bool? lastNinjaShukuchi;
     private bool? lastViperSlither;
+    private bool? lastHealerStayNearParty;
+    private bool? lastHealerHeal;
+    private bool? lastHealerEsuna;
+    private bool? lastHealerOutOfCombat;
+    private string? lastHealerRaise;
     private bool? rsrTrueNorthDisabled;
     private bool? trueNorthStrategy;
     private bool initializedPreset;
@@ -240,6 +246,11 @@ public sealed class Plugin : IDalamudPlugin
             this.bossMod.SetDragoonWingedGlide(presetName, false);
             this.bossMod.SetNinjaShukuchi(presetName, false);
             this.bossMod.SetViperSlither(presetName, false);
+            this.bossMod.SetHealerStayNearParty(presetName, false);
+            this.bossMod.SetHealerHeal(presetName, false);
+            this.bossMod.SetHealerEsuna(presetName, false);
+            this.bossMod.SetHealerOutOfCombat(presetName, false);
+            this.bossMod.SetHealerRaise(presetName, "None");
 
             if (this.bossMod.GetActive() == presetName)
             {
@@ -258,7 +269,13 @@ public sealed class Plugin : IDalamudPlugin
         {
             if (this.config.ManageRange)
             {
-                this.SetRange(this.CalculateDesiredRange());
+                if (this.config.HealerPartyCoverage &&
+                    GetCurrentRangeRole() == RangeRole.Healer &&
+                    this.CurrentTargetHasBossModule() &&
+                    !this.IsAoEMultiTargetActive())
+                    this.SetRange(HealerCoverageAttackRange);
+                else
+                    this.SetRange(this.CalculateDesiredRange());
             }
 
             if (this.config.ManageForbiddenZoneDistance)
@@ -317,6 +334,7 @@ public sealed class Plugin : IDalamudPlugin
                 this.config.ManageLeylines && this.config.UseRetrace,
                 this.config.ManageLeylines && this.config.ReturnToLeylines);
 
+            this.SetHealerAi();
             this.SetGapClosers();
         }
         catch (Exception ex)
@@ -480,6 +498,40 @@ public sealed class Plugin : IDalamudPlugin
             this.bossMod.SetLeylinesGoal(BossModIpc.DefaultPresetName, returnToLeylines))
         {
             this.lastLeylinesGoal = returnToLeylines;
+        }
+    }
+
+    private void SetHealerAi()
+    {
+        var presetName = BossModIpc.DefaultPresetName;
+        var stayNearParty = this.config.HealerPartyCoverage &&
+                            GetCurrentRangeRole() == RangeRole.Healer &&
+                            this.CurrentTargetHasBossModule();
+
+        if (this.lastHealerRaise != "None" && this.bossMod.SetHealerRaise(presetName, "None"))
+        {
+            this.lastHealerRaise = "None";
+        }
+
+        if (this.lastHealerHeal != false && this.bossMod.SetHealerHeal(presetName, false))
+        {
+            this.lastHealerHeal = false;
+        }
+
+        if (this.lastHealerEsuna != false && this.bossMod.SetHealerEsuna(presetName, false))
+        {
+            this.lastHealerEsuna = false;
+        }
+
+        if (this.lastHealerOutOfCombat != false && this.bossMod.SetHealerOutOfCombat(presetName, false))
+        {
+            this.lastHealerOutOfCombat = false;
+        }
+
+        if (this.lastHealerStayNearParty != stayNearParty &&
+            this.bossMod.SetHealerStayNearParty(presetName, stayNearParty))
+        {
+            this.lastHealerStayNearParty = stayNearParty;
         }
     }
 
@@ -1128,6 +1180,13 @@ public sealed class Plugin : IDalamudPlugin
         };
     }
 
+    private bool IsAoEMultiTargetActive()
+    {
+        if (!this.config.AoERangeInMultiTarget || TargetManager.Target == null) return false;
+        return ObjectFunctions.GetAttackableEnemyCountAroundPoint(
+            TargetManager.Target.Position, Configuration.EnemyCountRadius) > this.config.AoEEnemyThreshold;
+    }
+
     private bool CurrentTargetHasBossModule()
     {
         var dataId = TargetManager.Target?.BaseId ?? 0;
@@ -1320,6 +1379,11 @@ public sealed class Plugin : IDalamudPlugin
         this.lastDragoonWingedGlide = null;
         this.lastNinjaShukuchi = null;
         this.lastViperSlither = null;
+        this.lastHealerStayNearParty = null;
+        this.lastHealerHeal = null;
+        this.lastHealerEsuna = null;
+        this.lastHealerOutOfCombat = null;
+        this.lastHealerRaise = null;
         this.rsrTrueNorthDisabled = null;
         this.trueNorthStrategy = null;
         this.nextGapCloserAttempt = DateTime.MinValue;

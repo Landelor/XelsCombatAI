@@ -56,6 +56,7 @@ Open the settings window with `/xcai config` or through the Dalamud plugin list.
 - *Manage Ley Lines* — Helps BLM stay on Ley Lines and use Between the Lines / Retrace when available. Does not place Ley Lines.
 - *Use gap closer to (re)engage* — XCAI casts supported gap closers only after an unsupported reflected BossMod safety check says the destination is safe. If BossMod reflection fails, no gap closer is used. Disabled by default. Supported actions are PLD Intervene, WAR Onslaught, DRK Shadowstride, GNB Trajectory, MNK Thunderclap, DRG Winged Glide, NIN Shukuchi, SAM Hissatsu: Gyoten, DNC En Avant, RPR Hell's Ingress, and VPR Slither.
 - *Use gap closer to escape danger* — When your current position is dangerous, XCAI can use supported movement abilities to jump to a safe ally or location. If BossMod reflection fails, no escape gap closer is used. Disabled by default. Supported actions are MNK Thunderclap to ally, NIN Shukuchi, DNC En Avant, RPR Hell's Ingress, VPR Slither to ally, BLM Aetherial Manipulation, SGE Icarus, PCT Smudge, and BLU Loom. In Greed combat style, only DNC, BLM, SGE, PCT, and BLU escape actions are allowed; BLM will not use escape while standing in Ley Lines.
+- *Healer: stay near party* — On boss fights, enables BossMod's healer party coverage goal while keeping BossMod healer actions disabled.
 
 **Combat Behavior** — Choose between *Normal* (BossMod moves directly to its destination) and *Greed* (BossMod balances uptime against mechanic safety).
 

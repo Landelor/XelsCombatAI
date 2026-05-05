@@ -159,6 +159,7 @@ internal sealed class ConfigWindow : Window, IDisposable
             ImGui.Unindent();
         }
 
+        changed |= this.Checkbox("Healer: stay near party", this.config.HealerPartyCoverage, this.defaultConfig.HealerPartyCoverage, v => this.config.HealerPartyCoverage = v, "Positions healer to cover the most party members on boss fights.\nOverrides healer max distance.");
         ImGui.Unindent(8f);
         ImGui.Spacing();
 
@@ -198,7 +199,9 @@ internal sealed class ConfigWindow : Window, IDisposable
             ImGui.BeginDisabled();
         changed |= this.SliderFloat("Melee max distance", this.config.MeleeRange, this.defaultConfig.MeleeRange, Configuration.BossModMinRange, Configuration.BossModMaxRange, v => this.config.MeleeRange = v);
         changed |= this.SliderFloat("Physical ranged max distance", this.config.PhysicalRangedRange, this.defaultConfig.PhysicalRangedRange, Configuration.BossModMinRange, Configuration.BossModMaxRange, v => this.config.PhysicalRangedRange = v);
+        if (this.config.HealerPartyCoverage) ImGui.BeginDisabled();
         changed |= this.SliderFloat("Healer max distance", this.config.HealerRange, this.defaultConfig.HealerRange, Configuration.BossModMinRange, Configuration.BossModMaxRange, v => this.config.HealerRange = v);
+        if (this.config.HealerPartyCoverage) ImGui.EndDisabled();
         changed |= this.SliderFloat("Magic ranged max distance", this.config.MagicRangedRange, this.defaultConfig.MagicRangedRange, Configuration.BossModMinRange, Configuration.BossModMaxRange, v => this.config.MagicRangedRange = v);
         if (!this.config.RoleBasedRange)
             ImGui.EndDisabled();
