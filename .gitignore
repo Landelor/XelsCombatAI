@@ -5,4 +5,7 @@ artifacts/
 *.suo
 .vs/
 .claude/
-vendor
+external/*
+!external/AGENTS.md
+!external/sources.json
+!external/fetch-sources.sh

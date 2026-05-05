@@ -3,7 +3,7 @@ using System.Linq;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
 
-namespace XelsCombatAI;
+namespace XelsCombatAI.Integrations;
 
 internal sealed class BossModIpc
 {

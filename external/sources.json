@@ -1,0 +1,14 @@
+{
+  "BossmodReborn": {
+    "url": "https://github.com/FFXIV-CombatReborn/BossmodReborn.git",
+    "branch": "main"
+  },
+  "Avarice": {
+    "url": "https://github.com/PunishXIV/Avarice.git",
+    "branch": "master"
+  },
+  "RotationSolverReborn": {
+    "url": "https://github.com/FFXIV-CombatReborn/RotationSolverReborn.git",
+    "branch": "main"
+  }
+}

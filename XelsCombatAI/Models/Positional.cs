@@ -1,4 +1,4 @@
-namespace XelsCombatAI;
+namespace XelsCombatAI.Models;
 
 internal enum Positional
 {

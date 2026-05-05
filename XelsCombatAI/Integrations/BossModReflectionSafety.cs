@@ -4,8 +4,9 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Reflection;
 using Dalamud.Plugin;
+using Dalamud.Plugin.Services;
 
-namespace XelsCombatAI;
+namespace XelsCombatAI.Integrations;
 
 internal sealed class BossModReflectionSafety
 {
@@ -16,6 +17,7 @@ internal sealed class BossModReflectionSafety
     private const double DashLockSeconds = 0.8d;
 
     private readonly IDalamudPluginInterface pluginInterface;
+    private readonly IPluginLog log;
     private object? bossModPlugin;
     private FieldInfo? hintsField;
     private FieldInfo? imminentSpecialModeField;
@@ -25,9 +27,10 @@ internal sealed class BossModReflectionSafety
     private DateTime nextResolveAttempt = DateTime.MinValue;
     private string status = "unresolved";
 
-    public BossModReflectionSafety(IDalamudPluginInterface pluginInterface)
+    public BossModReflectionSafety(IDalamudPluginInterface pluginInterface, IPluginLog log)
     {
         this.pluginInterface = pluginInterface;
+        this.log = log;
     }
 
     public string Status => this.status;
@@ -84,7 +87,7 @@ internal sealed class BossModReflectionSafety
         }
         catch (Exception ex)
         {
-            Plugin.Log.Error(ex, "Could not query reflected BossMod dash safety.");
+            this.log.Error(ex, "Could not query reflected BossMod dash safety.");
             this.ResetWithStatus("BMR reflection query failed");
             reason = this.status;
             return false;
@@ -119,7 +122,7 @@ internal sealed class BossModReflectionSafety
         }
         catch (Exception ex)
         {
-            Plugin.Log.Error(ex, "Could not query reflected BossMod position safety.");
+            this.log.Error(ex, "Could not query reflected BossMod position safety.");
             this.ResetWithStatus("BMR reflection query failed");
             reason = this.status;
             return false;
@@ -185,7 +188,7 @@ internal sealed class BossModReflectionSafety
         }
         catch (Exception ex)
         {
-            Plugin.Log.Verbose($"Could not query BMR movement intent: {ex.Message}");
+            this.log.Verbose($"Could not query BMR movement intent: {ex.Message}");
             reason = "BMR movement intent query failed";
             return false;
         }
@@ -253,7 +256,7 @@ internal sealed class BossModReflectionSafety
         }
         catch (Exception ex)
         {
-            Plugin.Log.Error(ex, "Could not resolve reflected BossMod safety integration.");
+            this.log.Error(ex, "Could not resolve reflected BossMod safety integration.");
             this.ResetWithStatus("BMR reflection resolve failed");
             return false;
         }
@@ -333,7 +336,7 @@ internal sealed class BossModReflectionSafety
         this.status = newStatus;
         if (!string.Equals(oldStatus, newStatus, StringComparison.Ordinal))
         {
-            Plugin.Log.Error($"BossMod reflected gap closer safety unavailable: {newStatus}");
+            this.log.Error($"BossMod reflected gap closer safety unavailable: {newStatus}");
         }
     }
 

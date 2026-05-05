@@ -5,8 +5,9 @@ using Dalamud.Game.ClientState.Keys;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
+using Dalamud.Plugin.Services;
 
-namespace XelsCombatAI;
+namespace XelsCombatAI.UI;
 
 internal sealed class ConfigWindow : Window, IDisposable
 {
@@ -18,12 +19,13 @@ internal sealed class ConfigWindow : Window, IDisposable
     private readonly Func<string?> dependencyWarning;
     private readonly Func<string?> trueNorthWarning;
     private readonly Action manageTrueNorthEnabled;
+    private readonly IKeyState keyState;
     private readonly HashSet<string> editingSliders = [];
     private readonly HashSet<string> openSections = [];
     private bool backspacePressedThisFrame;
     private bool wasBackspaceDown;
 
-    public ConfigWindow(Configuration config, Action save, Action resetRuntimeState, Action<bool> setEnabled, Func<string?> dependencyWarning, Func<string?> trueNorthWarning, Action manageTrueNorthEnabled)
+    public ConfigWindow(Configuration config, Action save, Action resetRuntimeState, Action<bool> setEnabled, Func<string?> dependencyWarning, Func<string?> trueNorthWarning, Action manageTrueNorthEnabled, IKeyState keyState)
         : base("Xel's Combat AI Configuration###XelsCombatAIConfig")
     {
         this.config = config;
@@ -33,6 +35,7 @@ internal sealed class ConfigWindow : Window, IDisposable
         this.dependencyWarning = dependencyWarning;
         this.trueNorthWarning = trueNorthWarning;
         this.manageTrueNorthEnabled = manageTrueNorthEnabled;
+        this.keyState = keyState;
         this.SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = new(480, 360),
@@ -49,7 +52,7 @@ internal sealed class ConfigWindow : Window, IDisposable
         var changed = false;
         var dependencyWarningText = this.dependencyWarning();
         var trueNorthWarningText = this.trueNorthWarning();
-        var backspaceDown = Plugin.KeyState[VirtualKey.BACK];
+        var backspaceDown = this.keyState[VirtualKey.BACK];
         this.backspacePressedThisFrame = backspaceDown && !this.wasBackspaceDown;
         this.wasBackspaceDown = backspaceDown;
 

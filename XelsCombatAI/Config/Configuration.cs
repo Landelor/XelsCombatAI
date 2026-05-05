@@ -3,7 +3,7 @@ using Dalamud.Configuration;
 using Dalamud.Plugin;
 using Newtonsoft.Json;
 
-namespace XelsCombatAI;
+namespace XelsCombatAI.Config;
 
 public sealed class Configuration : IPluginConfiguration
 {

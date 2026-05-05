@@ -3,7 +3,7 @@ using System.Linq;
 using Dalamud.Plugin;
 using ECommons.EzIpcManager;
 
-namespace XelsCombatAI;
+namespace XelsCombatAI.Integrations;
 
 internal sealed class RotationSolverIpc
 {
