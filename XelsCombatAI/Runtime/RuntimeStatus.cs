@@ -52,7 +52,7 @@ internal sealed record RuntimeStatus(
     bool EscapeGapCloserPCT,
     bool EscapeGapCloserBLU,
     string ReflectedGapSafety,
-    string ReflectedManualMovement,
+    string ManualMovementInput,
     bool AutomatedMovementSuppressed,
     string LastGapCloserSafety,
     string LastEscapeGapCloserSafety,

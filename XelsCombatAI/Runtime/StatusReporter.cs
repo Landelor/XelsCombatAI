@@ -82,7 +82,7 @@ internal static class StatusReporter
         Append(builder, "LastGapCloserSafety", status.LastGapCloserSafety);
         Append(builder, "LastEscapeGapCloserSafety", status.LastEscapeGapCloserSafety);
         Append(builder, "ReflectedGapSafety", status.ReflectedGapSafety);
-        Append(builder, "ReflectedManualMovement", status.ReflectedManualMovement);
+        Append(builder, "ManualMovementInput", status.ManualMovementInput);
         builder.AppendLine();
 
         AppendSection(builder, "Configuration");

@@ -56,7 +56,7 @@ public sealed class Plugin : IDalamudPlugin
 
         var bossMod = new BossModIpc(PluginInterface);
         var bossModSafety = new BossModReflectionSafety(PluginInterface, Log);
-        var manualMovement = new BossModManualMovementReflection(PluginInterface, Log);
+        var manualMovement = new ManualMovementInputDetector();
         var rotationSolver = new RotationSolverIpc();
         var dependencyChecker = new DependencyChecker(this.config, this.services, bossMod, rotationSolver);
         var rangePlanner = new RangePlanner(this.config, this.services, bossMod);

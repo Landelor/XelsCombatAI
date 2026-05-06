@@ -11,7 +11,7 @@ internal sealed class CombatRuntime(
     BossModPresetController presetController,
     PositionalsController positionalsController,
     BossModReflectionSafety bossModSafety,
-    BossModManualMovementReflection manualMovement,
+    ManualMovementInputDetector manualMovement,
     GapCloserController gapCloserController,
     EscapeGapCloserController escapeGapCloserController,
     Action saveConfig,
@@ -66,7 +66,8 @@ internal sealed class CombatRuntime(
             return;
         }
 
-        presetController.ApplyStrategies(this.ShouldSuppressAutomatedMovement(now));
+        var suppressAutomatedMovement = this.ShouldSuppressAutomatedMovement(now);
+        presetController.ApplyStrategies(suppressAutomatedMovement);
     }
 
     public bool SetEnabled(bool enabled, bool warn = true)
