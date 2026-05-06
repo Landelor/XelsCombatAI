@@ -11,6 +11,8 @@ internal sealed class CombatRuntime(
     BossModPresetController presetController,
     PositionalsController positionalsController,
     BossModReflectionSafety bossModSafety,
+    BossModGoalZoneHook aoeGoalHook,
+    AoePackPositioningController aoePackPositioningController,
     ManualMovementInputDetector manualMovement,
     GapCloserController gapCloserController,
     EscapeGapCloserController escapeGapCloserController,
@@ -21,9 +23,11 @@ internal sealed class CombatRuntime(
     private static readonly TimeSpan ManualMovementResumeDelay = TimeSpan.FromMilliseconds(750);
 
     private bool wasDead;
+    private bool wasInCombat;
     private DateTime nextRuntimeUpdate = DateTime.MinValue;
     private DateTime manualMovementSuppressUntil = DateTime.MinValue;
     private string? lastMissingDependencies;
+    private readonly CombatHistory combatHistory = new();
 
     public bool AutomatedMovementSuppressed => DateTime.UtcNow < this.manualMovementSuppressUntil;
 
@@ -33,6 +37,11 @@ internal sealed class CombatRuntime(
         if (!config.Enabled)
         {
             return;
+        }
+
+        if (config.ManageAoePackPositioning)
+        {
+            aoeGoalHook.EnsureActive();
         }
 
         if (!dependencyChecker.DependenciesAvailable(out var missing))
@@ -45,8 +54,15 @@ internal sealed class CombatRuntime(
 
         if (!services.Condition[ConditionFlag.InCombat])
         {
+            this.wasInCombat = false;
             this.HandleOutOfCombat();
             return;
+        }
+
+        if (!this.wasInCombat)
+        {
+            this.combatHistory.Reset();
+            this.wasInCombat = true;
         }
 
         var isDead = services.Condition[ConditionFlag.Unconscious];
@@ -68,6 +84,7 @@ internal sealed class CombatRuntime(
 
         var suppressAutomatedMovement = this.ShouldSuppressAutomatedMovement(now);
         presetController.ApplyStrategies(suppressAutomatedMovement);
+        this.combatHistory.Record(this.GetStatus(), aoePackPositioningController.Status);
     }
 
     public bool SetEnabled(bool enabled, bool warn = true)
@@ -101,7 +118,11 @@ internal sealed class CombatRuntime(
     {
         this.manualMovementSuppressUntil = DateTime.MinValue;
         presetController.ResetCache();
+        aoePackPositioningController.Reset();
+        aoeGoalHook.Reset();
     }
+
+    public string GetCombatHistory() => this.combatHistory.Build(config);
 
     public void EnsureRsrTrueNorthDisabled()
     {
@@ -142,7 +163,6 @@ internal sealed class CombatRuntime(
             presetController.LastMovement,
             presetController.LastMovementRangeStrategy,
             presetController.LastForbiddenZoneCushion,
-            presetController.LastPartyRole,
             presetController.LastLeylinesBetweenTheLines,
             presetController.LastLeylinesRetrace,
             presetController.LastLeylinesGoal,
@@ -172,6 +192,8 @@ internal sealed class CombatRuntime(
             config.EscapeGapCloserPCT,
             config.EscapeGapCloserBLU,
             bossModSafety.Status,
+            aoeGoalHook.Status,
+            aoePackPositioningController.Status,
             manualMovement.Status,
             this.AutomatedMovementSuppressed,
             gapCloserController.LastGapCloserSafety,
@@ -185,6 +207,8 @@ internal sealed class CombatRuntime(
         {
             presetController.Deactivate();
         }
+
+        aoeGoalHook.Dispose();
     }
 
     private void HandleOutOfCombat()
