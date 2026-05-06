@@ -59,6 +59,20 @@ Notes:
 - Put repo structure, coding standards, validation commands, and agent workflow rules in `AGENTS.md`.
 - When adding or changing user-visible settings, update `UI/ConfigWindow.cs`, `Config/Configuration.cs`, defaults/migrations as needed, and the user-facing `README.md`.
 
+## Config UI Style
+
+- Keep the config window organized around the current tab layout: `Main`, `Positioning`, `Distance`, `Gap Closers`, and `Chat & Reset`.
+- Put only broad, frequently used controls in `Main`. Keep positional behavior in `Positioning`, range and forbidden-zone behavior in `Distance`, gap closer behavior in `Gap Closers`, and feedback/reset controls in `Chat & Reset`.
+- Use `DrawSectionHeader` for plain groups and `DrawToggleSectionHeader` for master toggles that own a group of dependent controls.
+- Use existing UI helper methods (`Checkbox`, `Combo`, `SliderFloat`, `SliderInt`, `DrawToggleSectionHeader`) instead of drawing one-off controls, so reset behavior, disabled-state tooltips, and info icons stay consistent.
+- For options whose label alone may be unclear, add a `FontAwesomeIcon.InfoCircle` info icon through the existing tooltip helper path. The icon tooltip should explain the user-visible behavior in clear, direct language.
+- Do not put long explanations on the main label hover when an info icon is present. Label/control hover should remain available for disabled-state explanations and reset behavior.
+- Keep tooltip text concise and scannable. Use short sentences and explicit line breaks for multi-part explanations. All config tooltips should go through the wrapped tooltip helper rather than raw `ImGui.SetTooltip`.
+- Do not mention `XCAI`, "this plugin", or similar self-references in config tooltips unless the distinction is necessary to avoid ambiguity. The user already knows which plugin they are configuring.
+- Use disabled-state tooltips to explain why a control is unavailable, usually by naming the controlling option and tab.
+- Use skull icons only for combat-risk warnings. When a feature can put the player in danger during combat, keep the normal info icon focused on what the option does and put the risk warning on the skull icon tooltip.
+- Do not make config text patronizing or alarmist. Be plain about risk, limitations, and dependencies without blaming the user.
+
 ## Integration Safety
 
 - Keep plugin behavior conservative. The code runs during combat and writes BossMod transient strategies, so avoid broad refactors or timing changes unless the task requires them.
