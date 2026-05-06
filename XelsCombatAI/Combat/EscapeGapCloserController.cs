@@ -13,14 +13,17 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
     private DateTime nextEscapeGapCloserAttempt = DateTime.MinValue;
     private DateTime escapeDangerDetectedAt = DateTime.MinValue;
     private string lastEscapeGapCloserSafety = "not checked";
+    private Vector3? lastSafeEscapeDestination;
 
     public string LastEscapeGapCloserSafety => this.lastEscapeGapCloserSafety;
+    public Vector3? LastSafeEscapeDestination => this.lastSafeEscapeDestination;
 
     public void Reset()
     {
         this.nextEscapeGapCloserAttempt = DateTime.MinValue;
         this.escapeDangerDetectedAt = DateTime.MinValue;
         this.lastEscapeGapCloserSafety = "not checked";
+        this.lastSafeEscapeDestination = null;
     }
 
     public unsafe bool TryUseEscapeGapCloser()
@@ -39,9 +42,15 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
             return false;
         }
 
-        if (player.IsCasting || ActionManager.Instance()->AnimationLock > 0)
+        if (player.IsCasting)
         {
-            this.lastEscapeGapCloserSafety = "player busy";
+            this.lastEscapeGapCloserSafety = "player casting";
+            return false;
+        }
+
+        if (ActionManager.Instance()->AnimationLock > 0)
+        {
+            this.lastEscapeGapCloserSafety = "animation lock";
             return false;
         }
 
@@ -62,6 +71,7 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
         {
             this.escapeDangerDetectedAt = DateTime.MinValue;
             this.lastEscapeGapCloserSafety = "current position safe";
+            this.lastSafeEscapeDestination = null;
             return false;
         }
 
@@ -154,6 +164,7 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
                 continue;
             }
 
+            this.lastSafeEscapeDestination = ally.Position;
             var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, ally.GameObjectId);
             if (used)
             {
@@ -194,6 +205,7 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
                 continue;
             }
 
+            this.lastSafeEscapeDestination = candidate;
             var location = candidate;
             var used = ActionManager.Instance()->UseActionLocation(ActionType.Action, actionId, player.GameObjectId, &location);
             this.lastEscapeGapCloserSafety = used ? $"used escape {actionName}" : $"failed to use escape {actionName}";
@@ -229,6 +241,7 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
             return false;
         }
 
+        this.lastSafeEscapeDestination = destination;
         var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, player.GameObjectId);
         this.lastEscapeGapCloserSafety = used ? $"used {actionId}" : $"failed to use {actionId}";
         return used;

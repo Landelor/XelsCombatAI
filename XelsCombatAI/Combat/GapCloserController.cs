@@ -12,13 +12,16 @@ internal sealed class GapCloserController(Configuration config, DalamudServices 
 {
     private DateTime nextGapCloserAttempt = DateTime.MinValue;
     private string lastGapCloserSafety = "not checked";
+    private Vector3? lastSafeLandingPosition;
 
     public string LastGapCloserSafety => this.lastGapCloserSafety;
+    public Vector3? LastSafeLandingPosition => this.lastSafeLandingPosition;
 
     public void Reset()
     {
         this.nextGapCloserAttempt = DateTime.MinValue;
         this.lastGapCloserSafety = "not checked";
+        this.lastSafeLandingPosition = null;
     }
 
     public unsafe bool TryUseReengageGapCloser()
@@ -44,9 +47,15 @@ internal sealed class GapCloserController(Configuration config, DalamudServices 
             return false;
         }
 
-        if (player.IsCasting || ActionManager.Instance()->AnimationLock > 0)
+        if (player.IsCasting)
         {
-            this.lastGapCloserSafety = "player busy";
+            this.lastGapCloserSafety = "player casting";
+            return false;
+        }
+
+        if (ActionManager.Instance()->AnimationLock > 0)
+        {
+            this.lastGapCloserSafety = "animation lock";
             return false;
         }
 
@@ -69,6 +78,7 @@ internal sealed class GapCloserController(Configuration config, DalamudServices 
         if (distanceToHitbox <= CombatConstants.MeleeActionRange || distanceToHitbox > CombatConstants.GapCloserMaxRange)
         {
             this.lastGapCloserSafety = "target not in gap closer range";
+            this.lastSafeLandingPosition = null;
             return false;
         }
 
@@ -173,15 +183,18 @@ internal sealed class GapCloserController(Configuration config, DalamudServices 
         if (!Geometry.TryCalculateTargetDashDestination(player.Position, target.Position, distanceToHitbox, out var destination))
         {
             this.lastGapCloserSafety = "could not calculate dash destination";
+            this.lastSafeLandingPosition = null;
             return false;
         }
 
         if (!bossModSafety.TryIsDashSafe(player.Position, destination, out var reason))
         {
             this.lastGapCloserSafety = reason;
+            this.lastSafeLandingPosition = null;
             return false;
         }
 
+        this.lastSafeLandingPosition = destination;
         var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, target.GameObjectId);
         this.lastGapCloserSafety = used ? $"used {actionId}" : $"failed to use {actionId}";
         return used;
@@ -229,9 +242,11 @@ internal sealed class GapCloserController(Configuration config, DalamudServices 
         if (!bossModSafety.TryIsDashSafe(player.Position, destination, out var reason))
         {
             this.lastGapCloserSafety = reason;
+            this.lastSafeLandingPosition = null;
             return false;
         }
 
+        this.lastSafeLandingPosition = destination;
         var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, player.GameObjectId);
         this.lastGapCloserSafety = used ? $"used {actionId}" : $"failed to use {actionId}";
         return used;
