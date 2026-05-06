@@ -19,16 +19,18 @@ internal sealed class ConfigWindow : Window, IDisposable
     private readonly Action resetRuntimeState;
     private readonly Action<bool> setEnabled;
     private readonly Func<string> debugState;
+    private readonly Func<string> combatHistory;
     private readonly Func<string?> dependencyWarning;
     private readonly Func<string?> trueNorthWarning;
     private readonly Action manageTrueNorthEnabled;
     private readonly IKeyState keyState;
     private readonly HashSet<string> editingSliders = [];
     private DateTime copiedDebugStateUntil = DateTime.MinValue;
+    private DateTime copiedHistoryUntil = DateTime.MinValue;
     private bool backspacePressedThisFrame;
     private bool wasBackspaceDown;
 
-    public ConfigWindow(Configuration config, Action save, Action resetRuntimeState, Action<bool> setEnabled, Func<string> debugState, Func<string?> dependencyWarning, Func<string?> trueNorthWarning, Action manageTrueNorthEnabled, IKeyState keyState)
+    public ConfigWindow(Configuration config, Action save, Action resetRuntimeState, Action<bool> setEnabled, Func<string> debugState, Func<string> combatHistory, Func<string?> dependencyWarning, Func<string?> trueNorthWarning, Action manageTrueNorthEnabled, IKeyState keyState)
         : base("Xel's Combat AI Configuration###XelsCombatAIConfig")
     {
         this.config = config;
@@ -36,6 +38,7 @@ internal sealed class ConfigWindow : Window, IDisposable
         this.resetRuntimeState = resetRuntimeState;
         this.setEnabled = setEnabled;
         this.debugState = debugState;
+        this.combatHistory = combatHistory;
         this.dependencyWarning = dependencyWarning;
         this.trueNorthWarning = trueNorthWarning;
         this.manageTrueNorthEnabled = manageTrueNorthEnabled;
@@ -137,7 +140,6 @@ internal sealed class ConfigWindow : Window, IDisposable
             CombatStyle.GreedLastMoment => "Greed Last Moment",
             _                           => v.ToString()
         });
-        changed |= this.Checkbox("Follow tank on trash", this.config.ManagePartyRoleFollow, this.defaultConfig.ManagePartyRoleFollow, v => this.config.ManagePartyRoleFollow = v, "Follows the tank's position on trash pulls.\nAutomatically disabled on boss encounters.");
         changed |= this.Checkbox("Healer: stay near party", this.config.HealerPartyCoverage, this.defaultConfig.HealerPartyCoverage, v => this.config.HealerPartyCoverage = v, "Positions the healer to stay within range of as many party members as possible.\nOverrides the healer max distance sliders.");
         ImGui.Unindent(8f);
         ImGui.Spacing();
@@ -177,6 +179,59 @@ internal sealed class ConfigWindow : Window, IDisposable
         ImGui.Unindent(8f);
         ImGui.Spacing();
 
+        this.DrawSectionHeader("Decision Overlay");
+        changed |= this.Checkbox(
+            "Show decision overlay",
+            this.config.ShowDecisionOverlay,
+            this.defaultConfig.ShowDecisionOverlay,
+            v => this.config.ShowDecisionOverlay = v,
+            "Draws current movement decisions and candidates in the world overlay.\nUses projected screen-space lines and markers.");
+        ImGui.Unindent(8f);
+        ImGui.Spacing();
+
+        changed |= this.DrawToggleSectionHeader(
+            "AoE Pack Positioning",
+            this.config.ManageAoePackPositioning,
+            this.defaultConfig.ManageAoePackPositioning,
+            v => this.config.ManageAoePackPositioning = v,
+            "Repositions to hit more enemies with AoE attacks using RSR's next GCD preview.\nOnly moves when 2+ in-combat targets exist and a better position is available.",
+            FontAwesomeIcon.LayerGroup,
+            null,
+            !this.config.ManageMovement ? "Disabled by Manage movement in combat on the Main tab." : null);
+        var aoePackDisabledTooltip = !this.config.ManageAoePackPositioning
+            ? "Disabled by AoE Pack Positioning in the Positioning tab."
+            : !this.config.ManageMovement
+                ? "Disabled by Manage movement in combat on the Main tab."
+                : null;
+        if (!this.config.ManageAoePackPositioning || !this.config.ManageMovement)
+            ImGui.BeginDisabled();
+        changed |= this.SliderInt(
+            "Minimum extra AoE targets",
+            this.config.AoePackPositioningMinimumExtraTargets,
+            this.defaultConfig.AoePackPositioningMinimumExtraTargets,
+            1,
+            5,
+            v => this.config.AoePackPositioningMinimumExtraTargets = v,
+            aoePackDisabledTooltip);
+        changed |= this.Checkbox(
+            "Control RSR targeting during repositioning",
+            this.config.AoePackPositioningControlRsrTarget,
+            this.defaultConfig.AoePackPositioningControlRsrTarget,
+            v => this.config.AoePackPositioningControlRsrTarget = v,
+            "Switches RSR to Henched mode and sets the best AoE primary target during repositioning.\nRestores RSR's previous state when no improvement is found.",
+            aoePackDisabledTooltip);
+        changed |= this.Checkbox(
+            "AoE Combat Control",
+            this.config.AoePackPositioningAoeCombatControl,
+            this.defaultConfig.AoePackPositioningAoeCombatControl,
+            v => this.config.AoePackPositioningAoeCombatControl = v,
+            "Takes over RSR targeting on trash pulls as soon as the enemy threshold is met.\nPulls toward the pack centroid when out of AoE range.",
+            aoePackDisabledTooltip);
+        if (!this.config.ManageAoePackPositioning || !this.config.ManageMovement)
+            ImGui.EndDisabled();
+        ImGui.Unindent(8f);
+        ImGui.Spacing();
+
         return changed;
     }
 
@@ -211,7 +266,8 @@ internal sealed class ConfigWindow : Window, IDisposable
         ImGui.Unindent(8f);
         ImGui.Spacing();
 
-        changed |= this.DrawToggleSectionHeader("AoE Target Distance", this.config.AoERangeInMultiTarget, this.defaultConfig.AoERangeInMultiTarget, v => this.config.AoERangeInMultiTarget = v, "Switches to the AoE distances when enough enemies are nearby.\nThe enemy threshold below controls when this kicks in.", disabledTooltip: !this.config.ManageRange ? manageRangeDisabledTooltip : null);
+        if (this.config.AoePackPositioningAoeCombatControl) ImGui.BeginDisabled();
+        changed |= this.DrawToggleSectionHeader("AoE Target Distance", this.config.AoERangeInMultiTarget, this.defaultConfig.AoERangeInMultiTarget, v => this.config.AoERangeInMultiTarget = v, "Switches to the AoE distances when enough enemies are nearby.\nThe enemy threshold below controls when this kicks in.\nNot used when AoE Combat Control is enabled.", disabledTooltip: !this.config.ManageRange ? manageRangeDisabledTooltip : this.config.AoePackPositioningAoeCombatControl ? "Disabled by AoE Combat Control in the Positioning tab." : null);
         if (!this.config.AoERangeInMultiTarget)
             ImGui.BeginDisabled();
         changed |= this.Checkbox("Non-AST healers use melee AoE range", this.config.AoEHealerMeleeRange, this.defaultConfig.AoEHealerMeleeRange, v => this.config.AoEHealerMeleeRange = v, disabledTooltip: aoeDisabledTooltip);
@@ -224,6 +280,7 @@ internal sealed class ConfigWindow : Window, IDisposable
         changed |= this.SliderInt("AoE enemy threshold", this.config.AoEEnemyThreshold, this.defaultConfig.AoEEnemyThreshold, 1, 10, v => this.config.AoEEnemyThreshold = v, disabledTooltip: aoeDisabledTooltip);
         if (!this.config.AoERangeInMultiTarget)
             ImGui.EndDisabled();
+        if (this.config.AoePackPositioningAoeCombatControl) ImGui.EndDisabled();
         ImGui.Unindent(8f);
         ImGui.Spacing();
 
@@ -347,7 +404,7 @@ internal sealed class ConfigWindow : Window, IDisposable
         var changed = false;
 
         this.DrawSectionHeader("Chat");
-        changed |= this.Checkbox("Echo command status to chat", this.config.EchoStatusToChat, this.defaultConfig.EchoStatusToChat, v => this.config.EchoStatusToChat = v);
+        changed |= this.Checkbox("Echo command status to chat", this.config.EchoStatusToChat, this.defaultConfig.EchoStatusToChat, v => this.config.EchoStatusToChat = v, "Prints a message to chat when the plugin is enabled or disabled via command.");
         ImGui.Unindent(8f);
         ImGui.Spacing();
 
@@ -360,6 +417,19 @@ internal sealed class ConfigWindow : Window, IDisposable
 
         this.DrawInfoIcon("Copies current runtime state, BossMod strategy cache, integration state, and configuration values.");
         if (DateTime.UtcNow < this.copiedDebugStateUntil)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "Copied.");
+        }
+
+        if (ImGui.Button("Copy combat history"))
+        {
+            ImGui.SetClipboardText(this.combatHistory());
+            this.copiedHistoryUntil = DateTime.UtcNow.AddSeconds(2);
+        }
+
+        this.DrawInfoIcon("Copies AoE positioning decisions recorded during the last combat.\nResets when a new combat starts.");
+        if (DateTime.UtcNow < this.copiedHistoryUntil)
         {
             ImGui.SameLine();
             ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "Copied.");
@@ -445,7 +515,7 @@ internal sealed class ConfigWindow : Window, IDisposable
         }
 
         var hovered = checkboxHovered || titleHovered || iconHovered;
-        this.DrawTooltip(hovered, disabledTooltip: disabledTooltip);
+        this.DrawTooltip(hovered, tooltip, disabledTooltip);
 
         if (enabled && IsResetRequested(hovered))
         {
@@ -509,12 +579,13 @@ internal sealed class ConfigWindow : Window, IDisposable
         return true;
     }
 
-    private bool Combo<T>(string label, T value, T defaultValue, Action<T> setter, string? tooltip = null, Func<T, string>? displayName = null)
+    private bool Combo<T>(string label, T value, T defaultValue, Action<T> setter, string? tooltip = null, Func<T, string>? displayName = null, string? disabledTooltip = null)
         where T : struct, Enum
     {
         var changed = false;
         ImGui.TextUnformatted(label);
         var labelHovered = ImGui.IsItemHovered();
+        this.DrawTooltip(labelHovered, tooltip, disabledTooltip);
         this.DrawInfoIcon(tooltip);
 
         var getName = displayName ?? (v => v.ToString());
