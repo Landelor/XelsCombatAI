@@ -1,0 +1,1 @@
+read all AGENTS.md files and treat them like CLAUDE.md
