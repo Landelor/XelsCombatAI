@@ -13,13 +13,18 @@ A Dalamud plugin that automatically manages your BossMod Reborn movement and pos
 While you are in combat, the plugin automatically:
 
 - **Moves you to the correct positional** (rear/flank) based on your autorotation
-- **Keeps you at the right distance** from your target based on your role
-- **Switches to AoE distance** when there are multiple enemies nearby
-- **Stays close to a tank** when your target doesn't have a boss module
+- **Maintains target uptime** using internal melee/ranged action-range behavior
 - **Manages your Ley Lines** — returns to them when safe, uses Between the Lines and Retrace if available
 - **Stays clear of forbidden zones** with a configurable buffer distance
 - **Uses BossMod-checked gap closers** to re-engage after being knocked away or escape a dangerous spot (optional, off by default)
-- **Optimizes AoE pack positioning** by using RSR's next GCD preview to let BossMod prefer locations that hit more enemies (experimental, optional, off by default)
+- **Moves for better AoE hits** when your next AoE can hit more enemies from another spot
+- **Picks better AoE and trash targets** when target choice affects how many enemies you hit
+- **Moves closer to trash packs** when you are too far away to hit them well
+- **Avoids awkward boss-center positions** and small enemy hitboxes when choosing movement goals
+- **Prefers the party cluster** by letting BossMod gently gravitate toward your current 4-player or 8-player party during combat, while magic ranged jobs avoid party-gravity movement when they can keep casting at a target
+- **Prefers helpful defensive ground effects** such as Asylum, Sacred Soil, Earthly Star, and Collective Unconscious
+- **Prefers Paladin Passage of Arms protection** by letting BossMod prefer the protected cone behind a party Paladin while the buff is active
+- **Avoids hugging the arena edge** as a weak preference when stronger movement goals do not matter
 - **Shows a decision overlay** with projected in-world markers for current movement decisions and candidates (optional, off by default)
 - **Pauses automated movement** briefly when you move manually, including remapped movement or gamepad input reported by BossMod
 - **Manages True North** usage and disables RSR's Auto True North to prevent conflicts (optional, requires RSR)
@@ -47,42 +52,30 @@ https://raw.githubusercontent.com/Xeltor/XelsCombatAI/master/pluginmaster.json
 
 Open the settings window with `/xcai config` or through the Dalamud plugin list. The window is split by intent so related options stay together.
 
-### Main tab
+### General tab
 
-**Main** — Toggle the plugin, movement management, manual movement pause, combat style, whether to follow the tank on trash pulls (targets with no boss module), and healer party coverage on boss fights.
+**General** — Toggle the plugin, command chat messages, and reset settings.
 
-### Positioning tab
+### Movement tab
 
-**Positioning** — Manage positionals, True North, Ley Lines, the decision overlay, and experimental AoE pack positioning.
+**Movement** — Control automatic movement, manual movement pause, movement timing, attack range, danger-zone spacing, party positioning, defensive ground effects, Passage of Arms, and weak edge-avoidance preferences.
 
-- *Manage positionals* — Moves you to the correct rear/flank position for your rotation.
-- *Manage True North* — Uses True North automatically and disables RSR's Auto True North to prevent conflicts. Requires RSR.
-- *Manage Ley Lines* — Helps BLM stay on Ley Lines and use Between the Lines / Retrace when available. Does not place Ley Lines.
-- *Decision overlay* — Draws current decisions and candidates in the world overlay. Green is active, blue is a candidate, yellow is preview-only, red is rejected, gray is suppressed, and white is BossMod's current movement intent.
-- *AoE Pack Positioning* — Uses RSR's upcoming GCD preview and a reflected BossMod hook to add an AoE hit-count goal to BossMod pathfinding. Supports common circle, cone, and line AoE shapes. Unsupported actions and reflection failures are ignored.
+### AoE & Trash tab
 
-### Distance tab
+**AoE & Trash** — Move for better AoE hits, pick better AoE targets, keep a trash target selected, move closer to trash packs, and avoid standing inside enemies.
 
-**Manage range** — Master toggle for all distance management.
+### Positionals tab
 
-**Single target distance** — Set your preferred max distance per role (melee, physical ranged, healer, magic ranged). Disable to stop managing single-target distance.
+**Positionals** — Move to the correct rear/flank position and optionally use True North when the correct side cannot be reached.
 
-**AoE target distance** — When multiple enemies are nearby the target, the plugin switches to these distances instead. The threshold controls how many enemies must be present to trigger AoE mode. You can also enable non-AST healers to use melee AoE distance so they stay in range of their ground targets.
+### Black Mage tab
 
-**Forbidden zone** — Keeps you a set distance back from forbidden zones to avoid clipping into them.
+**Black Mage** — Stay in existing Ley Lines and choose whether to use Between the Lines, Retrace, or walking to return to them.
 
-### Gap Closers tab
+### Dashes tab
 
-**Re-engage gap closers** — Uses supported gap closers to return to melee range when BossMod reports the dash is safe. Disabled by default.
+**Dashes** — Optional dash automation for returning to a target or reaching safety faster. These options are off by default and can very likely kill you in some fights. Each dash type has its own minimum distance and job allow-list.
 
-**Escape gap closers** — Uses supported movement abilities to help BossMod reach safety faster when the landing point is safe and moves toward BossMod's safe point. Disabled by default. BLM will not escape out of Ley Lines in Greed mode.
+### Troubleshooting tab
 
-**Minimum distances** — Sets the minimum distance required before using optional gap closers for re-engage or safety. Each slider is disabled when its matching gap-closer option is off. Defaults to 8y.
-
-### Chat & Reset tab
-
-**Feedback** — Toggle whether enable/disable commands are echoed to chat.
-
-Use **Copy debug state** to copy a full runtime, integration, and configuration snapshot for troubleshooting.
-
-Use **Reset ranges** to restore all distance values to defaults, or **Reset all** to restore the full configuration.
+**Troubleshooting** — Show the movement overlay, copy a debug snapshot, or copy recent combat decisions.
