@@ -10,5 +10,29 @@
   "RotationSolverReborn": {
     "url": "https://github.com/FFXIV-CombatReborn/RotationSolverReborn.git",
     "branch": "main"
+  },
+  "VNavmesh": {
+    "url": "https://github.com/awgil/ffxiv_navmesh.git",
+    "branch": "master"
+  },
+  "Dalamud": {
+    "url": "https://github.com/goatcorp/Dalamud.git",
+    "branch": "master"
+  },
+  "FFXIVClientStructs": {
+    "url": "https://github.com/aers/FFXIVClientStructs.git",
+    "branch": "main"
+  },
+  "ECommons": {
+    "url": "https://github.com/NightmareXIV/ECommons.git",
+    "branch": "master"
+  },
+  "Lumina": {
+    "url": "https://github.com/NotAdam/Lumina.git",
+    "branch": "master"
+  },
+  "FfxivDatamining": {
+    "url": "https://github.com/xivapi/ffxiv-datamining.git",
+    "branch": "master"
   }
 }
