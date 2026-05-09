@@ -390,6 +390,10 @@ internal sealed class BossModGoalZoneHook : IDisposable
             var preventMovingWhileCasting = ReadBoolMember(this.actionManagerConfig, this.preventMovingWhileCastingMember);
             var forceUnblocked = (bool)this.isForceUnblockedMethod.Invoke(this.movementOverride, [])!;
             var moveImminent = moveRequested && (!preventMovingWhileCasting || forceUnblocked);
+            foreach (var contributor in this.contributors)
+            {
+                contributor.SetBossModMovementState(moveRequested, moveImminent);
+            }
 
             this.dtrUpdateMethod.Invoke(this.dtr, []);
             var camera = this.cameraInstanceField?.GetValue(null);

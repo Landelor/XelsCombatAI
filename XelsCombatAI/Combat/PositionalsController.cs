@@ -117,6 +117,7 @@ internal sealed class PositionalsController(
         if (this.HasActiveTrueNorth()) return false;
         if (this.GetTrueNorthCharges() == 0) return false;
         if (this.IsOutsideMeleeRange()) return false;
+        if (rotationSolver.IsNoCasting(services.Log)) return false;
 
         if (ActionManager.Instance()->AnimationLock > 0) return false;
         if (services.ObjectTable.LocalPlayer?.IsCasting == true) return false;

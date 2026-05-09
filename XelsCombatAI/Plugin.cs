@@ -81,8 +81,10 @@ public sealed class Plugin : IDalamudPlugin
         var partyGravityPositioningController = new PartyGravityPositioningController(this.config, this.services, bossModSafety, () => runtime?.AutomatedMovementSuppressed == true, targetUptimePlanner.ShouldDeferPartyGravityForMeleeUptime);
         var healerAoePositioningController = new HealerAoePositioningController(this.config, this.services, new RotationSolverActionReflection(PluginInterface, Log), () => runtime?.AutomatedMovementSuppressed == true);
         var survivabilityZonePositioningController = new SurvivabilityZonePositioningController(this.config, this.services, () => runtime?.AutomatedMovementSuppressed == true);
+        var aggroSafetyController = new AggroSafetyController(this.config, this.services);
+        var bossFrontalConeController = new BossFrontalConeController(this.config, this.services, bossMod);
         var arenaEdgePositioningController = new ArenaEdgePositioningController(this.config, this.services);
-        var aoeGoalHook = new BossModGoalZoneHook(PluginInterface, this.services, Log, [aoePackPositioningController, passageOfArmsPositioningController, partyGravityPositioningController, healerAoePositioningController, survivabilityZonePositioningController, arenaEdgePositioningController]);
+        var aoeGoalHook = new BossModGoalZoneHook(PluginInterface, this.services, Log, [aggroSafetyController, bossFrontalConeController, aoePackPositioningController, passageOfArmsPositioningController, partyGravityPositioningController, healerAoePositioningController, survivabilityZonePositioningController, arenaEdgePositioningController]);
         presetController = new BossModPresetController(
             this.config,
             this.services,
@@ -106,6 +108,8 @@ public sealed class Plugin : IDalamudPlugin
             partyGravityPositioningController,
             healerAoePositioningController,
             survivabilityZonePositioningController,
+            aggroSafetyController,
+            bossFrontalConeController,
             manualMovement,
             gapCloserController,
             escapeGapCloserController,
@@ -125,7 +129,8 @@ public sealed class Plugin : IDalamudPlugin
             bossModSafety,
             gapCloserController,
             escapeGapCloserController,
-            rotationSolverActions);
+            rotationSolverActions,
+            bossFrontalConeController);
 
         this.configWindow = new ConfigWindow(
             this.config,

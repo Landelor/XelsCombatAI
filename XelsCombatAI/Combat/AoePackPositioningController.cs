@@ -112,6 +112,7 @@ internal sealed class AoePackPositioningController(
     public AoePackOverlaySnapshot? Overlay => this.lastInjected ? this.lastOverlay : null;
     public AoePackOverlaySnapshot? SuggestedCandidate => this.lastInjected ? null : this.lastSuggestion;
     public bool RsrHenchedActive => this.rsrHenchedActive;
+    public bool CurrentTargetHasBossModule => currentTargetHasBossModule();
 
     public void SetHookState(string state)
     {

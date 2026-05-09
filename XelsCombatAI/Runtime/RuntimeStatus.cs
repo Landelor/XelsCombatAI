@@ -47,7 +47,6 @@ internal sealed record RuntimeStatus(
     bool EscapeGapCloserBLM,
     bool EscapeGapCloserSGE,
     bool EscapeGapCloserPCT,
-    bool EscapeGapCloserBLU,
     string ReflectedGapSafety,
     string ReflectedGapSafetyDiagnostics,
     string AoeGoalHook,
@@ -57,8 +56,10 @@ internal sealed record RuntimeStatus(
     PartyGravityPositioningStatus PartyGravityPositioning,
     HealerAoePositioningStatus HealerAoePositioning,
     SurvivabilityZonePositioningStatus SurvivabilityZonePositioning,
+    AggroSafetyStatus AggroSafety,
     string ManualMovementInput,
     bool AutomatedMovementSuppressed,
     string LastGapCloserSafety,
     string LastEscapeGapCloserSafety,
-    bool InitializedPreset);
+    bool InitializedPreset,
+    string BossFrontalConeReason);

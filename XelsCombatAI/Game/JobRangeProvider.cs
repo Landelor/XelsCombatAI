@@ -44,7 +44,6 @@ internal sealed class JobRangeProvider(DalamudServices services) : IDisposable
             7 or 25 => (25f, 25f),  // THM / BLM
             26 or 27 => (25f, 25f), // ACN / SMN
             35      => (25f, 8f),   // RDM — Veraero II / Impact
-            36      => (25f, 25f),  // BLU
             42      => (25f, 25f),  // PCT
             // Default: melee
             _       => (2.6f, 2.6f),

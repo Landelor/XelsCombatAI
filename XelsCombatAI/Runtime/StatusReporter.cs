@@ -9,7 +9,7 @@ internal static class StatusReporter
 {
     public static string Build(RuntimeStatus status)
     {
-        return $"Enabled={status.Enabled}, InCombat={status.InCombat}, Dead={status.IsDead}, Dependencies={(status.DependencyWarning ?? "OK")}, TrueNorthManagement={(status.TrueNorthWarning ?? status.RsrTrueNorthDisabled?.ToString() ?? "NotManaged")}, Preset={BossModIpc.DefaultPresetName}, LastPositional={status.LastPositional}, TrueNorthCharges={status.TrueNorthCharges}, TrueNorthActive={status.TrueNorthActive}, TargetUptime={status.LastTargetUptimeRange:0.0}, Movement={status.LastMovement}, MovementRange={status.LastMovementRangeStrategy}, SafetyBuffer={status.LastForbiddenZoneCushion}, MovementSuppressed={status.AutomatedMovementSuppressed}, AoEPack={status.AoePackPositioning.LastReason}, HealerAoE={status.HealerAoePositioning.LastReason}, Passage={status.PassageOfArmsPositioning.LastReason}, SurvZone={status.SurvivabilityZonePositioning.LastReason}, PartyGravity={status.PartyGravityPositioning.LastReason}, Initialized={status.InitializedPreset}";
+        return $"Enabled={status.Enabled}, InCombat={status.InCombat}, Dead={status.IsDead}, Dependencies={(status.DependencyWarning ?? "OK")}, TrueNorthManagement={(status.TrueNorthWarning ?? status.RsrTrueNorthDisabled?.ToString() ?? "NotManaged")}, Preset={BossModIpc.DefaultPresetName}, LastPositional={status.LastPositional}, TrueNorthCharges={status.TrueNorthCharges}, TrueNorthActive={status.TrueNorthActive}, TargetUptime={status.LastTargetUptimeRange:0.0}, Movement={status.LastMovement}, MovementRange={status.LastMovementRangeStrategy}, SafetyBuffer={status.LastForbiddenZoneCushion}, MovementSuppressed={status.AutomatedMovementSuppressed}, AoEPack={status.AoePackPositioning.LastReason}, HealerAoE={status.HealerAoePositioning.LastReason}, Passage={status.PassageOfArmsPositioning.LastReason}, SurvZone={status.SurvivabilityZonePositioning.LastReason}, PartyGravity={status.PartyGravityPositioning.LastReason}, AggroSafety={status.AggroSafety.LastReason}, Initialized={status.InitializedPreset}";
     }
 
     public static string BuildDebug(Configuration config, RuntimeStatus status)
@@ -75,7 +75,6 @@ internal static class StatusReporter
         Append(builder, "EscapeGapCloserBLM", status.EscapeGapCloserBLM);
         Append(builder, "EscapeGapCloserSGE", status.EscapeGapCloserSGE);
         Append(builder, "EscapeGapCloserPCT", status.EscapeGapCloserPCT);
-        Append(builder, "EscapeGapCloserBLU", status.EscapeGapCloserBLU);
         Append(builder, "LastGapCloserSafety", status.LastGapCloserSafety);
         Append(builder, "LastEscapeGapCloserSafety", status.LastEscapeGapCloserSafety);
         Append(builder, "ReflectedGapSafety", status.ReflectedGapSafety);
@@ -91,6 +90,8 @@ internal static class StatusReporter
         Append(builder, "PartyGravityGoalMembers", status.PartyGravityPositioning.LastReason);
         Append(builder, "HealerAoeGoalMembers", status.HealerAoePositioning.LastReason);
         Append(builder, "SurvivabilityZoneGoalMembers", status.SurvivabilityZonePositioning.LastReason);
+        Append(builder, "AggroSafetyGoalMembers", status.AggroSafety.LastReason);
+        Append(builder, "BossFrontalCone", status.BossFrontalConeReason);
         builder.AppendLine();
 
         AppendSection(builder, "AoE Pack Positioning");
@@ -147,6 +148,16 @@ internal static class StatusReporter
         Append(builder, "ZoneName", status.SurvivabilityZonePositioning.ZoneName);
         Append(builder, "CasterName", status.SurvivabilityZonePositioning.CasterName);
         Append(builder, "DistanceToCenter", status.SurvivabilityZonePositioning.DistanceToCenter);
+        builder.AppendLine();
+
+        AppendSection(builder, "Aggro Safety");
+        Append(builder, "HookState", status.AggroSafety.HookState);
+        Append(builder, "LastReason", status.AggroSafety.LastReason);
+        Append(builder, "Injected", status.AggroSafety.Injected);
+        Append(builder, "ActiveMobId", status.AggroSafety.ActiveMobId);
+        Append(builder, "SelectedTankId", status.AggroSafety.SelectedTankId);
+        Append(builder, "AggroSeconds", status.AggroSafety.AggroSeconds);
+        Append(builder, "PriorityDevalued", status.AggroSafety.PriorityDevalued);
         builder.AppendLine();
 
         AppendSection(builder, "Configuration");

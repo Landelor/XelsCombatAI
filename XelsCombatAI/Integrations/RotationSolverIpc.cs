@@ -40,6 +40,7 @@ internal sealed class RotationSolverIpc
     private PropertyInfo? isHenchedProp;
     private PropertyInfo? isTargetOnlyProp;
     private PropertyInfo? isPvpStateEnabledProp;
+    private PropertyInfo? specialTypeProp;
 
     public RotationSolverIpc(IDalamudPluginInterface pluginInterface)
     {
@@ -68,6 +69,23 @@ internal sealed class RotationSolverIpc
     public void RestoreMode(StateCommandType mode)
     {
         this.changeOperatingMode(mode);
+    }
+
+    public bool IsNoCasting(IPluginLog log)
+    {
+        try
+        {
+            if (!this.EnsureDataCenterResolved() || this.specialTypeProp == null)
+                return false;
+            var value = this.specialTypeProp.GetValue(null);
+            // SpecialCommandType.NoCasting == 13
+            return value != null && Convert.ToByte(value) == 13;
+        }
+        catch (Exception ex)
+        {
+            log.Verbose($"Could not read RSR SpecialType: {ex.Message}");
+            return false;
+        }
     }
 
     public StateCommandType? TryGetCurrentState(IPluginLog log)
@@ -168,6 +186,7 @@ internal sealed class RotationSolverIpc
         this.isHenchedProp         = isHenched;
         this.isTargetOnlyProp      = isTargetOnly;
         this.isPvpStateEnabledProp = isPvpStateEnabled;
+        this.specialTypeProp       = type.GetProperty("SpecialType", StaticFlags);
         return true;
     }
 

@@ -5,6 +5,7 @@ using System.Numerics;
 using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.Types;
 using FFXIVClientStructs.FFXIV.Client.Game;
+using XelsCombatAI.Game;
 
 namespace XelsCombatAI.Combat;
 
@@ -61,7 +62,7 @@ internal sealed class GapCloserController(Configuration config, DalamudServices 
 
         var distanceToHitbox = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, target.Position, target.HitboxRadius);
 
-        if (distanceToHitbox > CombatConstants.MeleeActionRange && services.PartyList.Count >= 4)
+        if (distanceToHitbox > CombatConstants.MeleeActionRange && PartyAllyProvider.GetVisiblePartyAllies(services, player).Members.Count >= 4)
         {
             var targetIsBoss = target is IBattleNpc bossCheck && bossMod.HasModuleByDataId(bossCheck.BaseId);
             if (!targetIsBoss)
@@ -328,11 +329,13 @@ internal sealed class GapCloserController(Configuration config, DalamudServices 
 
     private bool TryFindTankPosition(out Vector3 tankPosition)
     {
-        foreach (var member in services.PartyList)
+        var player = services.ObjectTable.LocalPlayer;
+        if (player != null)
         {
-            if (JobRoles.IsTankJob(member.ClassJob.RowId) && member.GameObject is { } go && !go.IsDead)
+            var tank = PartyAllyProvider.SelectBestTank(services, player);
+            if (tank != null)
             {
-                tankPosition = go.Position;
+                tankPosition = tank.Position;
                 return true;
             }
         }

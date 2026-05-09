@@ -17,6 +17,10 @@ internal interface IBossModGoalZoneContributor
 {
     void SetHookState(string state);
 
+    void SetBossModMovementState(bool moveRequested, bool moveImminent)
+    {
+    }
+
     void TryInjectGoal(object hints, ICollection<BossModGoalContribution> contributions);
 
     void Reset();

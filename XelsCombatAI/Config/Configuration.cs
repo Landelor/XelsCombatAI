@@ -16,7 +16,7 @@ public sealed class Configuration : IPluginConfiguration
     public const float MinimumGapCloserDistanceMin = 0f;
     public const float MinimumGapCloserDistanceMax = 20f;
 
-    public int Version { get; set; } = 13;
+    public int Version { get; set; } = 14;
 
     public bool Enabled { get; set; } = false;
     public bool ManageMovement { get; set; } = true;
@@ -50,7 +50,6 @@ public sealed class Configuration : IPluginConfiguration
     public bool EscapeGapCloserSGE { get; set; } = true;
     public bool EscapeGapCloserDNC { get; set; } = true;
     public bool EscapeGapCloserPCT { get; set; } = true;
-    public bool EscapeGapCloserBLU { get; set; } = true;
     public bool EchoStatusToChat { get; set; } = true;
     public CombatStyle CombatStyle { get; set; } = CombatStyle.Normal;
     public float PreferredForbiddenZoneDistance { get; set; } = DefaultPreferredForbiddenZoneDistance;
@@ -63,9 +62,12 @@ public sealed class Configuration : IPluginConfiguration
     public bool ManagePassageOfArmsPositioning { get; set; } = true;
     public bool PickBetterAoeTarget { get; set; } = false;
     public bool KeepTrashTargetSelected { get; set; } = true;
+    public bool ManageAggroSafetyMovement { get; set; } = true;
     public bool AvoidStandingInsideEnemies { get; set; } = true;
     public bool AvoidArenaEdge { get; set; } = true;
+    public bool AvoidBossFrontalCone { get; set; } = true;
     public bool ShowDecisionOverlay { get; set; } = false;
+    public bool ShowDecisionOverlayHud { get; set; } = false;
 
     [JsonProperty("ManageSurvivabilityZonePositioning")]
     private bool ManageSurvivabilityZonePositioningCompatibility
@@ -177,7 +179,6 @@ public sealed class Configuration : IPluginConfiguration
             this.EscapeGapCloserBLM = true;
             this.EscapeGapCloserSGE = true;
             this.EscapeGapCloserPCT = true;
-            this.EscapeGapCloserBLU = true;
             this.Version = 8;
         }
 
@@ -218,7 +219,14 @@ public sealed class Configuration : IPluginConfiguration
             this.AvoidStandingInsideEnemies = true;
             this.AvoidArenaEdge = true;
             this.ShowDecisionOverlay = false;
+            this.ShowDecisionOverlayHud = false;
             this.Version = 13;
+        }
+
+        if (this.Version < 14)
+        {
+            this.AvoidBossFrontalCone = true;
+            this.Version = 14;
         }
     }
 
@@ -235,6 +243,7 @@ public sealed class Configuration : IPluginConfiguration
         this.CombatStyle = CombatStyle.Normal;
         this.ManageTargetUptime = true;
         this.ManageForbiddenZoneDistance = true;
+        this.ManageAggroSafetyMovement = true;
         this.PreferredForbiddenZoneDistance = DefaultPreferredForbiddenZoneDistance;
         this.MinimumReengageGapCloserDistance = DefaultMinimumReengageGapCloserDistance;
         this.MinimumEscapeGapCloserDistance = DefaultMinimumEscapeGapCloserDistance;
@@ -274,7 +283,6 @@ public sealed class Configuration : IPluginConfiguration
         this.EscapeGapCloserSGE = true;
         this.EscapeGapCloserDNC = true;
         this.EscapeGapCloserPCT = true;
-        this.EscapeGapCloserBLU = true;
         this.EchoStatusToChat = true;
         this.CombatStyle = CombatStyle.Normal;
         this.ManageAoePackPositioning = true;
@@ -284,9 +292,11 @@ public sealed class Configuration : IPluginConfiguration
         this.ManagePassageOfArmsPositioning = true;
         this.PickBetterAoeTarget = false;
         this.KeepTrashTargetSelected = true;
+        this.ManageAggroSafetyMovement = true;
         this.AvoidStandingInsideEnemies = true;
         this.AvoidArenaEdge = true;
         this.ShowDecisionOverlay = false;
+        this.ShowDecisionOverlayHud = false;
         this.ResetBehaviorSettings();
     }
 

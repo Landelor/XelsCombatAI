@@ -7,6 +7,7 @@ using System.Numerics;
 using System.Reflection;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.Types;
+using XelsCombatAI.Game;
 using XelsCombatAI.Integrations;
 
 namespace XelsCombatAI.Combat;
@@ -163,14 +164,14 @@ internal sealed class PassageOfArmsPositioningController(
 
     public void RefreshOverlay()
     {
-        if (!config.Enabled || !config.ShowDecisionOverlay || !config.ManagePassageOfArmsPositioning)
+        if (!config.ShowDecisionOverlay)
         {
             this.lastOverlay = null;
             return;
         }
 
         var player = services.ObjectTable.LocalPlayer;
-        if (player == null || !services.Condition[ConditionFlag.InCombat] || services.Condition[ConditionFlag.Unconscious])
+        if (player == null || services.Condition[ConditionFlag.Unconscious])
         {
             this.lastOverlay = null;
             return;
@@ -263,25 +264,12 @@ internal sealed class PassageOfArmsPositioningController(
 
     private IEnumerable<IBattleChara> ActivePassagePaladins(IBattleChara player)
     {
-        var seen = new HashSet<ulong>();
-        foreach (var member in services.PartyList)
+        foreach (var ally in PartyAllyProvider.EnumerateVisiblePartyAllies(services, player))
         {
-            if (member.GameObject is not IBattleChara paladin)
+            if (ally.ClassJob.RowId == PaladinJobId &&
+                ally.StatusList.Any(status => status.StatusId == ActionUse.PassageOfArmsStatusId && status.RemainingTime > 0f))
             {
-                continue;
-            }
-
-            if (!seen.Add(paladin.GameObjectId) ||
-                paladin.GameObjectId == player.GameObjectId ||
-                paladin.IsDead ||
-                paladin.ClassJob.RowId != PaladinJobId)
-            {
-                continue;
-            }
-
-            if (paladin.StatusList.Any(status => status.StatusId == ActionUse.PassageOfArmsStatusId && status.RemainingTime > 0f))
-            {
-                yield return paladin;
+                yield return ally;
             }
         }
     }

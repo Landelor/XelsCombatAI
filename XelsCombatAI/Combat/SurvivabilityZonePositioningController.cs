@@ -7,6 +7,7 @@ using System.Numerics;
 using System.Reflection;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.Types;
+using XelsCombatAI.Game;
 using XelsCombatAI.Integrations;
 
 namespace XelsCombatAI.Combat;
@@ -167,14 +168,14 @@ internal sealed class SurvivabilityZonePositioningController(
 
     public void RefreshOverlay()
     {
-        if (!config.Enabled || !config.ShowDecisionOverlay || !config.ManageDefensiveGroundZonePositioning)
+        if (!config.ShowDecisionOverlay)
         {
             this.lastOverlay = null;
             return;
         }
 
         var player = services.ObjectTable.LocalPlayer;
-        if (player == null || !services.Condition[ConditionFlag.InCombat] || services.Condition[ConditionFlag.Unconscious])
+        if (player == null || services.Condition[ConditionFlag.Unconscious])
         {
             this.lastOverlay = null;
             return;
@@ -237,12 +238,8 @@ internal sealed class SurvivabilityZonePositioningController(
         var playerPos = new Vector2(player.Position.X, player.Position.Z);
         SurvivabilityZoneGoalPlan? best = null;
 
-        foreach (var member in services.PartyList)
+        foreach (var caster in PartyAllyProvider.EnumerateVisiblePartyAllies(services, player))
         {
-            if (member.GameObject is not IBattleChara caster || caster.IsDead || caster.GameObjectId == player.GameObjectId)
-            {
-                continue;
-            }
 
             foreach (var zone in ZoneDefinitions)
             {

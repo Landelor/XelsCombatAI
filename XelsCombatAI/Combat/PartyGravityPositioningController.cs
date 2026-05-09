@@ -41,6 +41,8 @@ internal sealed class PartyGravityPositioningController(
     private const float MinPreferredRadius = 3f;
     private const float PreferredRadiusPadding = 8f;
     private const float PreferredScore = GoalZoneScorePolicy.PartyGravityPreference;
+    private const double MinBossModIdleDelaySeconds = 1d;
+    private const double MaxBossModIdleDelaySeconds = 3d;
     private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
     private FieldInfo? goalZonesField;
@@ -59,6 +61,9 @@ internal sealed class PartyGravityPositioningController(
     private Delegate? lastGoalDelegate;
     private PartyGravityGoalPlan? lastPlan;
     private PartyGravityOverlaySnapshot? lastOverlay;
+    private bool lastBossModMoveImminent;
+    private bool receivedBossModMovementState;
+    private DateTime partyGravityAllowedAfter = DateTime.MaxValue;
 
     public PartyGravityPositioningStatus Status => new(
         this.hookState,
@@ -75,6 +80,26 @@ internal sealed class PartyGravityPositioningController(
     public void SetHookState(string state)
     {
         this.hookState = state;
+    }
+
+    public void SetBossModMovementState(bool moveRequested, bool moveImminent)
+    {
+        _ = moveRequested;
+        var now = DateTime.UtcNow;
+        this.receivedBossModMovementState = true;
+        if (moveImminent)
+        {
+            this.lastBossModMoveImminent = true;
+            this.partyGravityAllowedAfter = DateTime.MaxValue;
+            return;
+        }
+
+        if (this.lastBossModMoveImminent || this.partyGravityAllowedAfter == DateTime.MaxValue)
+        {
+            this.partyGravityAllowedAfter = now.AddSeconds(MinBossModIdleDelaySeconds + (Random.Shared.NextDouble() * (MaxBossModIdleDelaySeconds - MinBossModIdleDelaySeconds)));
+        }
+
+        this.lastBossModMoveImminent = false;
     }
 
     public void Reset()
@@ -94,6 +119,9 @@ internal sealed class PartyGravityPositioningController(
         this.lastGoalDelegate = null;
         this.lastPlan = null;
         this.lastOverlay = null;
+        this.lastBossModMoveImminent = false;
+        this.receivedBossModMovementState = false;
+        this.partyGravityAllowedAfter = DateTime.MaxValue;
     }
 
     public void TryInjectGoal(object hints, ICollection<BossModGoalContribution> contributions)
@@ -146,20 +174,20 @@ internal sealed class PartyGravityPositioningController(
 
     public void RefreshOverlay()
     {
-        if (!config.Enabled || !config.ShowDecisionOverlay || !config.ManagePartyGravityPositioning)
+        if (!config.ShowDecisionOverlay)
         {
             this.lastOverlay = null;
             return;
         }
 
-        if (!this.CanEvaluate(out var player, out _))
+        var player = services.ObjectTable.LocalPlayer;
+        if (player == null || services.Condition[ConditionFlag.Unconscious])
         {
             this.lastOverlay = null;
             return;
         }
-        var localPlayer = player!;
 
-        var plan = this.FindBestPlan(localPlayer);
+        var plan = this.FindBestPlan(player);
         if (plan == null)
         {
             this.lastOverlay = null;
@@ -171,7 +199,7 @@ internal sealed class PartyGravityPositioningController(
         this.lastDutySupportMembers = plan.DutySupportMemberCount;
         this.lastClusterMembers = plan.ClusterMemberCount;
         this.lastDistanceToCluster = plan.DistanceToCluster;
-        this.lastOverlay = plan.CreateOverlay(localPlayer.Position.Y, this.lastInjected);
+        this.lastOverlay = plan.CreateOverlay(player.Position.Y, this.lastInjected);
     }
 
     private bool CanEvaluate(out IBattleChara? player, out string reason)
@@ -214,9 +242,15 @@ internal sealed class PartyGravityPositioningController(
             return false;
         }
 
-        if (this.ShouldDeferForCasterUptime(player))
+        var isMagicRanged = JobRoles.GetRangeRole(player) == RangeRole.MagicRanged;
+        if (isMagicRanged && this.ShouldDeferForCasterUptime(player))
         {
             reason = "deferred for caster uptime";
+            return false;
+        }
+
+        if (!isMagicRanged && !this.BossModIdleWindowElapsed(out reason))
+        {
             return false;
         }
 
@@ -233,6 +267,31 @@ internal sealed class PartyGravityPositioningController(
         }
 
         return !this.AlreadyNeedsMovement(player);
+    }
+
+    private bool BossModIdleWindowElapsed(out string reason)
+    {
+        if (!this.receivedBossModMovementState)
+        {
+            reason = "waiting for BMR movement state";
+            return false;
+        }
+
+        if (this.lastBossModMoveImminent)
+        {
+            reason = "deferred while BMR movement active";
+            return false;
+        }
+
+        var now = DateTime.UtcNow;
+        if (now < this.partyGravityAllowedAfter)
+        {
+            reason = $"waiting for BMR movement idle ({Math.Max(0d, (this.partyGravityAllowedAfter - now).TotalSeconds):0.0}s)";
+            return false;
+        }
+
+        reason = string.Empty;
+        return true;
     }
 
     private bool HasUsableRangedTarget(IBattleChara player)

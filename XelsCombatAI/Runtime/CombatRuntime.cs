@@ -18,6 +18,8 @@ internal sealed class CombatRuntime(
     PartyGravityPositioningController partyGravityPositioningController,
     HealerAoePositioningController healerAoePositioningController,
     SurvivabilityZonePositioningController survivabilityZonePositioningController,
+    AggroSafetyController aggroSafetyController,
+    BossFrontalConeController bossFrontalConeController,
     ManualMovementInputDetector manualMovement,
     GapCloserController gapCloserController,
     EscapeGapCloserController escapeGapCloserController,
@@ -59,9 +61,11 @@ internal sealed class CombatRuntime(
             config.ManagePartyGravityPositioning ||
             config.KeepTrashTargetSelected ||
             config.ManageTargetUptime ||
+            config.ManageAggroSafetyMovement ||
             config.AvoidStandingInsideEnemies ||
             config.ManageDefensiveGroundZonePositioning ||
-            config.ManagePassageOfArmsPositioning)
+            config.ManagePassageOfArmsPositioning ||
+            config.AvoidBossFrontalCone)
         {
             aoeGoalHook.EnsureActive();
         }
@@ -137,6 +141,8 @@ internal sealed class CombatRuntime(
         partyGravityPositioningController.Reset();
         healerAoePositioningController.Reset();
         survivabilityZonePositioningController.Reset();
+        aggroSafetyController.Reset();
+        bossFrontalConeController.Reset();
         aoeGoalHook.Reset();
     }
 
@@ -173,7 +179,7 @@ internal sealed class CombatRuntime(
             target != null,
             target?.BaseId ?? 0,
             target?.GameObjectId ?? 0,
-            services.PartyList.Count,
+            player != null ? PartyAllyProvider.GetVisiblePartyAllies(services, player).Members.Count : services.PartyList.Count,
             this.GetDependencyWarning(),
             this.GetTrueNorthWarning(),
             positionalsController.RsrTrueNorthDisabled,
@@ -210,7 +216,6 @@ internal sealed class CombatRuntime(
             config.EscapeGapCloserBLM,
             config.EscapeGapCloserSGE,
             config.EscapeGapCloserPCT,
-            config.EscapeGapCloserBLU,
             bossModSafety.Status,
             bossModSafety.Diagnostics,
             aoeGoalHook.Status,
@@ -220,11 +225,13 @@ internal sealed class CombatRuntime(
             partyGravityPositioningController.Status,
             healerAoePositioningController.Status,
             survivabilityZonePositioningController.Status,
+            aggroSafetyController.Status,
             manualMovement.Status,
             this.AutomatedMovementSuppressed,
             gapCloserController.LastGapCloserSafety,
             escapeGapCloserController.LastEscapeGapCloserSafety,
-            presetController.InitializedPreset);
+            presetController.InitializedPreset,
+            bossFrontalConeController.LastReason);
     }
 
     public void DisposeRuntime()
