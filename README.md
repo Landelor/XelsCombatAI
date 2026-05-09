@@ -74,7 +74,7 @@ Open the settings window with `/xcai config` or through the Dalamud plugin list.
 
 ### Dashes tab
 
-**Dashes** — Optional dash automation for returning to a target or reaching safety faster. These options are off by default and can very likely kill you in some fights. Each dash type has its own minimum distance and job allow-list.
+**Dashes** — Optional dash automation for returning to a target or reaching safety faster. These options are off by default and can very likely kill you in some fights. Each dash type has its own minimum distance and job allow-list, including White Mage's Aetherial Shift.
 
 ### Troubleshooting tab
 

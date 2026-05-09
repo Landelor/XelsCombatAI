@@ -390,6 +390,7 @@ internal sealed class ConfigWindow : Window, IDisposable
             changed |= this.JobCheckbox("DNC", this.config.GapCloserDNC, this.defaultConfig.GapCloserDNC, v => this.config.GapCloserDNC = v, reengageDisabledTooltip);
             changed |= this.JobCheckbox("RPR", this.config.GapCloserRPR, this.defaultConfig.GapCloserRPR, v => this.config.GapCloserRPR = v, reengageDisabledTooltip);
             changed |= this.JobCheckbox("VPR", this.config.GapCloserVPR, this.defaultConfig.GapCloserVPR, v => this.config.GapCloserVPR = v, reengageDisabledTooltip);
+            changed |= this.JobCheckbox("WHM", this.config.GapCloserWHM, this.defaultConfig.GapCloserWHM, v => this.config.GapCloserWHM = v, reengageDisabledTooltip);
             ImGui.EndTable();
         }
         ImGui.Unindent(8f);
@@ -427,6 +428,7 @@ internal sealed class ConfigWindow : Window, IDisposable
             changed |= this.JobCheckbox("DNC", this.config.EscapeGapCloserDNC, this.defaultConfig.EscapeGapCloserDNC, v => this.config.EscapeGapCloserDNC = v, escapeDisabledTooltip);
             changed |= this.JobCheckbox("RPR", this.config.EscapeGapCloserRPR, this.defaultConfig.EscapeGapCloserRPR, v => this.config.EscapeGapCloserRPR = v, escapeDisabledTooltip);
             changed |= this.JobCheckbox("VPR", this.config.EscapeGapCloserVPR, this.defaultConfig.EscapeGapCloserVPR, v => this.config.EscapeGapCloserVPR = v, escapeDisabledTooltip);
+            changed |= this.JobCheckbox("WHM", this.config.EscapeGapCloserWHM, this.defaultConfig.EscapeGapCloserWHM, v => this.config.EscapeGapCloserWHM = v, escapeDisabledTooltip);
             changed |= this.JobCheckbox("BLM", this.config.EscapeGapCloserBLM, this.defaultConfig.EscapeGapCloserBLM, v => this.config.EscapeGapCloserBLM = v, escapeDisabledTooltip);
             changed |= this.JobCheckbox("SGE", this.config.EscapeGapCloserSGE, this.defaultConfig.EscapeGapCloserSGE, v => this.config.EscapeGapCloserSGE = v, escapeDisabledTooltip);
             changed |= this.JobCheckbox("PCT", this.config.EscapeGapCloserPCT, this.defaultConfig.EscapeGapCloserPCT, v => this.config.EscapeGapCloserPCT = v, escapeDisabledTooltip);

@@ -103,6 +103,7 @@ internal sealed class GapCloserController(Configuration config, DalamudServices 
             38 when config.GapCloserDNC => this.TryUseForwardGapCloser(ActionUse.DancerEnAvantActionId, distanceToHitbox),
             39 when config.GapCloserRPR => this.TryUseReaperRegress(ref this.lastGapCloserSafety, distanceToHitbox) || this.TryUseForwardGapCloser(ActionUse.ReaperHellsIngressActionId, distanceToHitbox),
             41 when config.GapCloserVPR => this.TryUseTargetGapCloser(ActionUse.ViperSlitherActionId, distanceToHitbox, target),
+            24 when config.GapCloserWHM => this.TryUseForwardGapCloser(ActionUse.WhiteMageAetherialShiftActionId, distanceToHitbox),
             _ => false
         };
     }

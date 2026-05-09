@@ -105,6 +105,7 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
             25 when config.EscapeGapCloserBLM => this.TryUseFriendlyEscapeGapCloser(ActionUse.BlackMageAetherialManipulationActionId, 25f, safeMovementDestination),
             29 or 30 when config.EscapeGapCloserNIN => this.TryUseLocationEscapeGapCloser(ActionUse.NinjaShukuchiActionId, CombatConstants.GapCloserMaxRange, "Shukuchi", safeMovementDestination),
             39 when config.EscapeGapCloserRPR => gapCloserController.TryUseReaperRegress(ref this.lastEscapeGapCloserSafety, safeMovementDestination: safeMovementDestination) || this.TryUseForwardEscapeGapCloser(ActionUse.ReaperHellsIngressActionId, safeMovementDestination),
+            24 when config.EscapeGapCloserWHM => this.TryUseForwardEscapeGapCloser(ActionUse.WhiteMageAetherialShiftActionId, safeMovementDestination),
             40 when config.EscapeGapCloserSGE => this.TryUseFriendlyEscapeGapCloser(ActionUse.SageIcarusActionId, 25f, safeMovementDestination),
             41 when config.EscapeGapCloserVPR => this.TryUseFriendlyEscapeGapCloser(ActionUse.ViperSlitherActionId, CombatConstants.GapCloserMaxRange, safeMovementDestination),
             38 when config.EscapeGapCloserDNC => this.TryUseForwardEscapeGapCloser(ActionUse.DancerEnAvantActionId, safeMovementDestination),

@@ -25,6 +25,7 @@ internal static class ActionUse
     public const uint ReaperRegressActionId = 24403;
     public const uint ReaperHellsgatePortalDataId = 0x4C3u;
     public const uint ViperSlitherActionId = 34646;
+    public const uint WhiteMageAetherialShiftActionId = 37008;
     public const uint BlackMageAetherialManipulationActionId = 155;
     public const uint SageIcarusActionId = 24295;
     public const uint PictomancerSmudgeActionId = 34684;

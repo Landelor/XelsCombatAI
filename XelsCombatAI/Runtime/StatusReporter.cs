@@ -63,11 +63,13 @@ internal static class StatusReporter
         Append(builder, "GapCloserDNC", status.GapCloserDNC);
         Append(builder, "GapCloserRPR", status.GapCloserRPR);
         Append(builder, "GapCloserVPR", status.GapCloserVPR);
+        Append(builder, "GapCloserWHM", status.GapCloserWHM);
         Append(builder, "EscapeGapCloserMNK", status.EscapeGapCloserMNK);
         Append(builder, "EscapeGapCloserNIN", status.EscapeGapCloserNIN);
         Append(builder, "EscapeGapCloserDNC", status.EscapeGapCloserDNC);
         Append(builder, "EscapeGapCloserRPR", status.EscapeGapCloserRPR);
         Append(builder, "EscapeGapCloserVPR", status.EscapeGapCloserVPR);
+        Append(builder, "EscapeGapCloserWHM", status.EscapeGapCloserWHM);
         Append(builder, "EscapeGapCloserBLM", status.EscapeGapCloserBLM);
         Append(builder, "EscapeGapCloserSGE", status.EscapeGapCloserSGE);
         Append(builder, "EscapeGapCloserPCT", status.EscapeGapCloserPCT);

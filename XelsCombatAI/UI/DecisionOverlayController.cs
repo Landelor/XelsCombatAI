@@ -548,10 +548,10 @@ internal sealed class DecisionOverlayController(
 
             this.DrawConfigSection("Dashes");
             this.DrawConfigRow("Dash back to target", config.UseGapCloser, config.Enabled && config.ManageMovement && config.UseGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Dash back to target")));
-            this.DrawConfigRow("Dash-back jobs", this.FormatJobAllowlist("PLD", config.GapCloserPLD, "WAR", config.GapCloserWAR, "DRK", config.GapCloserDRK, "GNB", config.GapCloserGNB, "MNK", config.GapCloserMNK, "DRG", config.GapCloserDRG, "NIN", config.GapCloserNIN, "SAM", config.GapCloserSAM, "DNC", config.GapCloserDNC, "RPR", config.GapCloserRPR, "VPR", config.GapCloserVPR), config.Enabled && config.ManageMovement && config.UseGapCloser && this.CurrentJobReengageGapCloserEnabled(), this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Dash back to target"), (this.CurrentJobReengageGapCloserEnabled(), "Current job dash-back allowlist")));
+            this.DrawConfigRow("Dash-back jobs", this.FormatJobAllowlist("PLD", config.GapCloserPLD, "WAR", config.GapCloserWAR, "DRK", config.GapCloserDRK, "GNB", config.GapCloserGNB, "MNK", config.GapCloserMNK, "DRG", config.GapCloserDRG, "NIN", config.GapCloserNIN, "SAM", config.GapCloserSAM, "DNC", config.GapCloserDNC, "RPR", config.GapCloserRPR, "VPR", config.GapCloserVPR, "WHM", config.GapCloserWHM), config.Enabled && config.ManageMovement && config.UseGapCloser && this.CurrentJobReengageGapCloserEnabled(), this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Dash back to target"), (this.CurrentJobReengageGapCloserEnabled(), "Current job dash-back allowlist")));
             this.DrawConfigRow("Minimum dash-back distance", config.MinimumReengageGapCloserDistance, config.Enabled && config.ManageMovement && config.UseGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Dash back to target")));
             this.DrawConfigRow("Dash to safety", config.UseEscapeGapCloser, config.Enabled && config.ManageMovement && config.UseEscapeGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseEscapeGapCloser, "Dash to safety")));
-            this.DrawConfigRow("Safety-dash jobs", this.FormatJobAllowlist("MNK", config.EscapeGapCloserMNK, "NIN", config.EscapeGapCloserNIN, "DNC", config.EscapeGapCloserDNC, "RPR", config.EscapeGapCloserRPR, "VPR", config.EscapeGapCloserVPR, "BLM", config.EscapeGapCloserBLM, "SGE", config.EscapeGapCloserSGE, "PCT", config.EscapeGapCloserPCT), config.Enabled && config.ManageMovement && config.UseEscapeGapCloser && this.CurrentJobEscapeGapCloserEnabled(), this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseEscapeGapCloser, "Dash to safety"), (this.CurrentJobEscapeGapCloserEnabled(), "Current job dash-to-safety allowlist")));
+            this.DrawConfigRow("Safety-dash jobs", this.FormatJobAllowlist("MNK", config.EscapeGapCloserMNK, "NIN", config.EscapeGapCloserNIN, "DNC", config.EscapeGapCloserDNC, "RPR", config.EscapeGapCloserRPR, "VPR", config.EscapeGapCloserVPR, "WHM", config.EscapeGapCloserWHM, "BLM", config.EscapeGapCloserBLM, "SGE", config.EscapeGapCloserSGE, "PCT", config.EscapeGapCloserPCT), config.Enabled && config.ManageMovement && config.UseEscapeGapCloser && this.CurrentJobEscapeGapCloserEnabled(), this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseEscapeGapCloser, "Dash to safety"), (this.CurrentJobEscapeGapCloserEnabled(), "Current job dash-to-safety allowlist")));
             this.DrawConfigRow("Minimum safety-dash distance", config.MinimumEscapeGapCloserDistance, config.Enabled && config.ManageMovement && config.UseEscapeGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseEscapeGapCloser, "Dash to safety")));
 
             ImGui.EndTable();
@@ -614,6 +614,7 @@ internal sealed class DecisionOverlayController(
             38      => config.GapCloserDNC,
             39      => config.GapCloserRPR,
             41      => config.GapCloserVPR,
+            24      => config.GapCloserWHM,
             _       => false
         };
     }
@@ -628,6 +629,7 @@ internal sealed class DecisionOverlayController(
             29 or 30 => config.EscapeGapCloserNIN,
             38      => config.EscapeGapCloserDNC,
             39      => config.EscapeGapCloserRPR,
+            24      => config.EscapeGapCloserWHM,
             40      => config.EscapeGapCloserSGE,
             41      => config.EscapeGapCloserVPR,
             42      => config.EscapeGapCloserPCT,
