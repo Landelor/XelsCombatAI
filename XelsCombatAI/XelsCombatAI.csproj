@@ -35,8 +35,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\AutoDuty\ECommons\ECommons\ECommons.csproj" Condition="'$(CI)' != 'true'" AdditionalProperties="ProduceReferenceAssembly=true" />
-    <ProjectReference Include="..\ECommons\ECommons\ECommons.csproj" Condition="'$(CI)' == 'true'" AdditionalProperties="ProduceReferenceAssembly=true" />
+    <ProjectReference Include="..\..\AutoDuty\ECommons\ECommons\ECommons.csproj" Condition="'$(CI)' != 'true'" />
+    <ProjectReference Include="..\ECommons\ECommons\ECommons.csproj" Condition="'$(CI)' == 'true'" />
     <Reference Include="Dalamud.Common">
       <HintPath>$(DalamudLibPath)Dalamud.Common.dll</HintPath>
     </Reference>

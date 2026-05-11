@@ -167,6 +167,7 @@ static void SchemaV2Rejected()
 static void ConfigurationLoggingDefaultsAndReset()
 {
     var config = new Configuration();
+    var currentVersion = config.Version;
     AssertFalse(config.FightReviewLoggingEnabled, "default logging disabled");
 
     config.FightReviewLoggingEnabled = true;
@@ -176,7 +177,7 @@ static void ConfigurationLoggingDefaultsAndReset()
     config.Version = 16;
     config.FightReviewLoggingEnabled = true;
     config.Migrate();
-    AssertEqual(25, config.Version, "migrated version");
+    AssertEqual(currentVersion, config.Version, "migrated version");
     AssertFalse(config.FightReviewLoggingEnabled, "migration disables logging");
     AssertTrue(config.ManageSocialTurning, "migration enables social turning");
 }
@@ -184,6 +185,7 @@ static void ConfigurationLoggingDefaultsAndReset()
 static void ConfigurationTankLeadDefaultsAndReset()
 {
     var config = new Configuration();
+    var currentVersion = config.Version;
     AssertTrue(config.LeadTrashPullsWithTank, "default tank lead enabled");
 
     config.LeadTrashPullsWithTank = false;
@@ -194,10 +196,10 @@ static void ConfigurationTankLeadDefaultsAndReset()
     config.ResetAll();
     AssertTrue(config.LeadTrashPullsWithTank, "full reset enables tank lead");
 
-    config.Version = 17;
+    config.Version = 16;
     config.LeadTrashPullsWithTank = false;
     config.Migrate();
-    AssertEqual(25, config.Version, "tank lead migrated version");
+    AssertEqual(currentVersion, config.Version, "tank lead migrated version");
     AssertTrue(config.LeadTrashPullsWithTank, "migration enables tank lead");
 }
 
