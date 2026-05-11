@@ -33,20 +33,20 @@ internal sealed class JobRangeProvider(DalamudServices services) : IDisposable
             2 or 20 or 4 or 22 or 29 or 30 or 34 or 39 or 41 => (2.6f, 2.6f),
             // Physical Ranged
             5 or 23 => (25f, 8f),   // ARC / BRD — Rain of Death
-            31      => (25f, 12f),  // MCH — Auto Crossbow / Scattergun
-            38      => (25f, 5f),   // DNC — Windmill / Bladeshower
+            31 => (25f, 12f),  // MCH — Auto Crossbow / Scattergun
+            38 => (25f, 5f),   // DNC — Windmill / Bladeshower
             // Healers
             6 or 24 => (25f, 8f),   // CNJ / WHM — Holy
-            28      => (25f, 5f),   // SCH — Art of War
-            33      => (25f, 25f),   // AST — Gravity
-            40      => (25f, 5f),   // SGE — Dyskrasia
+            28 => (25f, 5f),   // SCH — Art of War
+            33 => (25f, 25f),   // AST — Gravity
+            40 => (25f, 5f),   // SGE — Dyskrasia
             // Magic Ranged — AoE at 25y except RDM
             7 or 25 => (25f, 25f),  // THM / BLM
             26 or 27 => (25f, 25f), // ACN / SMN
-            35      => (25f, 8f),   // RDM — Veraero II / Impact
-            42      => (25f, 25f),  // PCT
+            35 => (25f, 8f),   // RDM — Veraero II / Impact
+            42 => (25f, 25f),  // PCT
             // Default: melee
-            _       => (2.6f, 2.6f),
+            _ => (2.6f, 2.6f),
         };
     }
 

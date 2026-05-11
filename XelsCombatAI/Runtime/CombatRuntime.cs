@@ -1,5 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
 using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.ClientState.Objects.Enums;
+using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Plugin.Services;
 using XelsCombatAI.Game;
 
@@ -19,21 +24,28 @@ internal sealed class CombatRuntime(
     SurvivabilityZonePositioningController survivabilityZonePositioningController,
     AggroSafetyController aggroSafetyController,
     ArenaEdgePositioningController arenaEdgePositioningController,
+    RedMageMeleeComboController redMageMeleeComboController,
     CombatLogWriter combatLogWriter,
     ManualMovementInputDetector manualMovement,
+    MobilityDecisionEvaluator mobilityDecisionEvaluator,
     GapCloserController gapCloserController,
     EscapeGapCloserController escapeGapCloserController,
+    DashStyleController dashStyleController,
+    FacingController facingController,
     JobRangeProvider jobRangeProvider,
     Action saveConfig,
     Action updateDtr,
     Action<string> print)
 {
-    private static readonly TimeSpan ManualMovementResumeDelay = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan ManualMovementResumeDelay = TimeSpan.FromMilliseconds(350);
+    private const int MaxReviewActorSnapshots = 48;
+    private const float MaxReviewActorDistance = 60f;
 
     private bool wasDead;
     private bool wasInCombat;
     private DateTime nextRuntimeUpdate = DateTime.MinValue;
     private DateTime manualMovementSuppressUntil = DateTime.MinValue;
+    private DateTime nextRuntimeErrorLog = DateTime.MinValue;
     private string? lastMissingDependencies;
     private readonly CombatHistory combatHistory = new();
     private bool combatHistorySaved;
@@ -41,6 +53,24 @@ internal sealed class CombatRuntime(
     public bool AutomatedMovementSuppressed => DateTime.UtcNow < this.manualMovementSuppressUntil;
 
     public void OnFrameworkUpdate(IFramework framework)
+    {
+        try
+        {
+            this.OnFrameworkUpdateCore(framework);
+        }
+        catch (Exception ex)
+        {
+            if (DateTime.UtcNow >= this.nextRuntimeErrorLog)
+            {
+                services.Log.Warning(ex, "XCAI runtime update failed; integrations will be retried after plugin-manager churn settles.");
+                this.nextRuntimeErrorLog = DateTime.UtcNow.AddSeconds(10);
+            }
+
+            this.ResetRuntimeCache();
+        }
+    }
+
+    private void OnFrameworkUpdateCore(IFramework framework)
     {
         _ = framework;
         jobRangeProvider.Tick();
@@ -110,6 +140,7 @@ internal sealed class CombatRuntime(
             return;
         }
         this.nextRuntimeUpdate = now.AddMilliseconds(250);
+        redMageMeleeComboController.Tick();
 
         if (!presetController.InitializedPreset && !presetController.Initialize())
         {
@@ -118,12 +149,21 @@ internal sealed class CombatRuntime(
 
         var suppressAutomatedMovement = this.ShouldSuppressAutomatedMovement(now);
         presetController.ApplyStrategies(suppressAutomatedMovement);
-        this.combatHistory.Record(this.GetStatus(), aoePackPositioningController.Status);
+        facingController.Update(now, suppressAutomatedMovement, aoeGoalHook.MovementDiagnostics);
+        if (config.FightReviewLoggingEnabled)
+        {
+            this.combatHistory.Record(this.GetStatus(), aoePackPositioningController.Status, this.BuildActorSnapshots());
+        }
+        else if (this.combatHistory.HasFrames)
+        {
+            this.combatHistory.Reset();
+            this.combatHistorySaved = false;
+        }
     }
 
     public bool SetEnabled(bool enabled, bool warn = true)
     {
-        if (enabled && !dependencyChecker.DependenciesAvailable(out var missing))
+        if (enabled && !dependencyChecker.DependenciesAvailable(out var missing, forceRefresh: true))
         {
             config.Enabled = true;
             this.ResetRuntimeCache();
@@ -157,10 +197,12 @@ internal sealed class CombatRuntime(
         healerAoePositioningController.Reset();
         survivabilityZonePositioningController.Reset();
         aggroSafetyController.Reset();
+        redMageMeleeComboController.Reset();
         aoeGoalHook.Reset();
+        mobilityDecisionEvaluator.Reset();
+        dashStyleController.Reset();
+        facingController.Reset();
     }
-
-    public string GetCombatHistory() => this.combatHistory.Build(config);
 
     public void EnsureRsrTrueNorthDisabled()
     {
@@ -188,6 +230,8 @@ internal sealed class CombatRuntime(
             services.Condition[ConditionFlag.InCombat],
             services.Condition[ConditionFlag.Unconscious],
             player?.ClassJob.RowId ?? 0,
+            services.ClientState.TerritoryType,
+            services.DutyState.ContentFinderCondition.RowId,
             player?.Position,
             player?.Rotation ?? 0f,
             jobRangeProvider.PackAoeRange,
@@ -218,21 +262,20 @@ internal sealed class CombatRuntime(
             config.GapCloserGNB,
             config.GapCloserMNK,
             config.GapCloserDRG,
+            config.GapCloserBRD,
             config.GapCloserNIN,
             config.GapCloserSAM,
             config.GapCloserDNC,
             config.GapCloserRPR,
             config.GapCloserVPR,
             config.GapCloserWHM,
-            config.EscapeGapCloserMNK,
-            config.EscapeGapCloserNIN,
-            config.EscapeGapCloserDNC,
-            config.EscapeGapCloserRPR,
-            config.EscapeGapCloserVPR,
-            config.EscapeGapCloserWHM,
-            config.EscapeGapCloserBLM,
-            config.EscapeGapCloserSGE,
-            config.EscapeGapCloserPCT,
+            config.GapCloserBLM,
+            config.GapCloserRDM,
+            config.GapCloserSGE,
+            config.GapCloserPCT,
+            dashStyleController.ReengageStyleActive || dashStyleController.EscapeStyleActive,
+            dashStyleController.LastStyleReason,
+            config.UseGapCloser && config.CombatStyle != CombatStyle.Normal,
             bossModSafety.Status,
             bossModSafety.Diagnostics,
             aoeGoalHook.Status,
@@ -240,13 +283,17 @@ internal sealed class CombatRuntime(
             aoeGoalHook.LastGoalSources,
             aoeGoalHook.Diagnostics,
             aoeGoalHook.MovementDiagnostics,
+            aoeGoalHook.PlannerDiagnostics,
             aoePackPositioningController.Status,
             passageOfArmsPositioningController.Status,
             healerAoePositioningController.Status, // HealerCoveragePositioning
             survivabilityZonePositioningController.Status,
             aggroSafetyController.Status,
+            redMageMeleeComboController.Status,
             manualMovement.Status,
             this.AutomatedMovementSuppressed,
+            facingController.Status,
+            mobilityDecisionEvaluator.LastDecision,
             gapCloserController.LastGapCloserSafety,
             escapeGapCloserController.LastEscapeGapCloserSafety,
             escapeGapCloserController.LastSafeEscapeDestination,
@@ -268,6 +315,7 @@ internal sealed class CombatRuntime(
 
         aoeGoalHook.Dispose();
         survivabilityZonePositioningController.Dispose();
+        redMageMeleeComboController.Dispose();
     }
 
     private void HandleOutOfCombat()
@@ -365,11 +413,20 @@ internal sealed class CombatRuntime(
                config.ManageHealerCoverageZone ||
                config.ManageDefensiveGroundZonePositioning ||
                config.ManagePassageOfArmsPositioning ||
-               config.AvoidArenaEdge;
+               config.AvoidArenaEdge ||
+               config.ManageSocialTurning ||
+               config.UseRedMageMeleeComboMovement;
     }
 
     private void FlushCombatHistory(string reason)
     {
+        if (!config.FightReviewLoggingEnabled)
+        {
+            this.combatHistory.Reset();
+            this.combatHistorySaved = false;
+            return;
+        }
+
         if (this.combatHistorySaved)
         {
             return;
@@ -377,5 +434,88 @@ internal sealed class CombatRuntime(
 
         this.combatHistorySaved = true;
         combatLogWriter.WriteFight(this.combatHistory, config, reason);
+    }
+
+    private IReadOnlyList<CombatHistoryActorSnapshot> BuildActorSnapshots()
+    {
+        var player = services.ObjectTable.LocalPlayer;
+        if (player == null)
+        {
+            return [];
+        }
+
+        var partyEntityIds = services.PartyList
+            .Select(member => member.EntityId)
+            .Where(id => id != 0)
+            .ToHashSet();
+        var targetObjectId = services.TargetManager.Target?.GameObjectId ?? 0;
+        var playerPosition = player.Position;
+
+        return services.ObjectTable
+            .OfType<IBattleChara>()
+            .Where(actor => actor.IsValid())
+            .Select(actor => BuildActorSnapshot(actor, player, partyEntityIds, targetObjectId, playerPosition))
+            .Where(snapshot => snapshot != null)
+            .Select(snapshot => snapshot!)
+            .OrderBy(snapshot => SnapshotRelationPriority(snapshot.Relation))
+            .ThenBy(snapshot => snapshot.DistanceToPlayer)
+            .ThenBy(snapshot => snapshot.GameObjectId)
+            .Take(MaxReviewActorSnapshots)
+            .ToArray();
+    }
+
+    private static CombatHistoryActorSnapshot? BuildActorSnapshot(IBattleChara actor, IGameObject player, HashSet<uint> partyEntityIds, ulong targetObjectId, Vector3 playerPosition)
+    {
+        var distance = Vector3.Distance(playerPosition, actor.Position);
+        var isPlayer = actor.GameObjectId == player.GameObjectId;
+        var isParty = !isPlayer && partyEntityIds.Contains(actor.EntityId);
+        var isCurrentTarget = actor.GameObjectId == targetObjectId;
+        var isTargetingPlayer = actor.TargetObjectId == player.GameObjectId;
+        if (!isPlayer && !isParty && !isCurrentTarget && !isTargetingPlayer && distance > MaxReviewActorDistance)
+        {
+            return null;
+        }
+
+        var relation = isPlayer
+            ? "player"
+            : isParty
+                ? "party"
+                : isCurrentTarget
+                    ? "target"
+                    : isTargetingPlayer
+                        ? "targeting-player"
+                        : "nearby";
+
+        return new CombatHistoryActorSnapshot(
+            relation,
+            actor.GameObjectId,
+            actor.EntityId,
+            actor.BaseId,
+            actor.ObjectKind.ToString(),
+            actor.SubKind,
+            actor.ClassJob.RowId,
+            actor.Level,
+            actor.Position,
+            actor.Rotation,
+            actor.HitboxRadius,
+            actor.IsTargetable,
+            actor.IsDead,
+            actor.StatusFlags.HasFlag(StatusFlags.InCombat),
+            actor.CurrentHp,
+            actor.MaxHp,
+            actor.TargetObjectId,
+            distance);
+    }
+
+    private static int SnapshotRelationPriority(string relation)
+    {
+        return relation switch
+        {
+            "player" => 0,
+            "party" => 1,
+            "target" => 2,
+            "targeting-player" => 3,
+            _ => 4
+        };
     }
 }

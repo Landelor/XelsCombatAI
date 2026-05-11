@@ -12,35 +12,53 @@ internal sealed class DecisionOverlayController(
     Configuration config,
     DalamudServices services,
     AoePackPositioningController aoePackPositioningController,
+    Func<bool> currentTargetHasBossModule,
     PassageOfArmsPositioningController passageOfArmsPositioningController,
     HealerAoePositioningController healerAoePositioningController,
     SurvivabilityZonePositioningController survivabilityZonePositioningController,
     BossModReflectionSafety bossModSafety,
+    MobilityDecisionEvaluator mobilityDecisionEvaluator,
     GapCloserController gapCloserController,
     EscapeGapCloserController escapeGapCloserController,
-    RotationSolverActionReflection rotationSolverActions)
+    RedMageMeleeComboController redMageMeleeComboController,
+    RotationSolverActionReflection rotationSolverActions,
+    Func<MovementPlannerDiagnostics> movementPlannerDiagnostics)
 {
 
     private DecisionOverlayState gapCloserDisplayedState = DecisionOverlayState.Suppressed;
     private DecisionOverlayState gapCloserPendingState = DecisionOverlayState.Suppressed;
     private DateTime gapCloserPendingStateAt = DateTime.MinValue;
+    private DateTime nextDrawErrorLog = DateTime.MinValue;
     private static readonly TimeSpan GapCloserStateDebounce = TimeSpan.FromMilliseconds(400);
 
     private sealed record OverlayLabel(DecisionOverlayState State, DecisionOverlaySource Source, string Text);
 
     public void Draw()
     {
-        if (!config.ShowDecisionOverlay)
+        try
         {
-            return;
-        }
+            if (!config.ShowDecisionOverlay)
+            {
+                return;
+            }
 
-        if (config.ShowDecisionOverlayHud)
+            if (config.ShowDecisionOverlayHud)
+            {
+                this.DrawConfigHud();
+            }
+
+            this.DrawWorldDebug();
+        }
+        catch (Exception ex)
         {
-            this.DrawConfigHud();
-        }
+            if (DateTime.UtcNow < this.nextDrawErrorLog)
+            {
+                return;
+            }
 
-        this.DrawWorldDebug();
+            services.Log.Verbose(ex, "Decision overlay draw failed.");
+            this.nextDrawErrorLog = DateTime.UtcNow.AddSeconds(10);
+        }
     }
 
     private void DrawWorldDebug()
@@ -52,10 +70,13 @@ internal sealed class DecisionOverlayController(
         }
 
         var drawList = ImGui.GetBackgroundDrawList();
-        var snapshots = this.BuildSnapshots(player)
-            .Concat(this.BuildConfigDebugSnapshots(player))
-            .OrderBy(snapshot => snapshot.Priority)
-            .ToArray();
+        var snapshotSource = this.BuildSnapshots(player);
+        if (config.ShowDecisionOverlayHud)
+        {
+            snapshotSource = snapshotSource.Concat(this.BuildConfigDebugSnapshots(player));
+        }
+
+        var snapshots = snapshotSource.OrderBy(snapshot => snapshot.Priority).ToArray();
         var labelGroups = new Dictionary<(int, int), (Vector3 Anchor, List<OverlayLabel> Labels)>();
         foreach (var snapshot in snapshots)
         {
@@ -87,14 +108,28 @@ internal sealed class DecisionOverlayController(
     {
         var target = services.TargetManager.Target as IBattleChara;
 
+        var redMage = redMageMeleeComboController.Status;
+        if (redMage.Enabled && redMage.CandidateDestination.HasValue)
+        {
+            yield return new(
+                DecisionOverlaySource.RedMageMeleeCombo,
+                DecisionOverlayState.Candidate,
+                $"RDM: {redMage.Mode}",
+                redMage.LastReason,
+                18,
+                [],
+                [new(DecisionOverlayState.Candidate, player.Position, redMage.CandidateDestination.Value, "RDM combo range")],
+                [new(DecisionOverlayState.Candidate, redMage.CandidateDestination.Value, 0.35f, "RDM")]);
+        }
+
 
         if (rotationSolverActions.TryGetUpcomingGcd(requirePreview: false, out var nextAction, out _))
         {
             var shapeKind = nextAction.Shape switch
             {
-                RsrAoeShape.Cone         => DecisionOverlayShapeKind.Cone,
+                RsrAoeShape.Cone => DecisionOverlayShapeKind.Cone,
                 RsrAoeShape.StraightLine => DecisionOverlayShapeKind.Rectangle,
-                _                        => DecisionOverlayShapeKind.Circle
+                _ => DecisionOverlayShapeKind.Circle
             };
             var actionOrigin = this.ResolveNextActionOrigin(player, nextAction);
             var rotation = MathF.Atan2(
@@ -161,9 +196,9 @@ internal sealed class DecisionOverlayController(
                 var rotation = MathF.Atan2(aoe.PrimaryTarget.X - aoe.Candidate.X, aoe.PrimaryTarget.Z - aoe.Candidate.Z);
                 var shapeKind = aoe.Shape switch
                 {
-                    nameof(RsrAoeShape.Cone)         => DecisionOverlayShapeKind.Cone,
+                    nameof(RsrAoeShape.Cone) => DecisionOverlayShapeKind.Cone,
                     nameof(RsrAoeShape.StraightLine) => DecisionOverlayShapeKind.Rectangle,
-                    _                                => DecisionOverlayShapeKind.Circle
+                    _ => DecisionOverlayShapeKind.Circle
                 };
                 var label = aoePackPositioningController.RsrHenchedActive
                     ? $"Move for AoE hits: {aoe.CurrentHits}->{aoe.BestHits} +RSR"
@@ -191,9 +226,9 @@ internal sealed class DecisionOverlayController(
             var rotation = MathF.Atan2(suggestion.PrimaryTarget.X - suggestion.Candidate.X, suggestion.PrimaryTarget.Z - suggestion.Candidate.Z);
             var shapeKind = suggestion.Shape switch
             {
-                nameof(RsrAoeShape.Cone)         => DecisionOverlayShapeKind.Cone,
+                nameof(RsrAoeShape.Cone) => DecisionOverlayShapeKind.Cone,
                 nameof(RsrAoeShape.StraightLine) => DecisionOverlayShapeKind.Rectangle,
-                _                                => DecisionOverlayShapeKind.Circle
+                _ => DecisionOverlayShapeKind.Circle
             };
             yield return new(
                 DecisionOverlaySource.AoE,
@@ -270,7 +305,7 @@ internal sealed class DecisionOverlayController(
             yield return gapCloserSnapshot;
         }
 
-        if (config.UseEscapeGapCloser)
+        if (config.UseGapCloser)
         {
             var escapeDest = escapeGapCloserController.LastSafeEscapeDestination;
             if (escapeDest.HasValue)
@@ -278,7 +313,7 @@ internal sealed class DecisionOverlayController(
                 yield return new(
                     DecisionOverlaySource.EscapeLanding,
                     DecisionOverlayState.Future,
-                    "Dash to safety",
+                    "Gap closer safety",
                     "safe landing preview",
                     55,
                     [],
@@ -287,17 +322,41 @@ internal sealed class DecisionOverlayController(
             }
         }
 
+        var planner = movementPlannerDiagnostics();
+        if (planner.Destination.HasValue)
+        {
+            var plannerLabel = BuildPlannerOverlayLabel(planner);
+            var plannerReason = BuildPlannerOverlayReason(planner);
+            var lineLabel = BuildPlannerLineLabel(planner);
+            var destinationLabel = BuildPlannerDestinationLabel(planner);
+            var markers = planner.TopCandidates
+                .Where(candidate => !candidate.Accepted)
+                .Take(3)
+                .Select(candidate => new DecisionOverlayMarker(DecisionOverlayState.Rejected, candidate.Destination, 0.25f, NormalizePlannerRejectionReason(candidate.RejectionReason)))
+                .Concat([new DecisionOverlayMarker(DecisionOverlayState.Active, planner.Destination.Value, 0.35f, destinationLabel)])
+                .ToArray();
+            yield return new(
+                DecisionOverlaySource.FinalMovement,
+                DecisionOverlayState.Active,
+                plannerLabel,
+                plannerReason,
+                95,
+                [],
+                [new(DecisionOverlayState.Active, player.Position, planner.Destination.Value, lineLabel)],
+                markers);
+        }
+
         if (bossModSafety.TryGetSafeMovementIntent(player.Position, out var destination, out _))
         {
             yield return new(
                 DecisionOverlaySource.FinalMovement,
                 DecisionOverlayState.Active,
-                "Moving to safe spot",
-                "BossMod movement intent",
+                "BMR mechanic movement",
+                "encounter safety destination",
                 100,
                 [],
-                [new(DecisionOverlayState.Active, player.Position, destination, "current move")],
-                [new(DecisionOverlayState.Active, destination, 0.35f, "destination")]);
+                [new(DecisionOverlayState.Active, player.Position, destination, "BMR safe spot")],
+                [new(DecisionOverlayState.Active, destination, 0.35f, "safe spot")]);
         }
     }
 
@@ -342,7 +401,7 @@ internal sealed class DecisionOverlayController(
             }
 
             var insideEnemiesEnabled = config.Enabled && config.ManageMovement && config.AvoidStandingInsideEnemies
-                && aoePackPositioningController.CurrentTargetHasBossModule;
+                && currentTargetHasBossModule();
             var insideEnemiesState = insideEnemiesEnabled ? DecisionOverlayState.Future : DecisionOverlayState.Suppressed;
             var insideEnemiesReason = this.DisabledReason(
                 (config.Enabled, "Enabled"),
@@ -354,7 +413,7 @@ internal sealed class DecisionOverlayController(
                 insideEnemiesEnabled ? "Avoid boss center" : "Boss center avoidance disabled",
                 insideEnemiesReason,
                 17,
-                [new(DecisionOverlayShapeKind.Circle, insideEnemiesState, target.Position, AoePackPositioningController.BossHitboxAvoidanceRadius(target.HitboxRadius), 0f, 0f, 0f, "avoid center")],
+                [new(DecisionOverlayShapeKind.Circle, insideEnemiesState, target.Position, BossCenterAvoidanceController.AvoidanceRadius(target.HitboxRadius), 0f, 0f, 0f, "avoid center")],
                 [],
                 [new(insideEnemiesState, target.Position, 0.35f, "Boss")]);
 
@@ -383,19 +442,19 @@ internal sealed class DecisionOverlayController(
                 [new(state, player.Position, safeDestination, "move to safe spot")],
                 [new(state, safeDestination, 0.35f, "safe spot")]);
 
-            if (config.UseEscapeGapCloser || !movementEnabled)
+            if (config.UseGapCloser || !movementEnabled)
             {
-                var escapeEnabled = movementEnabled && config.UseEscapeGapCloser && this.CurrentJobEscapeGapCloserEnabled();
+                var escapeEnabled = movementEnabled && config.UseGapCloser && this.CurrentJobGapCloserEnabled();
                 var escapeState = escapeEnabled ? DecisionOverlayState.Future : DecisionOverlayState.Suppressed;
                 var escapeReason = this.DisabledReason(
                     (config.Enabled, "Enabled"),
                     (config.ManageMovement, "Automate movement"),
-                    (config.UseEscapeGapCloser, "Dash to safety"),
-                    (this.CurrentJobEscapeGapCloserEnabled(), "Current job dash-to-safety allowlist"));
+                    (config.UseGapCloser, "Gap closers"),
+                    (this.CurrentJobGapCloserEnabled(), "Current job gap closer allowlist"));
                 yield return new(
                     DecisionOverlaySource.EscapeLanding,
                     escapeState,
-                    $"Escape dash {config.MinimumEscapeGapCloserDistance:0}y",
+                    $"Safety gap closer {config.MinimumGapCloserDistance:0}y",
                     escapeReason,
                     54,
                     [],
@@ -441,19 +500,19 @@ internal sealed class DecisionOverlayController(
     private IEnumerable<DecisionOverlaySnapshot> BuildGapCloserDebugSnapshots(IBattleChara player, IBattleChara target)
     {
         var movementEnabled = config.Enabled && config.ManageMovement;
-        var reengageEnabled = movementEnabled && config.UseGapCloser && this.CurrentJobReengageGapCloserEnabled();
+        var reengageEnabled = movementEnabled && config.UseGapCloser && this.CurrentJobGapCloserEnabled();
         var state = reengageEnabled ? DecisionOverlayState.Future : DecisionOverlayState.Suppressed;
         var distanceToHitbox = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, target.Position, target.HitboxRadius);
         var reason = this.DisabledReason(
             (config.Enabled, "Enabled"),
             (config.ManageMovement, "Automate movement"),
-            (config.UseGapCloser, "Dash back to target"),
-            (this.CurrentJobReengageGapCloserEnabled(), "Current job dash-back allowlist"));
+            (config.UseGapCloser, "Gap closers"),
+            (this.CurrentJobGapCloserEnabled(), "Current job gap closer allowlist"));
 
         yield return new(
             DecisionOverlaySource.GapCloser,
             state,
-            $"Dash back {distanceToHitbox:0.#}y / min {config.MinimumReengageGapCloserDistance:0}y",
+            $"Reengage gap closer {distanceToHitbox:0.#}y / min {config.MinimumGapCloserDistance:0}y",
             reason,
             51,
             [],
@@ -506,6 +565,7 @@ internal sealed class DecisionOverlayController(
 
             this.DrawConfigSection("AoE & Trash");
             this.DrawConfigRow("Move for better AoE hits", config.ManageAoePackPositioning, config.Enabled && config.ManageMovement && config.ManageAoePackPositioning, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageAoePackPositioning, "Move for better AoE hits")));
+            this.DrawConfigRow("Lead trash pulls with tank", config.LeadTrashPullsWithTank, config.Enabled && config.ManageMovement && config.ManageTargetUptime && config.LeadTrashPullsWithTank, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageTargetUptime, "Close in to attack range"), (config.LeadTrashPullsWithTank, "Lead trash pulls with tank")));
             this.DrawConfigRow("Pick better AoE target", config.PickBetterAoeTarget, config.Enabled && config.PickBetterAoeTarget, this.DisabledReason((config.Enabled, "Enabled"), (config.PickBetterAoeTarget, "Pick better AoE target")));
             this.DrawConfigRow("Keep a trash target selected", config.KeepTrashTargetSelected, config.Enabled && config.KeepTrashTargetSelected, this.DisabledReason((config.Enabled, "Enabled"), (config.KeepTrashTargetSelected, "Keep a trash target selected")));
             this.DrawConfigRow("Healer coverage zone", config.ManageHealerCoverageZone, config.Enabled && config.ManageMovement && config.ManageHealerCoverageZone, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageHealerCoverageZone, "Healer coverage zone")));
@@ -514,19 +574,20 @@ internal sealed class DecisionOverlayController(
             this.DrawConfigRow("Do positionals", config.ManagePositionals, config.Enabled && config.ManagePositionals, this.DisabledReason((config.Enabled, "Enabled"), (config.ManagePositionals, "Do positionals")));
             this.DrawConfigRow("Use True North", config.ManageTrueNorth, config.Enabled && config.ManagePositionals && config.ManageTrueNorth, this.DisabledReason((config.Enabled, "Enabled"), (config.ManagePositionals, "Do positionals"), (config.ManageTrueNorth, "Use True North")));
 
-            this.DrawConfigSection("Black Mage");
+            this.DrawConfigSection("Job Specific");
+            this.DrawConfigRow("RDM melee combo movement", config.UseRedMageMeleeComboMovement, config.Enabled && config.ManageMovement && config.UseRedMageMeleeComboMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseRedMageMeleeComboMovement, "Move for melee combo")));
+            this.DrawConfigRow("RDM combo state", redMageMeleeComboController.Status.Mode, config.Enabled && config.ManageMovement && config.UseRedMageMeleeComboMovement && redMageMeleeComboController.Status.Enabled, redMageMeleeComboController.Status.LastReason);
             this.DrawConfigRow("Stay in Ley Lines", config.ManageLeylines, config.Enabled && config.ManageMovement && config.ManageLeylines, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageLeylines, "Stay in Ley Lines")));
             this.DrawConfigRow("Use Between the Lines", config.UseBetweenTheLines, config.Enabled && config.ManageMovement && config.ManageLeylines && config.UseBetweenTheLines, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageLeylines, "Stay in Ley Lines"), (config.UseBetweenTheLines, "Use Between the Lines")));
             this.DrawConfigRow("Use Retrace", config.UseRetrace, config.Enabled && config.ManageMovement && config.ManageLeylines && config.UseRetrace, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageLeylines, "Stay in Ley Lines"), (config.UseRetrace, "Use Retrace")));
             this.DrawConfigRow("Walk back to Ley Lines", config.ReturnToLeylines, config.Enabled && config.ManageMovement && config.ManageLeylines && config.ReturnToLeylines, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageLeylines, "Stay in Ley Lines"), (config.ReturnToLeylines, "Walk back to Ley Lines")));
 
             this.DrawConfigSection("Dashes");
-            this.DrawConfigRow("Dash back to target", config.UseGapCloser, config.Enabled && config.ManageMovement && config.UseGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Dash back to target")));
-            this.DrawConfigRow("Dash-back jobs", this.FormatJobAllowlist("PLD", config.GapCloserPLD, "WAR", config.GapCloserWAR, "DRK", config.GapCloserDRK, "GNB", config.GapCloserGNB, "MNK", config.GapCloserMNK, "DRG", config.GapCloserDRG, "NIN", config.GapCloserNIN, "SAM", config.GapCloserSAM, "DNC", config.GapCloserDNC, "RPR", config.GapCloserRPR, "VPR", config.GapCloserVPR, "WHM", config.GapCloserWHM), config.Enabled && config.ManageMovement && config.UseGapCloser && this.CurrentJobReengageGapCloserEnabled(), this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Dash back to target"), (this.CurrentJobReengageGapCloserEnabled(), "Current job dash-back allowlist")));
-            this.DrawConfigRow("Minimum dash-back distance", config.MinimumReengageGapCloserDistance, config.Enabled && config.ManageMovement && config.UseGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Dash back to target")));
-            this.DrawConfigRow("Dash to safety", config.UseEscapeGapCloser, config.Enabled && config.ManageMovement && config.UseEscapeGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseEscapeGapCloser, "Dash to safety")));
-            this.DrawConfigRow("Safety-dash jobs", this.FormatJobAllowlist("MNK", config.EscapeGapCloserMNK, "DRG", config.EscapeGapCloserDRG, "NIN", config.EscapeGapCloserNIN, "SAM", config.EscapeGapCloserSAM, "BRD", config.EscapeGapCloserBRD, "DNC", config.EscapeGapCloserDNC, "RPR", config.EscapeGapCloserRPR, "VPR", config.EscapeGapCloserVPR, "WHM", config.EscapeGapCloserWHM, "BLM", config.EscapeGapCloserBLM, "RDM", config.EscapeGapCloserRDM, "SGE", config.EscapeGapCloserSGE, "PCT", config.EscapeGapCloserPCT), config.Enabled && config.ManageMovement && config.UseEscapeGapCloser && this.CurrentJobEscapeGapCloserEnabled(), this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseEscapeGapCloser, "Dash to safety"), (this.CurrentJobEscapeGapCloserEnabled(), "Current job dash-to-safety allowlist")));
-            this.DrawConfigRow("Minimum safety-dash distance", config.MinimumEscapeGapCloserDistance, config.Enabled && config.ManageMovement && config.UseEscapeGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseEscapeGapCloser, "Dash to safety")));
+            this.DrawConfigRow("Gap closers", config.UseGapCloser, config.Enabled && config.ManageMovement && config.UseGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers")));
+            this.DrawConfigRow("Gap closer jobs", this.FormatJobAllowlist("PLD", config.GapCloserPLD, "WAR", config.GapCloserWAR, "DRK", config.GapCloserDRK, "GNB", config.GapCloserGNB, "MNK", config.GapCloserMNK, "DRG", config.GapCloserDRG, "BRD", config.GapCloserBRD, "NIN", config.GapCloserNIN, "SAM", config.GapCloserSAM, "DNC", config.GapCloserDNC, "RPR", config.GapCloserRPR, "VPR", config.GapCloserVPR, "WHM", config.GapCloserWHM, "BLM", config.GapCloserBLM, "RDM", config.GapCloserRDM, "SGE", config.GapCloserSGE, "PCT", config.GapCloserPCT), config.Enabled && config.ManageMovement && config.UseGapCloser && this.CurrentJobGapCloserEnabled(), this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers"), (this.CurrentJobGapCloserEnabled(), "Current job gap closer allowlist")));
+            this.DrawConfigRow("Minimum gap-closer distance", config.MinimumGapCloserDistance, config.Enabled && config.ManageMovement && config.UseGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers")));
+            this.DrawConfigRow("Greedy dash style", config.CombatStyle == CombatStyle.Normal ? "off" : "on", config.Enabled && config.ManageMovement && config.UseGapCloser && config.CombatStyle != CombatStyle.Normal, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers"), (config.CombatStyle != CombatStyle.Normal, "Greedy movement timing")));
+            this.DrawConfigRow("Greedy unsafe safety dashes", config.CombatStyle == CombatStyle.Normal ? "off" : config.CombatStyle, config.Enabled && config.ManageMovement && config.UseGapCloser && config.CombatStyle != CombatStyle.Normal, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers"), (config.CombatStyle != CombatStyle.Normal, "Greedy movement timing")));
 
             ImGui.EndTable();
         }
@@ -572,46 +633,29 @@ internal sealed class DecisionOverlayController(
         return null;
     }
 
-    private bool CurrentJobReengageGapCloserEnabled()
+    private bool CurrentJobGapCloserEnabled()
     {
         var classJobId = services.ObjectTable.LocalPlayer?.ClassJob.RowId ?? 0;
         return classJobId switch
         {
             1 or 19 => config.GapCloserPLD,
             3 or 21 => config.GapCloserWAR,
-            32      => config.GapCloserDRK,
-            37      => config.GapCloserGNB,
+            32 => config.GapCloserDRK,
+            37 => config.GapCloserGNB,
             2 or 20 => config.GapCloserMNK,
             4 or 22 => config.GapCloserDRG,
+            5 or 23 => config.GapCloserBRD,
+            25 => config.GapCloserBLM,
             29 or 30 => config.GapCloserNIN,
-            34      => config.GapCloserSAM,
-            38      => config.GapCloserDNC,
-            39      => config.GapCloserRPR,
-            41      => config.GapCloserVPR,
-            24      => config.GapCloserWHM,
-            _       => false
-        };
-    }
-
-    private bool CurrentJobEscapeGapCloserEnabled()
-    {
-        var classJobId = services.ObjectTable.LocalPlayer?.ClassJob.RowId ?? 0;
-        return classJobId switch
-        {
-            2 or 20 => config.EscapeGapCloserMNK,
-            4 or 22 => config.EscapeGapCloserDRG,
-            5 or 23 => config.EscapeGapCloserBRD,
-            25      => config.EscapeGapCloserBLM,
-            29 or 30 => config.EscapeGapCloserNIN,
-            34      => config.EscapeGapCloserSAM,
-            38      => config.EscapeGapCloserDNC,
-            39      => config.EscapeGapCloserRPR,
-            24      => config.EscapeGapCloserWHM,
-            35      => config.EscapeGapCloserRDM,
-            40      => config.EscapeGapCloserSGE,
-            41      => config.EscapeGapCloserVPR,
-            42      => config.EscapeGapCloserPCT,
-            _       => false
+            34 => config.GapCloserSAM,
+            38 => config.GapCloserDNC,
+            39 => config.GapCloserRPR,
+            24 => config.GapCloserWHM,
+            35 => config.GapCloserRDM,
+            40 => config.GapCloserSGE,
+            41 => config.GapCloserVPR,
+            42 => config.GapCloserPCT,
+            _ => false
         };
     }
 
@@ -672,21 +716,24 @@ internal sealed class DecisionOverlayController(
     private void AddGapCloserSnapshot(IBattleChara player, IBattleChara? target, out DecisionOverlaySnapshot? snapshot)
     {
         snapshot = null;
-        if (!config.UseGapCloser && !config.UseEscapeGapCloser)
+        if (!config.UseGapCloser)
         {
             return;
         }
 
-        var reason = config.UseEscapeGapCloser ? escapeGapCloserController.LastEscapeGapCloserSafety : gapCloserController.LastGapCloserSafety;
-        var rawState = reason.Contains("used ", StringComparison.OrdinalIgnoreCase)
-            ? DecisionOverlayState.Active
-            : reason.Contains("current position safe", StringComparison.OrdinalIgnoreCase) ||
-              reason.Contains("not in gap closer range", StringComparison.OrdinalIgnoreCase) ||
-              reason.Contains("animation lock", StringComparison.OrdinalIgnoreCase)
-                ? DecisionOverlayState.Suppressed
-                : reason.Contains("safe", StringComparison.OrdinalIgnoreCase)
-                    ? DecisionOverlayState.Candidate
-                    : DecisionOverlayState.Rejected;
+        var useMobilityDecision = TryGetRecentMobilityDecision(mobilityDecisionEvaluator.LastDecision, out var mobilityDecision);
+        var escapeReason = escapeGapCloserController.LastEscapeGapCloserSafety;
+        var reengageReason = gapCloserController.LastGapCloserSafety;
+        var showingEscapeDash = !useMobilityDecision &&
+                                 !string.Equals(escapeReason, "not checked", StringComparison.Ordinal) &&
+                                 !(escapeReason.Contains("current position safe", StringComparison.OrdinalIgnoreCase) &&
+                                   !string.Equals(reengageReason, "not checked", StringComparison.Ordinal));
+        var reason = useMobilityDecision
+            ? mobilityDecision.RiskReason
+            : showingEscapeDash ? escapeReason : reengageReason;
+        var rawState = useMobilityDecision
+            ? DashStateFromMobilityDecision(mobilityDecision)
+            : DashStateFromReason(reason);
 
         var now = DateTime.UtcNow;
         if (rawState != this.gapCloserPendingState)
@@ -705,23 +752,511 @@ internal sealed class DecisionOverlayController(
             return;
         }
 
-        var landingPos = gapCloserController.LastSafeLandingPosition;
+        var distanceToTarget = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, target.Position, target.HitboxRadius);
+        var label = useMobilityDecision
+            ? BuildMobilityOverlayLabel(mobilityDecision, state)
+            : BuildDashOverlayLabel(showingEscapeDash, state);
+        var readableReason = useMobilityDecision
+            ? BuildMobilityOverlayReason(mobilityDecision, distanceToTarget)
+            : BuildDashOverlayReason(showingEscapeDash, reason, distanceToTarget);
+        var landingPos = useMobilityDecision
+            ? mobilityDecision.Destination
+            : showingEscapeDash ? escapeGapCloserController.LastSafeEscapeDestination : gapCloserController.LastSafeLandingPosition;
+        var lineTarget = landingPos ?? target.Position;
         var landingMarker = state == DecisionOverlayState.Candidate && landingPos.HasValue
-            ? new DecisionOverlayMarker(DecisionOverlayState.Future, landingPos.Value, 0.35f, "Land")
+            ? new DecisionOverlayMarker(DecisionOverlayState.Future, landingPos.Value, 0.35f, "dash landing")
             : null;
 
         snapshot = new(
             DecisionOverlaySource.GapCloser,
             state,
-            state == DecisionOverlayState.Rejected ? "Gap: unsafe" : "Gap",
-            reason,
+            label,
+            readableReason,
             50,
             [],
-            [new(state, player.Position, target.Position, "Gap")],
+            [new(state, player.Position, lineTarget, label)],
             landingMarker != null
-                ? [new(state, target.Position, target.HitboxRadius, null), landingMarker]
-                : [new(state, target.Position, target.HitboxRadius, null)]);
+                ? [new(state, target.Position, target.HitboxRadius, "target"), landingMarker]
+                : [new(state, target.Position, target.HitboxRadius, "target")]);
 
+    }
+
+    private static bool TryGetRecentMobilityDecision(MobilityDecisionDiagnostics decision, out MobilityDecisionDiagnostics recent)
+    {
+        recent = decision;
+        return decision.State != MobilityDecisionState.NotChecked &&
+               decision.TimestampUtc != DateTime.MinValue &&
+               DateTime.UtcNow - decision.TimestampUtc <= TimeSpan.FromMilliseconds(1500);
+    }
+
+    private static DecisionOverlayState DashStateFromMobilityDecision(MobilityDecisionDiagnostics decision)
+    {
+        return decision.State switch
+        {
+            MobilityDecisionState.Used => DecisionOverlayState.Active,
+            MobilityDecisionState.Candidate => DecisionOverlayState.Candidate,
+            MobilityDecisionState.Rejected => DecisionOverlayState.Rejected,
+            _ => DecisionOverlayState.Suppressed
+        };
+    }
+
+    private static DecisionOverlayState DashStateFromReason(string reason)
+    {
+        return reason.Contains("used ", StringComparison.OrdinalIgnoreCase)
+            ? DecisionOverlayState.Active
+            : reason.Contains("current position safe", StringComparison.OrdinalIgnoreCase) ||
+              reason.Contains("not in gap closer range", StringComparison.OrdinalIgnoreCase) ||
+              reason.Contains("target within", StringComparison.OrdinalIgnoreCase) ||
+              reason.Contains("animation lock", StringComparison.OrdinalIgnoreCase) ||
+              reason.Contains("not checked", StringComparison.OrdinalIgnoreCase)
+                ? DecisionOverlayState.Suppressed
+                : reason.Contains("safe", StringComparison.OrdinalIgnoreCase) ||
+                  reason.Contains("turning for", StringComparison.OrdinalIgnoreCase)
+                    ? DecisionOverlayState.Candidate
+                    : DecisionOverlayState.Rejected;
+    }
+
+    private static string BuildDashOverlayLabel(bool escapeDash, DecisionOverlayState state)
+    {
+        return escapeDash
+            ? state switch
+            {
+                DecisionOverlayState.Active => "Safety gap closer used",
+                DecisionOverlayState.Candidate => "Safety gap closer ready",
+                DecisionOverlayState.Rejected => "Safety gap closer blocked",
+                DecisionOverlayState.Suppressed => "Safety gap closer idle",
+                _ => "Safety gap closer"
+            }
+            : state switch
+            {
+                DecisionOverlayState.Active => "Reengage gap closer used",
+                DecisionOverlayState.Candidate => "Reengage gap closer ready",
+                DecisionOverlayState.Rejected => "Reengage gap closer blocked",
+                DecisionOverlayState.Suppressed => "Reengage gap closer idle",
+                _ => "Reengage gap closer"
+            };
+    }
+
+    private static string BuildDashOverlayReason(bool escapeDash, string reason, float distanceToTarget)
+    {
+        var prefix = escapeDash
+            ? $"Safety dash; target {distanceToTarget:0.#}y away"
+            : $"Target {distanceToTarget:0.#}y away";
+        return $"{prefix}; {NormalizeDashReason(reason)}";
+    }
+
+    private static string BuildMobilityOverlayLabel(MobilityDecisionDiagnostics decision, DecisionOverlayState state)
+    {
+        var intent = decision.IntentLabel;
+        return state switch
+        {
+            DecisionOverlayState.Active => $"Dash used: {intent}",
+            DecisionOverlayState.Candidate => $"Dash ready: {intent}",
+            DecisionOverlayState.Rejected => $"Dash blocked: {intent}",
+            DecisionOverlayState.Suppressed => $"Dash idle: {intent}",
+            _ => $"Dash: {intent}"
+        };
+    }
+
+    private static string BuildMobilityOverlayReason(MobilityDecisionDiagnostics decision, float distanceToTarget)
+    {
+        var parts = new List<string>
+        {
+            $"{decision.ActionName}; target {distanceToTarget:0.#}y away"
+        };
+
+        if (decision.SafetyGain > 0.1f)
+        {
+            parts.Add($"safety +{decision.SafetyGain:0.0}y");
+        }
+
+        if (decision.UptimeGain > 0.1f)
+        {
+            parts.Add($"uptime +{decision.UptimeGain:0.0}");
+        }
+
+        if (decision.PathGain > 0.1f)
+        {
+            parts.Add($"path +{decision.PathGain:0.0}y");
+        }
+
+        parts.Add(NormalizeDashReason(decision.RiskReason));
+        return string.Join("; ", parts.Take(4));
+    }
+
+    private static string NormalizeDashReason(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason) || reason.Equals("not checked", StringComparison.OrdinalIgnoreCase))
+        {
+            return "waiting for dash check";
+        }
+
+        if (reason.Contains("used ", StringComparison.OrdinalIgnoreCase))
+        {
+            return "dash was used";
+        }
+
+        if (reason.Contains("current position safe", StringComparison.OrdinalIgnoreCase))
+        {
+            return "already safe";
+        }
+
+        if (reason.Contains("target within", StringComparison.OrdinalIgnoreCase))
+        {
+            return "already in attack range";
+        }
+
+        if (reason.Contains("not in gap closer range", StringComparison.OrdinalIgnoreCase))
+        {
+            return "target is too far for a dash";
+        }
+
+        if (reason.Contains("under", StringComparison.OrdinalIgnoreCase))
+        {
+            return "destination is closer than the configured minimum";
+        }
+
+        if (reason.Contains("animation lock", StringComparison.OrdinalIgnoreCase))
+        {
+            return "animation locked";
+        }
+
+        if (reason.Contains("player casting", StringComparison.OrdinalIgnoreCase))
+        {
+            return "casting";
+        }
+
+        if (reason.Contains("action unavailable", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains(" unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return "dash action unavailable";
+        }
+
+        if (reason.Contains("unknown boss module", StringComparison.OrdinalIgnoreCase))
+        {
+            return "unknown boss navigation guard disabled dashing";
+        }
+
+        if (reason.Contains("dangerous", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("unsafe", StringComparison.OrdinalIgnoreCase))
+        {
+            return "landing is unsafe";
+        }
+
+        if (reason.Contains("no safe", StringComparison.OrdinalIgnoreCase))
+        {
+            return "no safe landing found";
+        }
+
+        if (reason.Contains("could not calculate", StringComparison.OrdinalIgnoreCase))
+        {
+            return "could not calculate a landing point";
+        }
+
+        if (reason.Contains("failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "dash action failed";
+        }
+
+        return reason;
+    }
+
+    private static string BuildPlannerOverlayLabel(MovementPlannerDiagnostics planner)
+    {
+        return planner.ChosenSource switch
+        {
+            "Target range" => "Closing to attack range",
+            "Obstacle recovery" => "Going around obstacle",
+            "Line of sight recovery" => "Regaining line of sight",
+            "Trash route memory" => "Following trash route",
+            "Tank pull lead" => "Catching up to tank",
+            "Pack engagement" => "Following trash pack",
+            "AoE pack" => "Moving for AoE hits",
+            "Healer coverage" => "Improving healer coverage",
+            "Passage of Arms" => "Moving behind Passage",
+            "Defensive zone" => "Entering defensive zone",
+            "Aggro safety" => "Taking aggro to tank",
+            "Boss center avoidance" => "Leaving boss center",
+            "Arena edge" => "Nudging off arena edge",
+            "<none>" => "No movement intent",
+            _ => $"Moving: {planner.ChosenSource}"
+        };
+    }
+
+    private static string BuildPlannerOverlayReason(MovementPlannerDiagnostics planner)
+    {
+        var parts = new List<string>();
+        var candidateReason = NormalizePlannerCandidateReason(planner);
+        if (!string.IsNullOrWhiteSpace(candidateReason))
+        {
+            parts.Add(candidateReason);
+        }
+
+        var switchReason = NormalizePlannerSwitchReason(planner.SwitchReason);
+        if (!string.IsNullOrWhiteSpace(switchReason) &&
+            !parts.Contains(switchReason, StringComparer.OrdinalIgnoreCase))
+        {
+            parts.Add(switchReason);
+        }
+
+        var pathSummary = BuildPlannerPathSummary(planner);
+        if (!string.IsNullOrWhiteSpace(pathSummary))
+        {
+            parts.Add(pathSummary);
+        }
+
+        if (planner.BmrMoveRequested || planner.BmrMoveImminent)
+        {
+            parts.Add(planner.BmrMoveImminent ? "BMR move soon" : "BMR move active");
+        }
+
+        return parts.Count == 0
+            ? "selected safe destination"
+            : string.Join("; ", parts.Take(3));
+    }
+
+    private static string BuildPlannerLineLabel(MovementPlannerDiagnostics planner)
+    {
+        return planner.ChosenSource switch
+        {
+            "Target range" => "close in",
+            "Obstacle recovery" => "around obstacle",
+            "Line of sight recovery" => "restore line of sight",
+            "Trash route memory" => "trash route",
+            "Tank pull lead" => "catch up",
+            "Pack engagement" => "follow pack",
+            "AoE pack" => "AoE spot",
+            "Healer coverage" => "coverage",
+            "Passage of Arms" => "Passage",
+            "Defensive zone" => "defensive",
+            "Aggro safety" => "to tank",
+            "Boss center avoidance" => "leave center",
+            "Arena edge" => "off edge",
+            _ => "move"
+        };
+    }
+
+    private static string BuildPlannerDestinationLabel(MovementPlannerDiagnostics planner)
+    {
+        return planner.ChosenSource switch
+        {
+            "Target range" => "attack range",
+            "Obstacle recovery" => "clear path",
+            "Line of sight recovery" => "visible spot",
+            "Trash route memory" => "route step",
+            "Tank pull lead" => "behind tank",
+            "Pack engagement" => "pack",
+            "AoE pack" => "AoE spot",
+            "Healer coverage" => "coverage",
+            "Passage of Arms" => "Passage",
+            "Defensive zone" => "zone",
+            "Aggro safety" => "tank",
+            "Boss center avoidance" => "outside center",
+            "Arena edge" => "inside edge",
+            _ => "destination"
+        };
+    }
+
+    private static string NormalizePlannerCandidateReason(MovementPlannerDiagnostics planner)
+    {
+        var candidate = planner.TopCandidates.FirstOrDefault(candidate =>
+            candidate.Accepted &&
+            string.Equals(candidate.Source, planner.ChosenSource, StringComparison.Ordinal) &&
+            planner.Destination.HasValue &&
+            Distance2D(candidate.Destination, planner.Destination.Value) <= 1.75f);
+        if (candidate == null || string.IsNullOrWhiteSpace(candidate.Reason))
+        {
+            return string.Empty;
+        }
+
+        var reason = candidate.Reason;
+        if (reason.Contains("routing via vnav corner", StringComparison.OrdinalIgnoreCase))
+        {
+            return "routing around corner";
+        }
+
+        if (reason.Contains("following tank trail", StringComparison.OrdinalIgnoreCase))
+        {
+            return "following the tank's path";
+        }
+
+        if (reason.Contains("party breadcrumb route", StringComparison.OrdinalIgnoreCase))
+        {
+            return "following the party's route";
+        }
+
+        if (reason.Contains("vnav fallback", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("breadcrumb route unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return "using a bounded route fallback";
+        }
+
+        if (reason.StartsWith("routing around blocked BMR line", StringComparison.OrdinalIgnoreCase))
+        {
+            return "pillar or wall blocks the direct route";
+        }
+
+        if (reason.StartsWith("stepping away from", StringComparison.OrdinalIgnoreCase))
+        {
+            return "stepping away from a pillar or wall";
+        }
+
+        if (reason.StartsWith("restores line of sight", StringComparison.OrdinalIgnoreCase))
+        {
+            return "moving where the target is visible";
+        }
+
+        if (reason.StartsWith("following reachable route to line of sight", StringComparison.OrdinalIgnoreCase))
+        {
+            return "following path around obstruction";
+        }
+
+        if (reason.StartsWith("trash pull", StringComparison.OrdinalIgnoreCase))
+        {
+            var behind = ExtractDelimitedValue(reason, "behind=");
+            return string.IsNullOrWhiteSpace(behind)
+                ? "tank is still pulling"
+                : $"tank is still pulling, {behind} behind";
+        }
+
+        if (reason.StartsWith("target surface ", StringComparison.OrdinalIgnoreCase))
+        {
+            return reason.Replace("target surface", "attack range", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return reason switch
+        {
+            "avoiding boss center" => "inside boss center",
+            "near arena edge" => "too close to arena edge",
+            "goal injected" => "support zone is worth moving for",
+            "current intent" => "continuing current destination",
+            _ => reason
+        };
+    }
+
+    private static string NormalizePlannerSwitchReason(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason) ||
+            reason.Equals("<none>", StringComparison.OrdinalIgnoreCase) ||
+            reason.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        if (reason.StartsWith("no_candidate", StringComparison.OrdinalIgnoreCase))
+        {
+            return "no safe movement choice";
+        }
+
+        if (reason.StartsWith("current_invalid", StringComparison.OrdinalIgnoreCase))
+        {
+            return "previous destination no longer valid";
+        }
+
+        if (reason.StartsWith("BmrPlannerReflectionUnavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return "BMR planner data unavailable";
+        }
+
+        return reason switch
+        {
+            "new_intent" => "new movement choice",
+            "same_destination" => "continuing destination",
+            "hold_active" => "holding briefly to avoid jitter",
+            "held_previous" => "holding previous destination",
+            "meaningfully_better" => "better destination found",
+            "hold_expired" => "hold expired",
+            "Disabled" => "disabled",
+            "MovementDisabled" => "movement disabled",
+            "OutOfCombat" => "out of combat",
+            "PlayerDead" => "player dead",
+            "ManualMovementSuppressed" => "manual control active",
+            "BmrForcedMovement" => "BMR forced movement active",
+            "BmrSafetyActive" => "BMR safety active",
+            "PlayerCasting" => "casting",
+            "VnavmeshUnavailable" => "vnavmesh unavailable",
+            "LocalPlayerUnavailable" => "player unavailable",
+            "reset" => "reset",
+            _ => reason
+        };
+    }
+
+    private static string NormalizePlannerRejectionReason(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return "rejected";
+        }
+
+        if (reason.StartsWith("BmrSafetyUnavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return "safety unknown";
+        }
+
+        return reason switch
+        {
+            "InvalidDestination" => "invalid",
+            "StuckRecently" => "recently stuck",
+            "TinyMovement" => "too close",
+            "CasterComfortHold" => "casting",
+            "BmrGoalZoneActive" => "BMR mechanic",
+            "BmrPathBlocked" => "pillar/wall blocks path",
+            "BmrBoundaryHugging" => "too close to pillar/wall",
+            "OutsidePathfindMap" => "outside arena",
+            "BmrUnsafe" => "unsafe",
+            "OffMeshDestination" => "off navmesh",
+            "NoMeshPoint" => "off navmesh",
+            "Unavailable" => "path unavailable",
+            "Pending" => "path pending",
+            "Unreachable" => "unreachable",
+            _ => reason
+        };
+    }
+
+    private static string? BuildPlannerPathSummary(MovementPlannerDiagnostics planner)
+    {
+        if (planner.PathStatus != "Reachable" &&
+            planner.PathStatus != "None" &&
+            !string.IsNullOrWhiteSpace(planner.PathStatus))
+        {
+            return $"path {NormalizePlannerRejectionReason(planner.PathStatus)}";
+        }
+
+        if (planner.PathDistance.HasValue)
+        {
+            var path = $"{planner.PathDistance.Value:0.#}y path";
+            var waypointCount = planner.PathWaypointCount.GetValueOrDefault();
+            if (waypointCount > 1)
+            {
+                path += $", {waypointCount} waypoints";
+            }
+
+            return path;
+        }
+
+        return planner.DirectDistance.HasValue
+            ? $"{planner.DirectDistance.Value:0.#}y direct"
+            : null;
+    }
+
+    private static string ExtractDelimitedValue(string text, string prefix)
+    {
+        var start = text.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+        {
+            return string.Empty;
+        }
+
+        start += prefix.Length;
+        var end = text.IndexOf(';', start);
+        return (end < 0 ? text[start..] : text[start..end]).Trim();
+    }
+
+    private static float Distance2D(Vector3 a, Vector3 b)
+    {
+        var dx = a.X - b.X;
+        var dz = a.Z - b.Z;
+        return MathF.Sqrt(dx * dx + dz * dz);
     }
 
     private void DrawSnapshot(ImDrawListPtr drawList, DecisionOverlaySnapshot snapshot)
@@ -1043,6 +1578,13 @@ internal sealed class DecisionOverlayController(
 
     private static string BuildSnapshotLabel(DecisionOverlaySnapshot snapshot)
     {
+        if (snapshot.Source == DecisionOverlaySource.FinalMovement &&
+            snapshot.State == DecisionOverlayState.Active &&
+            !string.IsNullOrWhiteSpace(snapshot.Reason))
+        {
+            return $"{snapshot.Label}: {snapshot.Reason}";
+        }
+
         return snapshot.State == DecisionOverlayState.Suppressed && snapshot.Reason != null
             ? $"{snapshot.Label} ({snapshot.Reason})"
             : snapshot.Label;
@@ -1097,11 +1639,11 @@ internal sealed class DecisionOverlayController(
 
         return source is DecisionOverlaySource.FinalMovement
             or DecisionOverlaySource.EscapeLanding
-            or DecisionOverlaySource.GapCloser
             or DecisionOverlaySource.AoE
             or DecisionOverlaySource.HealerCoverage
             or DecisionOverlaySource.PassageOfArms
-            or DecisionOverlaySource.SurvivabilityZone;
+            or DecisionOverlaySource.SurvivabilityZone
+            or DecisionOverlaySource.RedMageMeleeCombo;
     }
 
     private static uint ColorFor(DecisionOverlayState state, DecisionOverlaySource source)
@@ -1113,12 +1655,12 @@ internal sealed class DecisionOverlayController(
 
         var color = state switch
         {
-            DecisionOverlayState.Active     => ImGui.GetColorU32(new Vector4(0.25f, 0.82f, 0.38f, 1f)),
-            DecisionOverlayState.Candidate  => ImGui.GetColorU32(SourceAccent(source, 1f)),
-            DecisionOverlayState.Future     => ImGui.GetColorU32(new Vector4(1f, 0.86f, 0.25f, 1f)),
-            DecisionOverlayState.Rejected   => ImGui.GetColorU32(new Vector4(1f, 0.2f, 0.2f, 1f)),
+            DecisionOverlayState.Active => ImGui.GetColorU32(new Vector4(0.25f, 0.82f, 0.38f, 1f)),
+            DecisionOverlayState.Candidate => ImGui.GetColorU32(SourceAccent(source, 1f)),
+            DecisionOverlayState.Future => ImGui.GetColorU32(new Vector4(1f, 0.86f, 0.25f, 1f)),
+            DecisionOverlayState.Rejected => ImGui.GetColorU32(new Vector4(1f, 0.2f, 0.2f, 1f)),
             DecisionOverlayState.Suppressed => ImGui.GetColorU32(new Vector4(0.58f, 0.58f, 0.58f, 0.82f)),
-            _                               => ImGui.GetColorU32(new Vector4(0.55f, 0.55f, 0.55f, 1f))
+            _ => ImGui.GetColorU32(new Vector4(0.55f, 0.55f, 0.55f, 1f))
         };
         return color;
     }
@@ -1159,6 +1701,7 @@ internal sealed class DecisionOverlayController(
             DecisionOverlaySource.EscapeLanding => new Vector4(0.25f, 0.95f, 0.95f, alpha),
             DecisionOverlaySource.TargetUptime => new Vector4(0.35f, 0.68f, 1f, alpha),
             DecisionOverlaySource.NextAction => new Vector4(1f, 0.86f, 0.25f, alpha),
+            DecisionOverlaySource.RedMageMeleeCombo => new Vector4(1f, 0.35f, 0.35f, alpha),
             DecisionOverlaySource.FinalMovement => new Vector4(0.95f, 1f, 1f, alpha),
             _ => new Vector4(0.35f, 0.68f, 1f, alpha)
         };

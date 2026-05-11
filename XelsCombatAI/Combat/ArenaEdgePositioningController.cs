@@ -9,11 +9,14 @@ using Dalamud.Game.ClientState.Conditions;
 namespace XelsCombatAI.Combat;
 
 internal sealed class ArenaEdgePositioningController(Configuration config, DalamudServices services)
-    : IBossModGoalZoneContributor
+    : IBossModGoalZoneContributor, IMovementCandidateSource
 {
-    private const float EdgeBand = 2.5f;
-    private const float ActivationDistance = 4f;
-    private static readonly TimeSpan GoalLinger = TimeSpan.FromMilliseconds(750);
+    private const float EdgeBand = 0.75f;
+    private const float ActivationDistance = 0.85f;
+    private const float NudgeDistance = 0.9f;
+    private const float AcceptanceRadius = 0.75f;
+    private static readonly TimeSpan GoalLinger = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan PostMechanicEdgeCooldown = TimeSpan.FromSeconds(2);
     private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     private static readonly MethodInfo ScoreCircleMethod = typeof(ArenaEdgePositioningController).GetMethod(nameof(ScoreCircle), BindingFlags.Static | BindingFlags.NonPublic)!;
     private static readonly MethodInfo ScoreRectMethod = typeof(ArenaEdgePositioningController).GetMethod(nameof(ScoreRect), BindingFlags.Static | BindingFlags.NonPublic)!;
@@ -33,12 +36,51 @@ internal sealed class ArenaEdgePositioningController(Configuration config, Dalam
     private string hookState = "unresolved";
     private string lastReason = "not evaluated";
     private DateTime goalLingerUntil = DateTime.MinValue;
+    private DateTime suppressComfortUntil = DateTime.MinValue;
+    private bool bossModEncounterActive;
+    private object? lastObservedBounds;
+    private bool hasLastObservedBounds;
+    private float lastObservedCenterX;
+    private float lastObservedCenterZ;
+    private float lastObservedRadius;
 
     public string LastReason => this.lastReason;
+
+    public void AddMovementCandidates(MovementPlannerContext context, ICollection<MovementCandidate> candidates)
+    {
+        if (!string.Equals(this.lastReason, "near arena edge", StringComparison.Ordinal) || context.PathfindMapCenter == null)
+        {
+            return;
+        }
+
+        var towardCenter = context.PathfindMapCenter.Value - context.PlayerPosition;
+        towardCenter.Y = 0f;
+        if (towardCenter.LengthSquared() <= 0.01f)
+        {
+            return;
+        }
+
+        towardCenter = Vector3.Normalize(towardCenter);
+        candidates.Add(new(
+            "Arena edge",
+            this.lastReason,
+            context.PlayerPosition + towardCenter * NudgeDistance,
+            AcceptanceRadius,
+            MovementCandidatePriority.Comfort,
+            1f,
+            0f,
+            0f,
+            0.45f));
+    }
 
     public void SetHookState(string state)
     {
         this.hookState = state;
+    }
+
+    public void SetBossModEncounterState(bool activeModule)
+    {
+        this.bossModEncounterActive = activeModule;
     }
 
     public void TryInjectGoal(object hints, ICollection<BossModGoalContribution> contributions)
@@ -63,6 +105,12 @@ internal sealed class ArenaEdgePositioningController(Configuration config, Dalam
             return;
         }
 
+        if (!this.bossModEncounterActive && !this.HasBossLikeCurrentTarget())
+        {
+            this.lastReason = "not boss context";
+            return;
+        }
+
         if (!this.EnsureResolved(hints.GetType()))
         {
             this.lastReason = "BMR arena edge reflection members unavailable";
@@ -79,8 +127,29 @@ internal sealed class ArenaEdgePositioningController(Configuration config, Dalam
 
         var centerX = ReadFloat(this.wposXField!.GetValue(center));
         var centerZ = ReadFloat(this.wposZField!.GetValue(center));
+        var radius = ReadFloat(this.radiusField!.GetValue(bounds));
         var edgeDistance = this.GetEdgeDistance(bounds, centerX, centerZ, player.Position);
         var now = DateTime.UtcNow;
+        if (this.BoundsShapeChanged(centerX, centerZ, radius))
+        {
+            this.suppressComfortUntil = now.Add(PostMechanicEdgeCooldown);
+        }
+
+        this.RecordObservedBounds(bounds, centerX, centerZ, radius);
+
+        if (this.BossModMechanicSafetyActive(hints))
+        {
+            this.suppressComfortUntil = now.Add(PostMechanicEdgeCooldown);
+            this.lastReason = "mechanic safety active";
+            return;
+        }
+
+        if (now < this.suppressComfortUntil)
+        {
+            this.lastReason = "post-mechanic edge cooldown";
+            return;
+        }
+
         if (edgeDistance <= ActivationDistance)
         {
             this.goalLingerUntil = now.Add(GoalLinger);
@@ -89,12 +158,6 @@ internal sealed class ArenaEdgePositioningController(Configuration config, Dalam
         if (edgeDistance > ActivationDistance && now > this.goalLingerUntil)
         {
             this.lastReason = "away from arena edge";
-            return;
-        }
-
-        if (this.BossModMechanicSafetyActive(hints))
-        {
-            this.lastReason = "mechanic safety active";
             return;
         }
 
@@ -137,6 +200,25 @@ internal sealed class ArenaEdgePositioningController(Configuration config, Dalam
         this.lastCenterZ = 0f;
         this.lastReason = "reset";
         this.goalLingerUntil = DateTime.MinValue;
+        this.suppressComfortUntil = DateTime.MinValue;
+        this.bossModEncounterActive = false;
+        this.lastObservedBounds = null;
+        this.hasLastObservedBounds = false;
+        this.lastObservedCenterX = 0f;
+        this.lastObservedCenterZ = 0f;
+        this.lastObservedRadius = 0f;
+    }
+
+    public bool TryGetObservedEdgeDistance(Vector3 position, out float edgeDistance)
+    {
+        if (!this.hasLastObservedBounds || this.lastObservedBounds == null)
+        {
+            edgeDistance = 0f;
+            return false;
+        }
+
+        edgeDistance = this.GetEdgeDistance(this.lastObservedBounds, this.lastObservedCenterX, this.lastObservedCenterZ, position);
+        return true;
     }
 
     private bool EnsureResolved(Type hintsType)
@@ -187,6 +269,23 @@ internal sealed class ArenaEdgePositioningController(Configuration config, Dalam
         }
 
         return VectorLengthSquared(this.forcedMovementField?.GetValue(hints)) > 0.01f;
+    }
+
+    private bool BoundsShapeChanged(float centerX, float centerZ, float radius)
+    {
+        return this.hasLastObservedBounds &&
+               (MathF.Abs(this.lastObservedCenterX - centerX) > 0.25f ||
+                MathF.Abs(this.lastObservedCenterZ - centerZ) > 0.25f ||
+                MathF.Abs(this.lastObservedRadius - radius) > 0.25f);
+    }
+
+    private void RecordObservedBounds(object bounds, float centerX, float centerZ, float radius)
+    {
+        this.lastObservedBounds = bounds;
+        this.hasLastObservedBounds = true;
+        this.lastObservedCenterX = centerX;
+        this.lastObservedCenterZ = centerZ;
+        this.lastObservedRadius = radius;
     }
 
     private bool TryCreateGoalDelegate(object bounds, float centerX, float centerZ, out Delegate? goal)
@@ -243,6 +342,11 @@ internal sealed class ArenaEdgePositioningController(Configuration config, Dalam
         var delegateType = typeof(Func<,>).MakeGenericType(wposType, typeof(float));
         goal = Expression.Lambda(delegateType, call, parameter).Compile();
         return true;
+    }
+
+    private bool HasBossLikeCurrentTarget()
+    {
+        return services.TargetManager.Target is { HitboxRadius: >= 4f };
     }
 
     private float GetEdgeDistance(object bounds, float centerX, float centerZ, Vector3 playerPosition)

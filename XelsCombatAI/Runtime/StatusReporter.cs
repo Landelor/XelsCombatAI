@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 
@@ -9,7 +10,7 @@ internal static class StatusReporter
 {
     public static string Build(RuntimeStatus status)
     {
-        return $"Enabled={status.Enabled}, InCombat={status.InCombat}, Dead={status.IsDead}, Dependencies={(status.DependencyWarning ?? "OK")}, TrueNorthManagement={(status.TrueNorthWarning ?? status.RsrTrueNorthDisabled?.ToString() ?? "NotManaged")}, Preset={BossModIpc.DefaultPresetName}, LastPositional={status.LastPositional}, TrueNorthCharges={status.TrueNorthCharges}, TrueNorthActive={status.TrueNorthActive}, TargetUptime={status.LastTargetUptimeRange:0.0}, Movement={status.LastMovement}, MovementRange={status.LastMovementRangeStrategy}, SafetyBuffer={status.LastForbiddenZoneCushion}, MovementSuppressed={status.AutomatedMovementSuppressed}, AoEPack={status.AoePackPositioning.LastReason}, HealerCoverage={status.HealerCoveragePositioning.LastReason}, Passage={status.PassageOfArmsPositioning.LastReason}, SurvZone={status.SurvivabilityZonePositioning.LastReason}, AggroSafety={status.AggroSafety.LastReason}, Initialized={status.InitializedPreset}";
+        return $"Enabled={status.Enabled}, InCombat={status.InCombat}, Dead={status.IsDead}, Dependencies={(status.DependencyWarning ?? "OK")}, TrueNorthManagement={(status.TrueNorthWarning ?? status.RsrTrueNorthDisabled?.ToString() ?? "NotManaged")}, Preset={BossModIpc.DefaultPresetName}, LastPositional={status.LastPositional}, TrueNorthCharges={status.TrueNorthCharges}, TrueNorthActive={status.TrueNorthActive}, TargetUptime={status.LastTargetUptimeRange:0.0}, Movement={status.LastMovement}, MovementRange={status.LastMovementRangeStrategy}, SafetyBuffer={status.LastForbiddenZoneCushion}, MovementSuppressed={status.AutomatedMovementSuppressed}, Facing={FormatFacingSummary(status.Facing)}, Planner={status.MovementPlanner.ChosenSource}/{status.MovementPlanner.SwitchReason}, Mobility={status.MobilityDecision.State}/{status.MobilityDecision.IntentLabel}, TrashPull={status.AoePackPositioning.TrashPull.Phase}/{status.AoePackPositioning.TrashPull.LeadRejectionReason}, AoEPack={status.AoePackPositioning.LastReason}, HealerCoverage={status.HealerCoveragePositioning.LastReason}, Passage={status.PassageOfArmsPositioning.LastReason}, SurvZone={status.SurvivabilityZonePositioning.LastReason}, AggroSafety={status.AggroSafety.LastReason}, RedMageMelee={status.RedMageMeleeCombo.Mode}/{status.RedMageMeleeCombo.LastReason}, Initialized={status.InitializedPreset}";
     }
 
     public static string BuildDebug(Configuration config, RuntimeStatus status)
@@ -25,6 +26,8 @@ internal static class StatusReporter
         Append(builder, "InCombat", status.InCombat);
         Append(builder, "IsDead", status.IsDead);
         Append(builder, "PlayerClassJobId", status.PlayerClassJobId);
+        Append(builder, "TerritoryType", status.TerritoryType);
+        Append(builder, "ContentFinderConditionId", status.ContentFinderConditionId);
         Append(builder, "EngagementRange", status.EngagementRange);
         Append(builder, "PackEngagementRange", status.PackAoeRange);
         Append(builder, "HasTarget", status.HasTarget);
@@ -36,6 +39,18 @@ internal static class StatusReporter
         Append(builder, "RsrTrueNorthDisabled", status.RsrTrueNorthDisabled);
         Append(builder, "InitializedPreset", status.InitializedPreset);
         Append(builder, "AutomatedMovementSuppressed", status.AutomatedMovementSuppressed);
+        builder.AppendLine();
+
+        AppendSection(builder, "Facing State");
+        Append(builder, "ManageSocialTurning", config.ManageSocialTurning);
+        Append(builder, "Source", status.Facing.Source);
+        Append(builder, "Reason", status.Facing.Reason);
+        Append(builder, "DesiredRotation", status.Facing.DesiredRotation);
+        Append(builder, "CurrentRotation", status.Facing.CurrentRotation);
+        Append(builder, "DeltaRadians", status.Facing.DeltaRadians);
+        Append(builder, "Applied", status.Facing.Applied);
+        Append(builder, "RejectionReason", status.Facing.RejectionReason);
+        Append(builder, "ConsensusMembers", status.Facing.ConsensusMembers);
         builder.AppendLine();
 
         AppendSection(builder, "BossMod Strategy Cache");
@@ -51,6 +66,20 @@ internal static class StatusReporter
         Append(builder, "LastLeylinesGoal", status.LastLeylinesGoal);
         builder.AppendLine();
 
+        AppendSection(builder, "Job Specific State");
+        Append(builder, "UseRedMageMeleeComboMovement", config.UseRedMageMeleeComboMovement);
+        Append(builder, "RedMageMeleeEnabled", status.RedMageMeleeCombo.Enabled);
+        Append(builder, "RedMageMeleeMode", status.RedMageMeleeCombo.Mode);
+        Append(builder, "RedMageMeleeReason", status.RedMageMeleeCombo.LastReason);
+        Append(builder, "RedMageWhiteMana", status.RedMageMeleeCombo.WhiteMana);
+        Append(builder, "RedMageBlackMana", status.RedMageMeleeCombo.BlackMana);
+        Append(builder, "RedMageManaStacks", status.RedMageMeleeCombo.ManaStacks);
+        Append(builder, "RedMageNextAction", $"{status.RedMageMeleeCombo.NextActionName} ({status.RedMageMeleeCombo.NextActionId})");
+        Append(builder, "RedMageAffectedTargets", status.RedMageMeleeCombo.AffectedTargets);
+        Append(builder, "RedMageCandidateDestination", status.RedMageMeleeCombo.CandidateDestination);
+        Append(builder, "RedMageLastJumpLanding", status.RedMageMeleeCombo.LastJumpLanding);
+        builder.AppendLine();
+
         AppendSection(builder, "Gap Closer State");
         Append(builder, "GapCloserPLD", status.GapCloserPLD);
         Append(builder, "GapCloserWAR", status.GapCloserWAR);
@@ -58,24 +87,34 @@ internal static class StatusReporter
         Append(builder, "GapCloserGNB", status.GapCloserGNB);
         Append(builder, "GapCloserMNK", status.GapCloserMNK);
         Append(builder, "GapCloserDRG", status.GapCloserDRG);
+        Append(builder, "GapCloserBRD", status.GapCloserBRD);
         Append(builder, "GapCloserNIN", status.GapCloserNIN);
         Append(builder, "GapCloserSAM", status.GapCloserSAM);
         Append(builder, "GapCloserDNC", status.GapCloserDNC);
         Append(builder, "GapCloserRPR", status.GapCloserRPR);
         Append(builder, "GapCloserVPR", status.GapCloserVPR);
         Append(builder, "GapCloserWHM", status.GapCloserWHM);
-        Append(builder, "EscapeGapCloserMNK", status.EscapeGapCloserMNK);
-        Append(builder, "EscapeGapCloserNIN", status.EscapeGapCloserNIN);
-        Append(builder, "EscapeGapCloserDNC", status.EscapeGapCloserDNC);
-        Append(builder, "EscapeGapCloserRPR", status.EscapeGapCloserRPR);
-        Append(builder, "EscapeGapCloserVPR", status.EscapeGapCloserVPR);
-        Append(builder, "EscapeGapCloserWHM", status.EscapeGapCloserWHM);
-        Append(builder, "EscapeGapCloserBLM", status.EscapeGapCloserBLM);
-        Append(builder, "EscapeGapCloserSGE", status.EscapeGapCloserSGE);
-        Append(builder, "EscapeGapCloserPCT", status.EscapeGapCloserPCT);
+        Append(builder, "GapCloserBLM", status.GapCloserBLM);
+        Append(builder, "GapCloserRDM", status.GapCloserRDM);
+        Append(builder, "GapCloserSGE", status.GapCloserSGE);
+        Append(builder, "GapCloserPCT", status.GapCloserPCT);
+        Append(builder, "GreedDashStyleActive", status.GreedDashStyleActive);
+        Append(builder, "LastDashStyleReason", status.LastDashStyleReason);
+        Append(builder, "GreedyUnsafeEscapeDashes", status.GreedyUnsafeEscapeDashes);
         Append(builder, "LastGapCloserSafety", status.LastGapCloserSafety);
         Append(builder, "LastEscapeGapCloserSafety", status.LastEscapeGapCloserSafety);
         Append(builder, "LastEscapeLanding", status.LastEscapeLanding);
+        Append(builder, "MobilityState", status.MobilityDecision.State);
+        Append(builder, "MobilityIntent", status.MobilityDecision.IntentLabel);
+        Append(builder, "MobilityAction", status.MobilityDecision.ActionName);
+        Append(builder, "MobilityDestination", status.MobilityDecision.Destination);
+        Append(builder, "MobilitySafetyGain", status.MobilityDecision.SafetyGain);
+        Append(builder, "MobilityUptimeGain", status.MobilityDecision.UptimeGain);
+        Append(builder, "MobilityPathGain", status.MobilityDecision.PathGain);
+        Append(builder, "MobilitySafetyReason", status.MobilityDecision.SafetyReason);
+        Append(builder, "MobilityUptimeReason", status.MobilityDecision.UptimeReason);
+        Append(builder, "MobilityPathReason", status.MobilityDecision.PathReason);
+        Append(builder, "MobilityRiskReason", status.MobilityDecision.RiskReason);
         Append(builder, "ReflectedGapSafety", status.ReflectedGapSafety);
         Append(builder, "ManualMovementInput", status.ManualMovementInput);
         builder.AppendLine();
@@ -89,6 +128,7 @@ internal static class StatusReporter
         Append(builder, "BossModNavigationNextWaypoint", status.BossModMovement.NavigationNextWaypoint);
         Append(builder, "BossModNavigationStats", status.BossModMovement.NavigationStats);
         Append(builder, "BossModVnavmeshGuard", status.BossModMovement.VnavmeshGuard);
+        Append(builder, "BossModPlannerSteer", status.BossModMovement.PlannerSteer);
         Append(builder, "BossModControllerTarget", status.BossModMovement.ControllerTarget);
         Append(builder, "BossModMovementOverride", status.BossModMovement.MovementOverride);
         Append(builder, "BossModHintSummary", status.BossModMovement.HintSummary);
@@ -99,6 +139,40 @@ internal static class StatusReporter
         Append(builder, "SurvivabilityZoneGoalMembers", status.SurvivabilityZonePositioning.LastReason);
         Append(builder, "AggroSafetyGoalMembers", status.AggroSafety.LastReason);
         Append(builder, "ArenaEdge", status.ArenaEdgeReason);
+        builder.AppendLine();
+
+        AppendSection(builder, "Movement Intent Planner");
+        Append(builder, "IntentId", status.MovementPlanner.IntentId);
+        Append(builder, "ChosenSource", status.MovementPlanner.ChosenSource);
+        Append(builder, "Destination", status.MovementPlanner.Destination);
+        Append(builder, "AcceptanceRadius", status.MovementPlanner.AcceptanceRadius);
+        Append(builder, "HoldRemainingMs", status.MovementPlanner.HoldRemainingMs);
+        Append(builder, "SwitchReason", status.MovementPlanner.SwitchReason);
+        Append(builder, "SuppressionReason", status.MovementPlanner.SuppressionReason);
+        Append(builder, "GeneratedCount", status.MovementPlanner.GeneratedCount);
+        Append(builder, "AcceptedCount", status.MovementPlanner.AcceptedCount);
+        Append(builder, "RejectedByReason", string.Join(",", status.MovementPlanner.RejectedByReason.Select(entry => $"{entry.Key}:{entry.Value}")));
+        Append(builder, "ScoreBreakdown", status.MovementPlanner.ScoreBreakdown);
+        Append(builder, "PathStatus", status.MovementPlanner.PathStatus);
+        Append(builder, "PathDistance", status.MovementPlanner.PathDistance);
+        Append(builder, "PathDetourRatio", status.MovementPlanner.PathDetourRatio);
+        Append(builder, "PathWaypointCount", status.MovementPlanner.PathWaypointCount);
+        Append(builder, "PathCacheAgeMs", status.MovementPlanner.PathCacheAgeMilliseconds);
+        Append(builder, "FirstWaypoint", status.MovementPlanner.FirstWaypoint);
+        Append(builder, "FirstWaypointDistance", status.MovementPlanner.FirstWaypointDistance);
+        Append(builder, "FirstWaypointYawDelta", status.MovementPlanner.FirstWaypointYawDelta);
+        Append(builder, "VnavmeshReady", status.MovementPlanner.Vnavmesh.Ready);
+        Append(builder, "VnavmeshAutoLoad", status.MovementPlanner.Vnavmesh.AutoLoad);
+        Append(builder, "VnavmeshPathfindInProgress", status.MovementPlanner.Vnavmesh.PathfindInProgress);
+        Append(builder, "VnavmeshPathfindQueued", status.MovementPlanner.Vnavmesh.PathfindQueued);
+        Append(builder, "VnavmeshProbeSource", status.MovementPlanner.VnavmeshProbeSource);
+        Append(builder, "VnavmeshDestination", status.MovementPlanner.VnavmeshDestination);
+        Append(builder, "LineOfSight", status.MovementPlanner.LineOfSight);
+        Append(builder, "BmrForcedMovement", status.MovementPlanner.BmrForcedMovement);
+        Append(builder, "BmrForbiddenZones", status.MovementPlanner.BmrForbiddenZones);
+        Append(builder, "BmrMoveRequested", status.MovementPlanner.BmrMoveRequested);
+        Append(builder, "BmrMoveImminent", status.MovementPlanner.BmrMoveImminent);
+        Append(builder, "TopCandidates", FormatPlannerCandidates(status.MovementPlanner.TopCandidates));
         builder.AppendLine();
 
         AppendSection(builder, "AoE Pack Positioning");
@@ -117,6 +191,26 @@ internal static class StatusReporter
         Append(builder, "RsrSnapshotMode", status.AoePackPositioning.RsrSnapshotMode);
         Append(builder, "RsrLastRestore", status.AoePackPositioning.RsrLastRestoreStatus);
         Append(builder, "PriorityTargetCount", status.AoePackPositioning.PriorityTargetCount);
+        builder.AppendLine();
+
+        AppendSection(builder, "Trash Pull Cognition");
+        Append(builder, "Phase", status.AoePackPositioning.TrashPull.Phase);
+        Append(builder, "Confidence", status.AoePackPositioning.TrashPull.Confidence);
+        Append(builder, "Reason", status.AoePackPositioning.TrashPull.Reason);
+        Append(builder, "TankObjectId", status.AoePackPositioning.TrashPull.TankObjectId);
+        Append(builder, "TankPosition", status.AoePackPositioning.TrashPull.TankPosition);
+        Append(builder, "TankSpeed", status.AoePackPositioning.TrashPull.TankSpeed);
+        Append(builder, "ProjectedTankPosition", status.AoePackPositioning.TrashPull.ProjectedTankPosition);
+        Append(builder, "LeadDestination", status.AoePackPositioning.TrashPull.LeadDestination);
+        Append(builder, "LeadCandidateActive", status.AoePackPositioning.TrashPull.LeadCandidateActive);
+        Append(builder, "LeadClampApplied", status.AoePackPositioning.TrashPull.LeadClampApplied);
+        Append(builder, "BehindDistance", status.AoePackPositioning.TrashPull.BehindDistance);
+        Append(builder, "PackCentroid", status.AoePackPositioning.TrashPull.PackCentroid);
+        Append(builder, "PackSpeed", status.AoePackPositioning.TrashPull.PackSpeed);
+        Append(builder, "PartyMedianSpeed", status.AoePackPositioning.TrashPull.PartyMedianSpeed);
+        Append(builder, "DominantTargetCount", status.AoePackPositioning.TrashPull.DominantTargetCount);
+        Append(builder, "StragglerTargetCount", status.AoePackPositioning.TrashPull.StragglerTargetCount);
+        Append(builder, "LeadRejectionReason", status.AoePackPositioning.TrashPull.LeadRejectionReason);
         builder.AppendLine();
 
         AppendSection(builder, "Passage of Arms Positioning");
@@ -153,6 +247,7 @@ internal static class StatusReporter
         Append(builder, "Injected", status.AggroSafety.Injected);
         Append(builder, "ActiveMobId", status.AggroSafety.ActiveMobId);
         Append(builder, "SelectedTankId", status.AggroSafety.SelectedTankId);
+        Append(builder, "SelectedTankPosition", status.AggroSafety.SelectedTankPosition);
         Append(builder, "AggroSeconds", status.AggroSafety.AggroSeconds);
         Append(builder, "PriorityDevalued", status.AggroSafety.PriorityDevalued);
         builder.AppendLine();
@@ -193,5 +288,24 @@ internal static class StatusReporter
             IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
             _ => value.ToString() ?? string.Empty
         };
+    }
+
+    private static string FormatFacingSummary(FacingStatus facing)
+    {
+        var source = facing.Source?.ToString() ?? "None";
+        var state = facing.Applied
+            ? "applied"
+            : string.IsNullOrEmpty(facing.RejectionReason)
+                ? "ready"
+                : facing.RejectionReason;
+        return $"{source}/{facing.Reason}/{state}";
+    }
+
+    private static string FormatPlannerCandidates(System.Collections.Generic.IReadOnlyList<MovementCandidateScore> candidates)
+    {
+        return candidates.Count == 0
+            ? "<none>"
+            : string.Join(" | ", candidates.Select(candidate =>
+                $"{candidate.Source}:{(candidate.Accepted ? "accepted" : candidate.RejectionReason)}:{candidate.TotalScore.ToString("0.0", CultureInfo.InvariantCulture)}@{FormatValue(candidate.Destination)}"));
     }
 }

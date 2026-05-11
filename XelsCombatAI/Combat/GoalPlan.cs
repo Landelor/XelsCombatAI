@@ -38,6 +38,7 @@ internal sealed class GoalPlan(
         new(0.7071068f, -0.7071068f),
         new(0.9238795f, -0.3826834f)
     ];
+    private readonly Vector2 centroid = CalculateCentroid(targets, primaryTarget);
 
     public Delegate CreateGoalDelegate(Type wposType, FieldInfo xField, FieldInfo zField)
     {
@@ -61,10 +62,10 @@ internal sealed class GoalPlan(
     {
         return shape switch
         {
-            RsrAoeShape.Circle       => this.ScoreCircle(origin),
-            RsrAoeShape.Cone         => this.ScoreCone(origin),
+            RsrAoeShape.Circle => this.ScoreCircle(origin),
+            RsrAoeShape.Cone => this.ScoreCone(origin),
             RsrAoeShape.StraightLine => this.ScoreLine(origin),
-            _                        => 0
+            _ => 0
         };
     }
 
@@ -72,6 +73,7 @@ internal sealed class GoalPlan(
     {
         var best = this.ScoreCandidate(playerPosition);
         var bestPosition = playerPosition;
+        var bestPreference = this.CandidatePreference(playerPosition, playerPosition);
         foreach (var candidate in this.GenerateCandidates(playerPosition))
         {
             if (candidateAllowed != null && !candidateAllowed(candidate))
@@ -80,12 +82,16 @@ internal sealed class GoalPlan(
             }
 
             var score = this.ScoreCandidate(candidate);
+            var preference = this.CandidatePreference(candidate, playerPosition);
             if (score.Hits > best.Hits ||
                 (score.Hits == best.Hits &&
-                 Vector2.DistanceSquared(candidate, playerPosition) < Vector2.DistanceSquared(bestPosition, playerPosition)))
+                 (preference > bestPreference + 0.05f ||
+                  MathF.Abs(preference - bestPreference) <= 0.05f &&
+                  Vector2.DistanceSquared(candidate, playerPosition) < Vector2.DistanceSquared(bestPosition, playerPosition))))
             {
                 best = score;
                 bestPosition = candidate;
+                bestPreference = preference;
             }
         }
 
@@ -121,7 +127,11 @@ internal sealed class GoalPlan(
     {
         var pos = new Vector2(x, z);
         var hits = this.ScoreHits(pos);
-        if (hits < minHits || hits <= scoreBaselineHits) return 0f;
+        if (hits < minHits || hits <= scoreBaselineHits)
+        {
+            return 0f;
+        }
+
         var maxImprovement = Math.Max(1, targets.Length - scoreBaselineHits);
         return Math.Clamp((hits - scoreBaselineHits) / (float)maxImprovement, 0f, GoalZoneScorePolicy.AoeRepositionPreference);
     }
@@ -134,39 +144,116 @@ internal sealed class GoalPlan(
     private IEnumerable<Vector2> GenerateCandidates(Vector2 playerPosition)
     {
         yield return playerPosition;
-        yield return this.AverageTargets();
+        yield return this.centroid;
         foreach (var target in targets)
         {
             yield return target.Position;
         }
 
-        var distances = new[] { Math.Min(3f, range), Math.Min(6f, range), Math.Min(radius, range), range };
-        foreach (var anchor in new[] { primaryTarget.Position, this.AverageTargets() })
+        var distance0 = Math.Min(3f, range);
+        var distance1 = Math.Min(6f, range);
+        var distance2 = Math.Min(radius, range);
+        foreach (var candidate in GenerateCandidatesForAnchor(primaryTarget.Position, distance0, distance1, distance2, range))
         {
-            foreach (var distance in distances)
+            yield return candidate;
+        }
+
+        foreach (var candidate in GenerateCandidatesForAnchor(this.centroid, distance0, distance1, distance2, range))
+        {
+            yield return candidate;
+        }
+    }
+
+    private static IEnumerable<Vector2> GenerateCandidatesForAnchor(Vector2 anchor, float distance0, float distance1, float distance2, float distance3)
+    {
+        if (distance0 > 0.1f)
+        {
+            foreach (var direction in Directions)
             {
-                if (distance <= 0.1f) continue;
-                foreach (var direction in Directions)
-                {
-                    yield return anchor - direction * distance;
-                }
+                yield return anchor - direction * distance0;
+            }
+        }
+
+        if (distance1 > 0.1f)
+        {
+            foreach (var direction in Directions)
+            {
+                yield return anchor - direction * distance1;
+            }
+        }
+
+        if (distance2 > 0.1f)
+        {
+            foreach (var direction in Directions)
+            {
+                yield return anchor - direction * distance2;
+            }
+        }
+
+        if (distance3 > 0.1f)
+        {
+            foreach (var direction in Directions)
+            {
+                yield return anchor - direction * distance3;
             }
         }
     }
 
-    private Vector2 AverageTargets()
+    private static Vector2 CalculateCentroid(TargetSnapshot[] targets, TargetSnapshot primaryTarget)
     {
         var total = Vector2.Zero;
         foreach (var target in targets)
+        {
             total += target.Position;
+        }
+
         return targets.Length == 0 ? primaryTarget.Position : total / targets.Length;
+    }
+
+    private float CandidatePreference(Vector2 candidate, Vector2 playerPosition)
+    {
+        if (shape == RsrAoeShape.Circle)
+        {
+            return 0f;
+        }
+
+        var toCentroid = this.centroid - candidate;
+        var toPrimary = primaryTarget.Position - candidate;
+        var aimIntoPack = 0f;
+        if (toCentroid.LengthSquared() > 0.01f && toPrimary.LengthSquared() > 0.01f)
+        {
+            aimIntoPack = (Vector2.Dot(Vector2.Normalize(toCentroid), Vector2.Normalize(toPrimary)) + 1f) * 0.5f;
+        }
+
+        var centerDistance = Vector2.Distance(candidate, this.centroid);
+        var outsidePack = Math.Clamp((centerDistance - 1.5f) / 6f, 0f, 1f);
+        var nearestSurface = float.MaxValue;
+        foreach (var target in targets)
+        {
+            nearestSurface = MathF.Min(nearestSurface, Vector2.Distance(candidate, target.Position) - target.Radius);
+        }
+
+        var hitboxPenalty = nearestSurface switch
+        {
+            < 0.25f => 1.25f,
+            < 1.25f => 0.45f,
+            _ => 0f
+        };
+        var travelPenalty = Math.Clamp(Vector2.Distance(candidate, playerPosition) / 30f, 0f, 1f) * 0.25f;
+        return (aimIntoPack * 0.75f) + (outsidePack * 0.55f) - hitboxPenalty - travelPenalty;
     }
 
     private int ScoreCircle(Vector2 origin)
     {
         var count = 0;
         foreach (var target in targets)
-            if (this.TargetHit(target, origin)) ++count;
+        {
+            if (this.TargetHit(target, origin))
+            {
+                ++count;
+            }
+        }
+
         return count;
     }
 
@@ -175,7 +262,10 @@ internal sealed class GoalPlan(
         var toPrimary = primaryTarget.Position - origin;
         var primaryDistanceSq = toPrimary.LengthSquared();
         var effectiveRange = radius + primaryTarget.Radius;
-        if (primaryDistanceSq <= 0.01f || primaryDistanceSq > effectiveRange * effectiveRange) return 0;
+        if (primaryDistanceSq <= 0.01f || primaryDistanceSq > effectiveRange * effectiveRange)
+        {
+            return 0;
+        }
 
         var direction = Vector2.Normalize(toPrimary);
         // halfWidth is the half-angle in radians (π/3 = 60°, matching RSR's hardcoded _alpha).
@@ -184,8 +274,12 @@ internal sealed class GoalPlan(
         foreach (var target in targets)
         {
             var toTarget = target.Position - origin;
-            if (this.TargetHitInCone(target, origin, direction, cosHalfAngle, toTarget)) ++count;
+            if (this.TargetHitInCone(target, origin, direction, cosHalfAngle, toTarget))
+            {
+                ++count;
+            }
         }
+
         return count;
     }
 
@@ -194,12 +288,21 @@ internal sealed class GoalPlan(
         var toPrimary = primaryTarget.Position - origin;
         var primaryDistanceSq = toPrimary.LengthSquared();
         var effectiveRange = radius + primaryTarget.Radius;
-        if (primaryDistanceSq <= 0.01f || primaryDistanceSq > effectiveRange * effectiveRange) return 0;
+        if (primaryDistanceSq <= 0.01f || primaryDistanceSq > effectiveRange * effectiveRange)
+        {
+            return 0;
+        }
 
         var direction = Vector2.Normalize(toPrimary);
         var count = 0;
         foreach (var target in targets)
-            if (this.TargetHitInLine(target, origin, direction)) ++count;
+        {
+            if (this.TargetHitInLine(target, origin, direction))
+            {
+                ++count;
+            }
+        }
+
         return count;
     }
 
@@ -207,10 +310,10 @@ internal sealed class GoalPlan(
     {
         return shape switch
         {
-            RsrAoeShape.Circle       => this.TargetHitInCircle(target, origin),
-            RsrAoeShape.Cone         => this.TargetHitInCone(target, origin),
+            RsrAoeShape.Circle => this.TargetHitInCircle(target, origin),
+            RsrAoeShape.Cone => this.TargetHitInCone(target, origin),
             RsrAoeShape.StraightLine => this.TargetHitInLine(target, origin),
-            _                        => false
+            _ => false
         };
     }
 
@@ -225,7 +328,11 @@ internal sealed class GoalPlan(
         var toPrimary = primaryTarget.Position - origin;
         var primaryDistanceSq = toPrimary.LengthSquared();
         var effectiveRange = radius + primaryTarget.Radius;
-        if (primaryDistanceSq <= 0.01f || primaryDistanceSq > effectiveRange * effectiveRange) return false;
+        if (primaryDistanceSq <= 0.01f || primaryDistanceSq > effectiveRange * effectiveRange)
+        {
+            return false;
+        }
+
         var cosHalfAngle = MathF.Cos(halfWidth);
         return this.TargetHitInCone(target, origin, Vector2.Normalize(toPrimary), cosHalfAngle, target.Position - origin);
     }
@@ -233,7 +340,11 @@ internal sealed class GoalPlan(
     private bool TargetHitInCone(TargetSnapshot target, Vector2 origin, Vector2 direction, float cosHalfAngle, Vector2 toTarget)
     {
         var effective = radius + target.Radius;
-        if (toTarget.LengthSquared() > effective * effective) return false;
+        if (toTarget.LengthSquared() > effective * effective)
+        {
+            return false;
+        }
+
         var length = toTarget.Length();
         return length > 0.01f && Vector2.Dot(toTarget / length, direction) >= cosHalfAngle;
     }

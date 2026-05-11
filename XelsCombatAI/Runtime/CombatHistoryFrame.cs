@@ -1,13 +1,20 @@
+using System;
+using System.Collections.Generic;
 using System.Numerics;
+using XelsCombatAI.Combat;
 using XelsCombatAI.Game;
+using XelsCombatAI.Integrations;
 
 namespace XelsCombatAI.Runtime;
 
 internal sealed record CombatHistoryFrame(
+    DateTime TimestampUtc,
     float T,
     bool InCombat,
     bool IsDead,
     uint PlayerClassJobId,
+    uint TerritoryType,
+    uint ContentFinderConditionId,
     Vector3? PlayerPosition,
     float PlayerRotation,
     uint TargetBaseId,
@@ -29,6 +36,7 @@ internal sealed record CombatHistoryFrame(
     string GapSafety,
     string EscapeSafety,
     Vector3? EscapeLanding,
+    MobilityDecisionDiagnostics MobilityDecision,
     // Healer coverage zone
     string HealerCoverageReason,
     bool HealerCoverageInjected,
@@ -37,6 +45,10 @@ internal sealed record CombatHistoryFrame(
     // AoE pack
     string Reason,
     bool Henched,
+    string RsrStatus,
+    string RsrReflectionDiagnostics,
+    StateCommandType RsrSnapshotMode,
+    string RsrLastRestore,
     int Targets,
     int CurrentHits,
     int BestHits,
@@ -80,4 +92,29 @@ internal sealed record CombatHistoryFrame(
     string BossModMovementOverride,
     string BossModHintSummary,
     BossModMovementDiagnostics BossModMovement,
-    string ManualMovementInput);
+    MovementPlannerDiagnostics MovementPlanner,
+    string ManualMovementInput,
+    FacingStatus Facing,
+    RedMageMeleeComboStatus RedMageMeleeCombo,
+    TrashPullDiagnostics TrashPull,
+    IReadOnlyList<CombatHistoryActorSnapshot> Actors);
+
+internal sealed record CombatHistoryActorSnapshot(
+    string Relation,
+    ulong GameObjectId,
+    uint EntityId,
+    uint BaseId,
+    string ObjectKind,
+    byte SubKind,
+    uint ClassJobId,
+    byte Level,
+    Vector3 Position,
+    float Rotation,
+    float Radius,
+    bool IsTargetable,
+    bool IsDead,
+    bool InCombat,
+    uint CurrentHp,
+    uint MaxHp,
+    ulong TargetObjectId,
+    float DistanceToPlayer);

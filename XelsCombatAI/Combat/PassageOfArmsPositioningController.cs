@@ -36,7 +36,7 @@ internal sealed class PassageOfArmsPositioningController(
     Configuration config,
     DalamudServices services,
     Func<bool> automatedMovementSuppressed)
-    : IBossModGoalZoneContributor
+    : IBossModGoalZoneContributor, IMovementCandidateSource
 {
     private const float ConeRadius = 8f;
     private const float ConeHalfAngle = MathF.PI / 3f;
@@ -45,6 +45,7 @@ internal sealed class PassageOfArmsPositioningController(
     private const float StrongInsideScore = GoalZoneScorePolicy.NormalPreference;
     private const float PreferredPointScore = GoalZoneScorePolicy.StrongPreference;
     private const uint PaladinJobId = 19;
+    private static readonly TimeSpan OverlayRefreshInterval = TimeSpan.FromMilliseconds(250);
     private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
     private FieldInfo? goalZonesField;
@@ -61,6 +62,7 @@ internal sealed class PassageOfArmsPositioningController(
     private Delegate? lastGoalDelegate;
     private PassageGoalPlan? lastPlan;
     private PassageOfArmsOverlaySnapshot? lastOverlay;
+    private DateTime nextOverlayRefresh = DateTime.MinValue;
 
     public PassageOfArmsPositioningStatus Status => new(
         this.hookState,
@@ -73,6 +75,26 @@ internal sealed class PassageOfArmsPositioningController(
         this.lastOverlay?.PreferredPosition);
 
     public PassageOfArmsOverlaySnapshot? Overlay => this.lastOverlay;
+
+    public void AddMovementCandidates(MovementPlannerContext context, ICollection<MovementCandidate> candidates)
+    {
+        var status = this.Status;
+        if (!status.Injected || status.PreferredPosition == null)
+        {
+            return;
+        }
+
+        candidates.Add(new(
+            "Passage of Arms",
+            status.LastReason,
+            new Vector3(status.PreferredPosition.Value.X, context.PlayerPosition.Y, status.PreferredPosition.Value.Z),
+            1.75f,
+            MovementCandidatePriority.Defensive,
+            1f,
+            0f,
+            0f,
+            status.PlayerInCone ? 1f : 0.85f));
+    }
 
     public void SetHookState(string state)
     {
@@ -94,6 +116,7 @@ internal sealed class PassageOfArmsPositioningController(
         this.lastGoalDelegate = null;
         this.lastPlan = null;
         this.lastOverlay = null;
+        this.nextOverlayRefresh = DateTime.MinValue;
     }
 
     public void TryInjectGoal(object hints, ICollection<BossModGoalContribution> contributions)
@@ -163,6 +186,7 @@ internal sealed class PassageOfArmsPositioningController(
         this.lastDistanceToPreferred = Vector2.Distance(plan.PlayerPosition, plan.PreferredPosition);
         this.lastPlayerInCone = plan.PlayerInCone;
         this.lastOverlay = plan.CreateOverlay(player.Position.Y, injected: true);
+        this.nextOverlayRefresh = DateTime.UtcNow.Add(OverlayRefreshInterval);
         this.lastReason = plan.PlayerInCone ? "holding inside Passage of Arms" : "goal injected";
     }
 
@@ -171,6 +195,7 @@ internal sealed class PassageOfArmsPositioningController(
         if (!config.ShowDecisionOverlay)
         {
             this.lastOverlay = null;
+            this.nextOverlayRefresh = DateTime.MinValue;
             return;
         }
 
@@ -178,9 +203,17 @@ internal sealed class PassageOfArmsPositioningController(
         if (player == null || services.Condition[ConditionFlag.Unconscious])
         {
             this.lastOverlay = null;
+            this.nextOverlayRefresh = DateTime.MinValue;
             return;
         }
 
+        var now = DateTime.UtcNow;
+        if (now < this.nextOverlayRefresh)
+        {
+            return;
+        }
+
+        this.nextOverlayRefresh = now.Add(OverlayRefreshInterval);
         var plan = this.FindBestPlan(player);
         if (plan == null)
         {
@@ -203,6 +236,7 @@ internal sealed class PassageOfArmsPositioningController(
         this.lastGoalDelegate = null;
         this.lastPlan = null;
         this.lastOverlay = null;
+        this.nextOverlayRefresh = DateTime.MinValue;
     }
 
     private bool EnsureResolved(Type hintsType)

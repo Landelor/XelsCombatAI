@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace XelsCombatAI.Integrations;
@@ -8,8 +9,21 @@ internal sealed class DependencyChecker(
     BossModIpc bossMod,
     RotationSolverIpc rotationSolver)
 {
-    public bool DependenciesAvailable(out string missing)
+    private static readonly TimeSpan DependencyCacheDuration = TimeSpan.FromMilliseconds(750);
+
+    private DateTime cachedDependencyCheckUntil = DateTime.MinValue;
+    private bool cachedDependenciesAvailable;
+    private string cachedMissing = string.Empty;
+
+    public bool DependenciesAvailable(out string missing, bool forceRefresh = false)
     {
+        var now = DateTime.UtcNow;
+        if (!forceRefresh && now < this.cachedDependencyCheckUntil)
+        {
+            missing = this.cachedMissing;
+            return this.cachedDependenciesAvailable;
+        }
+
         var missingParts = new List<string>();
 
         if (!this.IsBossModAvailable())
@@ -23,7 +37,10 @@ internal sealed class DependencyChecker(
         }
 
         missing = string.Join("; ", missingParts);
-        return missingParts.Count == 0;
+        this.cachedMissing = missing;
+        this.cachedDependenciesAvailable = missingParts.Count == 0;
+        this.cachedDependencyCheckUntil = now.Add(DependencyCacheDuration);
+        return this.cachedDependenciesAvailable;
     }
 
     public string? GetDependencyWarning()

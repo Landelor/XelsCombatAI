@@ -9,13 +9,13 @@ namespace XelsCombatAI.Integrations;
 
 internal enum StateCommandType : byte
 {
-    Off        = 0,
-    Auto       = 1,
+    Off = 0,
+    Auto = 1,
     TargetOnly = 2,
-    Manual     = 3,
-    AutoDuty   = 4,
-    Henched    = 5,
-    PvP        = 6,
+    Manual = 3,
+    AutoDuty = 4,
+    Henched = 5,
+    PvP = 6,
 }
 
 internal sealed class RotationSolverIpc
@@ -26,12 +26,13 @@ internal sealed class RotationSolverIpc
     private const string DisableTrueNorthCommand = "AutoUseTrueNorth False";
 
     [EzIPC("OtherCommand")]
-    private readonly Action<OtherCommandType, string> otherCommand = null!;
+    private Action<OtherCommandType, string> otherCommand = static (_, _) => throw new InvalidOperationException("Rotation Solver Reborn IPC is not initialized.");
 
     [EzIPC("ChangeOperatingMode")]
-    private readonly Action<StateCommandType> changeOperatingMode = null!;
+    private Action<StateCommandType> changeOperatingMode = static _ => throw new InvalidOperationException("Rotation Solver Reborn IPC is not initialized.");
 
     private readonly IDalamudPluginInterface pluginInterface;
+    private readonly IPluginLog log;
 
     private Type? dataCenterType;
     private PropertyInfo? stateProp;
@@ -41,34 +42,46 @@ internal sealed class RotationSolverIpc
     private PropertyInfo? isTargetOnlyProp;
     private PropertyInfo? isPvpStateEnabledProp;
     private PropertyInfo? specialTypeProp;
+    private DateTime nextFailureLog = DateTime.MinValue;
 
-    public RotationSolverIpc(IDalamudPluginInterface pluginInterface)
+    public RotationSolverIpc(IDalamudPluginInterface pluginInterface, IPluginLog log)
     {
         this.pluginInterface = pluginInterface;
-        EzIPC.Init(this, IpcPrefix);
+        this.log = log;
+        try
+        {
+            EzIPC.Init(this, IpcPrefix);
+        }
+        catch (Exception ex)
+        {
+            // RSR is optional. If its IPC is unavailable during plugin-manager churn,
+            // callers treat the integration as temporarily unavailable.
+            this.LogRecoverableFailure(ex, "Could not initialize Rotation Solver Reborn IPC.");
+        }
     }
 
     public bool IsAvailable(IDalamudPluginInterface pluginInterface)
     {
-        return pluginInterface.InstalledPlugins.Any(plugin =>
-            plugin.IsLoaded &&
-            (string.Equals(plugin.InternalName, InternalName, StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(plugin.Name, "Rotation Solver Reborn", StringComparison.OrdinalIgnoreCase)));
+        return ReflectionObjectSearch.HasLoadedPlugin(
+            pluginInterface,
+            InternalName,
+            "RotationSolverReborn",
+            "Rotation Solver Reborn");
     }
 
-    public void DisableAutoTrueNorth()
+    public bool DisableAutoTrueNorth()
     {
-        this.otherCommand(OtherCommandType.Settings, DisableTrueNorthCommand);
+        return this.TryInvoke(() => this.otherCommand(OtherCommandType.Settings, DisableTrueNorthCommand));
     }
 
-    public void SetHenched()
+    public bool SetHenched()
     {
-        this.changeOperatingMode(StateCommandType.Henched);
+        return this.TryInvoke(() => this.changeOperatingMode(StateCommandType.Henched));
     }
 
-    public void RestoreMode(StateCommandType mode)
+    public bool RestoreMode(StateCommandType mode)
     {
-        this.changeOperatingMode(mode);
+        return this.TryInvoke(() => this.changeOperatingMode(mode));
     }
 
     public bool IsNoCasting(IPluginLog log)
@@ -76,7 +89,10 @@ internal sealed class RotationSolverIpc
         try
         {
             if (!this.EnsureDataCenterResolved() || this.specialTypeProp == null)
+            {
                 return false;
+            }
+
             var value = this.specialTypeProp.GetValue(null);
             // SpecialCommandType.NoCasting == 13
             return value != null && Convert.ToByte(value) == 13;
@@ -98,22 +114,40 @@ internal sealed class RotationSolverIpc
             }
 
             var isHenched = this.isHenchedProp!.GetValue(null) as bool? ?? false;
-            if (isHenched) return StateCommandType.Henched;
+            if (isHenched)
+            {
+                return StateCommandType.Henched;
+            }
 
             var isAutoDuty = this.isAutoDutyProp?.GetValue(null) as bool? ?? false;
-            if (isAutoDuty) return StateCommandType.AutoDuty;
+            if (isAutoDuty)
+            {
+                return StateCommandType.AutoDuty;
+            }
 
             var isPvp = this.isPvpStateEnabledProp?.GetValue(null) as bool? ?? false;
-            if (isPvp) return StateCommandType.PvP;
+            if (isPvp)
+            {
+                return StateCommandType.PvP;
+            }
 
             var isTargetOnly = this.isTargetOnlyProp?.GetValue(null) as bool? ?? false;
-            if (isTargetOnly) return StateCommandType.TargetOnly;
+            if (isTargetOnly)
+            {
+                return StateCommandType.TargetOnly;
+            }
 
             var isManual = this.isManualProp!.GetValue(null) as bool? ?? false;
-            if (isManual) return StateCommandType.Manual;
+            if (isManual)
+            {
+                return StateCommandType.Manual;
+            }
 
             var state = this.stateProp!.GetValue(null) as bool? ?? false;
-            if (state) return StateCommandType.Auto;
+            if (state)
+            {
+                return StateCommandType.Auto;
+            }
 
             return StateCommandType.Off;
         }
@@ -126,6 +160,12 @@ internal sealed class RotationSolverIpc
 
     private bool EnsureDataCenterResolved()
     {
+        if (!this.IsAvailable(this.pluginInterface))
+        {
+            this.ResetReflectionCache();
+            return false;
+        }
+
         if (this.dataCenterType != null)
         {
             return true;
@@ -143,14 +183,19 @@ internal sealed class RotationSolverIpc
             "RotationSolver",
             "Rotation Solver Reborn");
         if (plugin == null)
+        {
             return false;
+        }
 
         var pluginAssembly = plugin.GetType().Assembly;
-        System.Reflection.Assembly? basicAssembly = null;
+        Assembly? basicAssembly = null;
         foreach (var refName in pluginAssembly.GetReferencedAssemblies())
         {
             if (!string.Equals(refName.Name, "RotationSolver.Basic", StringComparison.Ordinal))
+            {
                 continue;
+            }
+
             foreach (var loaded in AppDomain.CurrentDomain.GetAssemblies())
             {
                 if (loaded.GetName().Name == refName.Name && loaded.GetName().Version == refName.Version)
@@ -162,32 +207,93 @@ internal sealed class RotationSolverIpc
             break;
         }
         if (basicAssembly == null)
+        {
             return false;
+        }
 
         Type? type;
-        try { type = basicAssembly.GetType(DataCenterTypeName, throwOnError: false); }
-        catch { return false; }
-        if (type == null) return false;
+        try
+        {
+            type = basicAssembly.GetType(DataCenterTypeName, throwOnError: false);
+        }
+        catch (Exception ex)
+        {
+            this.LogRecoverableFailure(ex, "Could not resolve Rotation Solver Reborn DataCenter type.");
+            return false;
+        }
+
+        if (type == null)
+        {
+            return false;
+        }
 
         const BindingFlags StaticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-        var state    = type.GetProperty("State",     StaticFlags);
-        var isManual = type.GetProperty("IsManual",  StaticFlags);
+        var state = type.GetProperty("State", StaticFlags);
+        var isManual = type.GetProperty("IsManual", StaticFlags);
         var isAutoDuty = type.GetProperty("IsAutoDuty", StaticFlags);
         var isHenched = type.GetProperty("IsHenched", StaticFlags);
         var isTargetOnly = type.GetProperty("IsTargetOnly", StaticFlags);
         var isPvpStateEnabled = type.GetProperty("IsPvPStateEnabled", StaticFlags);
 
-        if (state == null || isManual == null || isHenched == null) return false;
+        if (state == null || isManual == null || isHenched == null)
+        {
+            return false;
+        }
 
-        this.dataCenterType        = type;
-        this.stateProp             = state;
-        this.isManualProp          = isManual;
-        this.isAutoDutyProp        = isAutoDuty;
-        this.isHenchedProp         = isHenched;
-        this.isTargetOnlyProp      = isTargetOnly;
+        this.dataCenterType = type;
+        this.stateProp = state;
+        this.isManualProp = isManual;
+        this.isAutoDutyProp = isAutoDuty;
+        this.isHenchedProp = isHenched;
+        this.isTargetOnlyProp = isTargetOnly;
         this.isPvpStateEnabledProp = isPvpStateEnabled;
-        this.specialTypeProp       = type.GetProperty("SpecialType", StaticFlags);
+        this.specialTypeProp = type.GetProperty("SpecialType", StaticFlags);
         return true;
+    }
+
+    private bool TryInvoke(Action action)
+    {
+        try
+        {
+            if (!this.IsAvailable(this.pluginInterface))
+            {
+                this.ResetReflectionCache();
+                return false;
+            }
+
+            action();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            this.LogRecoverableFailure(ex, "Rotation Solver Reborn IPC invocation failed.");
+            this.ResetReflectionCache();
+            return false;
+        }
+    }
+
+    private void LogRecoverableFailure(Exception ex, string message)
+    {
+        var now = DateTime.UtcNow;
+        if (now < this.nextFailureLog)
+        {
+            return;
+        }
+
+        this.log.Verbose(ex, message);
+        this.nextFailureLog = now.AddSeconds(10);
+    }
+
+    private void ResetReflectionCache()
+    {
+        this.dataCenterType = null;
+        this.stateProp = null;
+        this.isManualProp = null;
+        this.isAutoDutyProp = null;
+        this.isHenchedProp = null;
+        this.isTargetOnlyProp = null;
+        this.isPvpStateEnabledProp = null;
+        this.specialTypeProp = null;
     }
 
     private enum OtherCommandType : byte

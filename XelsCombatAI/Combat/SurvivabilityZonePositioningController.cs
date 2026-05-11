@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Numerics;
@@ -36,13 +37,14 @@ internal sealed record SurvivabilityZoneOverlaySnapshot(
     string ZoneName,
     string CasterName);
 
-internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneContributor, IDisposable
+internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneContributor, IMovementCandidateSource, IDisposable
 {
     private const float PreferredEntryRadius = 1.5f;
     private const float ZoneEntryMargin = 1.5f;
     private const float PreferredEntryScore = GoalZoneScorePolicy.StrongPreference;
     private const float InsideScore = GoalZoneScorePolicy.NormalPreference;
     private static readonly TimeSpan CachedZoneGrace = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan OverlayRefreshInterval = TimeSpan.FromMilliseconds(250);
     private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
     private static readonly ZoneDefinition[] ZoneDefinitions =
@@ -71,6 +73,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
     private Delegate? lastGoalDelegate;
     private SurvivabilityZoneGoalPlan? lastPlan;
     private SurvivabilityZoneOverlaySnapshot? lastOverlay;
+    private DateTime nextOverlayRefresh = DateTime.MinValue;
     private readonly List<CachedPlacedZone> cachedPlacedZones = [];
 
     public SurvivabilityZonePositioningController(
@@ -97,6 +100,27 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
 
     public SurvivabilityZoneOverlaySnapshot? Overlay => this.lastOverlay;
 
+    public void AddMovementCandidates(MovementPlannerContext context, ICollection<MovementCandidate> candidates)
+    {
+        var status = this.Status;
+        var plan = this.lastPlan;
+        if (!status.Injected || status.ZoneCenter == null || plan == null || plan.PlayerInZone)
+        {
+            return;
+        }
+
+        candidates.Add(new(
+            "Defensive zone",
+            status.LastReason,
+            plan.MovementDestination(context.PlayerPosition.Y),
+            2.5f,
+            MovementCandidatePriority.Defensive,
+            1f,
+            0f,
+            0f,
+            0.85f));
+    }
+
     public void SetHookState(string state)
     {
         this.hookState = state;
@@ -118,6 +142,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         this.lastGoalDelegate = null;
         this.lastPlan = null;
         this.lastOverlay = null;
+        this.nextOverlayRefresh = DateTime.MinValue;
         this.cachedPlacedZones.Clear();
     }
 
@@ -181,19 +206,32 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             return;
         }
 
-        if (this.lastGoalDelegate == null || this.lastPlan == null || !this.lastPlan.SameSource(plan))
+        var previousPlan = this.lastPlan;
+        this.lastZoneName = plan.ZoneName;
+        this.lastCasterName = plan.CasterName;
+        this.lastDistanceToCenter = plan.DistanceToCenter;
+        this.lastPlan = plan;
+
+        if (plan.PlayerInZone)
+        {
+            this.lastGoalDelegate = null;
+            this.lastInjected = false;
+            this.lastOverlay = plan.CreateOverlay(player.Position.Y, injected: false);
+            this.nextOverlayRefresh = DateTime.UtcNow.Add(OverlayRefreshInterval);
+            this.lastReason = $"holding inside {plan.ZoneName}";
+            return;
+        }
+
+        if (this.lastGoalDelegate == null || previousPlan == null || !previousPlan.SameSource(plan))
         {
             this.lastGoalDelegate = plan.CreateGoalDelegate(this.resolvedWPosType!, this.wposXField!, this.wposZField!);
-            this.lastPlan = plan;
         }
 
         contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.DefensiveMechanic, "Defensive zone"));
         this.lastInjected = true;
-        this.lastZoneName = plan.ZoneName;
-        this.lastCasterName = plan.CasterName;
-        this.lastDistanceToCenter = plan.DistanceToCenter;
         this.lastOverlay = plan.CreateOverlay(player.Position.Y, injected: true);
-        this.lastReason = plan.PlayerInZone ? $"holding inside {plan.ZoneName}" : $"goal injected toward {plan.ZoneName}";
+        this.nextOverlayRefresh = DateTime.UtcNow.Add(OverlayRefreshInterval);
+        this.lastReason = $"goal injected toward {plan.ZoneName}";
     }
 
     public void RefreshOverlay()
@@ -201,6 +239,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         if (!config.ShowDecisionOverlay)
         {
             this.lastOverlay = null;
+            this.nextOverlayRefresh = DateTime.MinValue;
             return;
         }
 
@@ -208,9 +247,17 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         if (player == null || services.Condition[ConditionFlag.Unconscious])
         {
             this.lastOverlay = null;
+            this.nextOverlayRefresh = DateTime.MinValue;
             return;
         }
 
+        var now = DateTime.UtcNow;
+        if (now < this.nextOverlayRefresh)
+        {
+            return;
+        }
+
+        this.nextOverlayRefresh = now.Add(OverlayRefreshInterval);
         var plan = this.FindBestPlan(player);
         if (plan == null)
         {
@@ -234,6 +281,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         this.lastGoalDelegate = null;
         this.lastPlan = null;
         this.lastOverlay = null;
+        this.nextOverlayRefresh = DateTime.MinValue;
     }
 
     private bool EnsureResolved(Type hintsType)
@@ -433,9 +481,9 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         IReadOnlySet<ulong> friendlyIds,
         Vector2 playerPos,
         ZoneDiagnostics diagnostics,
-        out SurvivabilityZoneGoalPlan plan)
+        [NotNullWhen(true)] out SurvivabilityZoneGoalPlan? plan)
     {
-        plan = null!;
+        plan = null;
         if (zone.ActionId == 0)
         {
             return false;
@@ -706,6 +754,11 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         public float DistanceToCenter { get; }
         public bool PlayerInZone => this.playerInZone;
 
+        public Vector3 MovementDestination(float y)
+        {
+            return new Vector3(this.preferredEntryPosition.X, y, this.preferredEntryPosition.Y);
+        }
+
         public bool SameSource(SurvivabilityZoneGoalPlan other)
         {
             return this.casterId == other.casterId &&
@@ -759,7 +812,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
                 return PreferredEntryScore;
             }
 
-            return InsideScore;
+            return GoalZoneScorePolicy.WeakPreference;
         }
 
         private static Vector2 FindPreferredEntryPosition(Vector2 center, Vector2 playerPosition, float radius, float distanceToCenter, bool playerInZone)

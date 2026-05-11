@@ -33,7 +33,7 @@ internal sealed class HealerAoePositioningController(
     Configuration config,
     DalamudServices services,
     Func<bool> automatedMovementSuppressed)
-    : IBossModGoalZoneContributor
+    : IBossModGoalZoneContributor, IMovementCandidateSource
 {
     private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
@@ -71,6 +71,26 @@ internal sealed class HealerAoePositioningController(
         this.lastOverlay?.Center);
 
     public HealerCoverageOverlaySnapshot? Overlay => this.lastOverlay;
+
+    public void AddMovementCandidates(MovementPlannerContext context, ICollection<MovementCandidate> candidates)
+    {
+        var status = this.Status;
+        if (!status.Injected || status.Center == null)
+        {
+            return;
+        }
+
+        candidates.Add(new(
+            "Healer coverage",
+            status.LastReason,
+            new Vector3(status.Center.Value.X, context.PlayerPosition.Y, status.Center.Value.Z),
+            2.5f,
+            MovementCandidatePriority.Comfort,
+            1f,
+            0f,
+            0f,
+            0.8f));
+    }
 
     public void SetHookState(string state)
     {

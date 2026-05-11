@@ -11,16 +11,16 @@ public sealed class Configuration : IPluginConfiguration
     public const float InternalRangedUptimeRange = 25f;
     public const float InternalDisabledUptimeRange = 30f;
     public const float DefaultPreferredForbiddenZoneDistance = 1f;
-    public const float DefaultMinimumReengageGapCloserDistance = 8f;
-    public const float DefaultMinimumEscapeGapCloserDistance = 8f;
+    public const float DefaultMinimumGapCloserDistance = 8f;
     public const float MinimumGapCloserDistanceMin = 0f;
     public const float MinimumGapCloserDistanceMax = 20f;
 
-    public int Version { get; set; } = 16;
+    public int Version { get; set; } = 17;
 
     public bool Enabled { get; set; } = false;
     public bool ManageMovement { get; set; } = true;
     public bool RespectManualMovement { get; set; } = true;
+    public bool ManageSocialTurning { get; set; } = true;
     public bool ManageTargetUptime { get; set; } = true;
     public bool ManageForbiddenZoneDistance { get; set; } = true;
     public bool ManagePositionals { get; set; } = true;
@@ -29,6 +29,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool UseBetweenTheLines { get; set; } = true;
     public bool UseRetrace { get; set; } = true;
     public bool ReturnToLeylines { get; set; } = true;
+    public bool UseRedMageMeleeComboMovement { get; set; } = false;
     public bool UseGapCloser { get; set; } = false;
     public bool GapCloserPLD { get; set; } = true;
     public bool GapCloserWAR { get; set; } = true;
@@ -38,30 +39,21 @@ public sealed class Configuration : IPluginConfiguration
     public bool GapCloserDRG { get; set; } = true;
     public bool GapCloserNIN { get; set; } = true;
     public bool GapCloserSAM { get; set; } = true;
+    public bool GapCloserBRD { get; set; } = true;
     public bool GapCloserDNC { get; set; } = true;
     public bool GapCloserRPR { get; set; } = true;
     public bool GapCloserVPR { get; set; } = true;
     public bool GapCloserWHM { get; set; } = true;
-    public bool UseEscapeGapCloser { get; set; } = false;
-    public bool EscapeGapCloserMNK { get; set; } = true;
-    public bool EscapeGapCloserDRG { get; set; } = true;
-    public bool EscapeGapCloserNIN { get; set; } = true;
-    public bool EscapeGapCloserSAM { get; set; } = true;
-    public bool EscapeGapCloserBRD { get; set; } = true;
-    public bool EscapeGapCloserRPR { get; set; } = true;
-    public bool EscapeGapCloserVPR { get; set; } = true;
-    public bool EscapeGapCloserWHM { get; set; } = true;
-    public bool EscapeGapCloserBLM { get; set; } = true;
-    public bool EscapeGapCloserRDM { get; set; } = true;
-    public bool EscapeGapCloserSGE { get; set; } = true;
-    public bool EscapeGapCloserDNC { get; set; } = true;
-    public bool EscapeGapCloserPCT { get; set; } = true;
+    public bool GapCloserBLM { get; set; } = true;
+    public bool GapCloserRDM { get; set; } = true;
+    public bool GapCloserSGE { get; set; } = true;
+    public bool GapCloserPCT { get; set; } = true;
     public bool EchoStatusToChat { get; set; } = true;
     public CombatStyle CombatStyle { get; set; } = CombatStyle.Normal;
     public float PreferredForbiddenZoneDistance { get; set; } = DefaultPreferredForbiddenZoneDistance;
-    public float MinimumReengageGapCloserDistance { get; set; } = DefaultMinimumReengageGapCloserDistance;
-    public float MinimumEscapeGapCloserDistance { get; set; } = DefaultMinimumEscapeGapCloserDistance;
+    public float MinimumGapCloserDistance { get; set; } = DefaultMinimumGapCloserDistance;
     public bool ManageAoePackPositioning { get; set; } = true;
+    public bool LeadTrashPullsWithTank { get; set; } = true;
     public bool ManageHealerCoverageZone { get; set; } = true;
     public bool ManageDefensiveGroundZonePositioning { get; set; } = true;
     public bool ManagePassageOfArmsPositioning { get; set; } = true;
@@ -73,12 +65,29 @@ public sealed class Configuration : IPluginConfiguration
     public bool AvoidArenaEdge { get; set; } = true;
     public bool ShowDecisionOverlay { get; set; } = false;
     public bool ShowDecisionOverlayHud { get; set; } = false;
+    public bool FightReviewLoggingEnabled { get; set; } = false;
 
     private bool? manageSurvivabilityZonePositioningCompatibility;
     private bool? manageMultiTargetTargetingCompatibility;
     private bool? aoePackPositioningControlRsrTargetCompatibility;
     private bool? manageTrueNorthInRsrCompatibility;
     private bool? manageHealerAoePositioningCompatibility;
+    private bool? useEscapeGapCloserCompatibility;
+    private bool? escapeGapCloserMNKCompatibility;
+    private bool? escapeGapCloserDRGCompatibility;
+    private bool? escapeGapCloserNINCompatibility;
+    private bool? escapeGapCloserSAMCompatibility;
+    private bool? escapeGapCloserBRDCompatibility;
+    private bool? escapeGapCloserDNCCompatibility;
+    private bool? escapeGapCloserRPRCompatibility;
+    private bool? escapeGapCloserVPRCompatibility;
+    private bool? escapeGapCloserWHMCompatibility;
+    private bool? escapeGapCloserBLMCompatibility;
+    private bool? escapeGapCloserRDMCompatibility;
+    private bool? escapeGapCloserSGECompatibility;
+    private bool? escapeGapCloserPCTCompatibility;
+    private float? minimumReengageGapCloserDistanceCompatibility;
+    private float? minimumEscapeGapCloserDistanceCompatibility;
 
     [JsonProperty("ManageSurvivabilityZonePositioning")]
     private bool ManageSurvivabilityZonePositioningCompatibility
@@ -163,6 +172,102 @@ public sealed class Configuration : IPluginConfiguration
         }
     }
 
+    [JsonProperty("UseEscapeGapCloser")]
+    private bool UseEscapeGapCloserCompatibility
+    {
+        set => this.useEscapeGapCloserCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserMNK")]
+    private bool EscapeGapCloserMNKCompatibility
+    {
+        set => this.escapeGapCloserMNKCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserDRG")]
+    private bool EscapeGapCloserDRGCompatibility
+    {
+        set => this.escapeGapCloserDRGCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserNIN")]
+    private bool EscapeGapCloserNINCompatibility
+    {
+        set => this.escapeGapCloserNINCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserSAM")]
+    private bool EscapeGapCloserSAMCompatibility
+    {
+        set => this.escapeGapCloserSAMCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserBRD")]
+    private bool EscapeGapCloserBRDCompatibility
+    {
+        set => this.escapeGapCloserBRDCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserDNC")]
+    private bool EscapeGapCloserDNCCompatibility
+    {
+        set => this.escapeGapCloserDNCCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserRPR")]
+    private bool EscapeGapCloserRPRCompatibility
+    {
+        set => this.escapeGapCloserRPRCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserVPR")]
+    private bool EscapeGapCloserVPRCompatibility
+    {
+        set => this.escapeGapCloserVPRCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserWHM")]
+    private bool EscapeGapCloserWHMCompatibility
+    {
+        set => this.escapeGapCloserWHMCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserBLM")]
+    private bool EscapeGapCloserBLMCompatibility
+    {
+        set => this.escapeGapCloserBLMCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserRDM")]
+    private bool EscapeGapCloserRDMCompatibility
+    {
+        set => this.escapeGapCloserRDMCompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserSGE")]
+    private bool EscapeGapCloserSGECompatibility
+    {
+        set => this.escapeGapCloserSGECompatibility = value;
+    }
+
+    [JsonProperty("EscapeGapCloserPCT")]
+    private bool EscapeGapCloserPCTCompatibility
+    {
+        set => this.escapeGapCloserPCTCompatibility = value;
+    }
+
+    [JsonProperty("MinimumReengageGapCloserDistance")]
+    private float MinimumReengageGapCloserDistanceCompatibility
+    {
+        set => this.minimumReengageGapCloserDistanceCompatibility = value;
+    }
+
+    [JsonProperty("MinimumEscapeGapCloserDistance")]
+    private float MinimumEscapeGapCloserDistanceCompatibility
+    {
+        set => this.minimumEscapeGapCloserDistanceCompatibility = value;
+    }
+
     internal void Migrate()
     {
         if (this.Version < 13)
@@ -176,18 +281,7 @@ public sealed class Configuration : IPluginConfiguration
             this.GapCloserRPR = true;
             this.GapCloserDNC = true;
             this.GapCloserWHM = true;
-            this.UseEscapeGapCloser = false;
-            this.EscapeGapCloserMNK = true;
-            this.EscapeGapCloserNIN = true;
-            this.EscapeGapCloserRPR = true;
-            this.EscapeGapCloserVPR = true;
-            this.EscapeGapCloserWHM = true;
-            this.EscapeGapCloserBLM = true;
-            this.EscapeGapCloserSGE = true;
-            this.EscapeGapCloserPCT = true;
-            this.EscapeGapCloserDNC = true;
-            this.MinimumReengageGapCloserDistance = DefaultMinimumReengageGapCloserDistance;
-            this.MinimumEscapeGapCloserDistance = DefaultMinimumEscapeGapCloserDistance;
+            this.MinimumGapCloserDistance = DefaultMinimumGapCloserDistance;
             this.RespectManualMovement = true;
             this.ManageAoePackPositioning = true;
             this.ManageHealerCoverageZone = true;
@@ -212,37 +306,44 @@ public sealed class Configuration : IPluginConfiguration
 
         if (this.Version < 15)
         {
-            this.EscapeGapCloserRDM = true;
             this.Version = 15;
         }
 
         if (this.Version < 16)
         {
-            this.EscapeGapCloserDRG = true;
-            this.EscapeGapCloserSAM = true;
-            this.EscapeGapCloserBRD = true;
             this.Version = 16;
+        }
+
+        if (this.Version < 17)
+        {
+            this.FightReviewLoggingEnabled = false;
+            this.LeadTrashPullsWithTank = true;
+            this.ManageSocialTurning = true;
+            this.UseRedMageMeleeComboMovement = false;
+            this.MigrateUnifiedGapCloserSettings();
+            this.Version = 17;
         }
     }
 
     internal void Clamp()
     {
         this.PreferredForbiddenZoneDistance = Math.Clamp(this.PreferredForbiddenZoneDistance, 0f, 3f);
-        this.MinimumReengageGapCloserDistance = MathF.Round(Math.Clamp(this.MinimumReengageGapCloserDistance, MinimumGapCloserDistanceMin, MinimumGapCloserDistanceMax));
-        this.MinimumEscapeGapCloserDistance = MathF.Round(Math.Clamp(this.MinimumEscapeGapCloserDistance, MinimumGapCloserDistanceMin, MinimumGapCloserDistanceMax));
+        this.MinimumGapCloserDistance = MathF.Round(Math.Clamp(this.MinimumGapCloserDistance, MinimumGapCloserDistanceMin, MinimumGapCloserDistanceMax));
         this.CombatStyle = Enum.IsDefined(this.CombatStyle) ? this.CombatStyle : CombatStyle.Normal;
     }
 
     internal void ResetBehaviorSettings()
     {
         this.CombatStyle = CombatStyle.Normal;
+        this.ManageSocialTurning = true;
         this.ManageTargetUptime = true;
         this.ManageForbiddenZoneDistance = true;
         this.ManageAggroSafetyMovement = true;
+        this.LeadTrashPullsWithTank = true;
         this.GuardUnknownBossNavigationWithVnavmesh = true;
         this.PreferredForbiddenZoneDistance = DefaultPreferredForbiddenZoneDistance;
-        this.MinimumReengageGapCloserDistance = DefaultMinimumReengageGapCloserDistance;
-        this.MinimumEscapeGapCloserDistance = DefaultMinimumEscapeGapCloserDistance;
+        this.MinimumGapCloserDistance = DefaultMinimumGapCloserDistance;
+        this.UseRedMageMeleeComboMovement = false;
     }
 
     internal void ResetAll()
@@ -250,6 +351,7 @@ public sealed class Configuration : IPluginConfiguration
         this.Enabled = false;
         this.ManageMovement = true;
         this.RespectManualMovement = true;
+        this.ManageSocialTurning = true;
         this.ManageTargetUptime = true;
         this.ManageForbiddenZoneDistance = true;
         this.ManagePositionals = true;
@@ -258,6 +360,7 @@ public sealed class Configuration : IPluginConfiguration
         this.UseBetweenTheLines = true;
         this.UseRetrace = true;
         this.ReturnToLeylines = true;
+        this.UseRedMageMeleeComboMovement = false;
         this.UseGapCloser = false;
         this.GapCloserPLD = true;
         this.GapCloserWAR = true;
@@ -267,27 +370,19 @@ public sealed class Configuration : IPluginConfiguration
         this.GapCloserDRG = true;
         this.GapCloserNIN = true;
         this.GapCloserSAM = true;
+        this.GapCloserBRD = true;
         this.GapCloserDNC = true;
         this.GapCloserRPR = true;
         this.GapCloserVPR = true;
         this.GapCloserWHM = true;
-        this.UseEscapeGapCloser = false;
-        this.EscapeGapCloserMNK = true;
-        this.EscapeGapCloserDRG = true;
-        this.EscapeGapCloserNIN = true;
-        this.EscapeGapCloserSAM = true;
-        this.EscapeGapCloserBRD = true;
-        this.EscapeGapCloserRPR = true;
-        this.EscapeGapCloserVPR = true;
-        this.EscapeGapCloserWHM = true;
-        this.EscapeGapCloserBLM = true;
-        this.EscapeGapCloserRDM = true;
-        this.EscapeGapCloserSGE = true;
-        this.EscapeGapCloserDNC = true;
-        this.EscapeGapCloserPCT = true;
+        this.GapCloserBLM = true;
+        this.GapCloserRDM = true;
+        this.GapCloserSGE = true;
+        this.GapCloserPCT = true;
         this.EchoStatusToChat = true;
         this.CombatStyle = CombatStyle.Normal;
         this.ManageAoePackPositioning = true;
+        this.LeadTrashPullsWithTank = true;
         this.ManageHealerCoverageZone = true;
         this.ManageDefensiveGroundZonePositioning = true;
         this.ManagePassageOfArmsPositioning = true;
@@ -299,8 +394,89 @@ public sealed class Configuration : IPluginConfiguration
         this.AvoidArenaEdge = true;
         this.ShowDecisionOverlay = false;
         this.ShowDecisionOverlayHud = false;
+        this.FightReviewLoggingEnabled = false;
         this.ResetBehaviorSettings();
     }
+
+    private void MigrateUnifiedGapCloserSettings()
+    {
+        var oldReengageEnabled = this.UseGapCloser;
+        var oldEscapeEnabled = this.useEscapeGapCloserCompatibility ?? false;
+
+        if (oldEscapeEnabled && !oldReengageEnabled)
+        {
+            this.GapCloserPLD = false;
+            this.GapCloserWAR = false;
+            this.GapCloserDRK = false;
+            this.GapCloserGNB = false;
+            this.ApplyEscapeGapCloserJobs(replace: true);
+        }
+        else if (oldEscapeEnabled)
+        {
+            this.ApplyEscapeGapCloserJobs(replace: false);
+        }
+        else if (oldReengageEnabled)
+        {
+            this.GapCloserBRD = false;
+            this.GapCloserBLM = false;
+            this.GapCloserRDM = false;
+            this.GapCloserSGE = false;
+            this.GapCloserPCT = false;
+        }
+
+        this.MigrateUnifiedGapCloserDistance(oldReengageEnabled, oldEscapeEnabled);
+        this.UseGapCloser = oldReengageEnabled || oldEscapeEnabled;
+    }
+
+    private void MigrateUnifiedGapCloserDistance(bool oldReengageEnabled, bool oldEscapeEnabled)
+    {
+        var oldReengageDistance = this.minimumReengageGapCloserDistanceCompatibility ?? this.MinimumGapCloserDistance;
+        var oldEscapeDistance = this.minimumEscapeGapCloserDistanceCompatibility ?? this.MinimumGapCloserDistance;
+        this.MinimumGapCloserDistance = (oldReengageEnabled, oldEscapeEnabled) switch
+        {
+            (true, false) => oldReengageDistance,
+            (false, true) => oldEscapeDistance,
+            (true, true) => MathF.Max(oldReengageDistance, oldEscapeDistance),
+            _ => MathF.Max(oldReengageDistance, oldEscapeDistance)
+        };
+    }
+
+    private void ApplyEscapeGapCloserJobs(bool replace)
+    {
+        if (replace)
+        {
+            this.GapCloserMNK = LegacyEscapeGapCloserEnabled(this.escapeGapCloserMNKCompatibility);
+            this.GapCloserDRG = LegacyEscapeGapCloserEnabled(this.escapeGapCloserDRGCompatibility);
+            this.GapCloserNIN = LegacyEscapeGapCloserEnabled(this.escapeGapCloserNINCompatibility);
+            this.GapCloserSAM = LegacyEscapeGapCloserEnabled(this.escapeGapCloserSAMCompatibility);
+            this.GapCloserBRD = LegacyEscapeGapCloserEnabled(this.escapeGapCloserBRDCompatibility);
+            this.GapCloserDNC = LegacyEscapeGapCloserEnabled(this.escapeGapCloserDNCCompatibility);
+            this.GapCloserRPR = LegacyEscapeGapCloserEnabled(this.escapeGapCloserRPRCompatibility);
+            this.GapCloserVPR = LegacyEscapeGapCloserEnabled(this.escapeGapCloserVPRCompatibility);
+            this.GapCloserWHM = LegacyEscapeGapCloserEnabled(this.escapeGapCloserWHMCompatibility);
+            this.GapCloserBLM = LegacyEscapeGapCloserEnabled(this.escapeGapCloserBLMCompatibility);
+            this.GapCloserRDM = LegacyEscapeGapCloserEnabled(this.escapeGapCloserRDMCompatibility);
+            this.GapCloserSGE = LegacyEscapeGapCloserEnabled(this.escapeGapCloserSGECompatibility);
+            this.GapCloserPCT = LegacyEscapeGapCloserEnabled(this.escapeGapCloserPCTCompatibility);
+            return;
+        }
+
+        this.GapCloserMNK |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserMNKCompatibility);
+        this.GapCloserDRG |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserDRGCompatibility);
+        this.GapCloserNIN |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserNINCompatibility);
+        this.GapCloserSAM |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserSAMCompatibility);
+        this.GapCloserBRD |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserBRDCompatibility);
+        this.GapCloserDNC |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserDNCCompatibility);
+        this.GapCloserRPR |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserRPRCompatibility);
+        this.GapCloserVPR |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserVPRCompatibility);
+        this.GapCloserWHM |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserWHMCompatibility);
+        this.GapCloserBLM |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserBLMCompatibility);
+        this.GapCloserRDM |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserRDMCompatibility);
+        this.GapCloserSGE |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserSGECompatibility);
+        this.GapCloserPCT |= LegacyEscapeGapCloserEnabled(this.escapeGapCloserPCTCompatibility);
+    }
+
+    private static bool LegacyEscapeGapCloserEnabled(bool? value) => value ?? true;
 
     private void ApplyCompatibilityValues()
     {

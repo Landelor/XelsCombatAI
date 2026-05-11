@@ -37,4 +37,32 @@ internal static class Geometry
         var (sin, cos) = MathF.SinCos(rotation);
         return new Vector3(sin, 0f, cos);
     }
+
+    public static float DirectionToRotation(Vector3 direction)
+    {
+        direction.Y = 0f;
+        return direction.LengthSquared() <= 0.0001f
+            ? 0f
+            : NormalizeRadians(MathF.Atan2(direction.X, direction.Z));
+    }
+
+    public static float NormalizeRadians(float radians)
+    {
+        while (radians > MathF.PI)
+        {
+            radians -= MathF.Tau;
+        }
+
+        while (radians < -MathF.PI)
+        {
+            radians += MathF.Tau;
+        }
+
+        return radians;
+    }
+
+    public static float AbsAngleDelta(float from, float to)
+    {
+        return MathF.Abs(NormalizeRadians(to - from));
+    }
 }

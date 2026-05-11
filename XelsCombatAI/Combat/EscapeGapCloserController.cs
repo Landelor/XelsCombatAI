@@ -8,7 +8,7 @@ using FFXIVClientStructs.FFXIV.Client.Game;
 
 namespace XelsCombatAI.Combat;
 
-internal sealed class EscapeGapCloserController(Configuration config, DalamudServices services, BossModReflectionSafety bossModSafety, VNavmeshIpc vnavmesh, GapCloserController gapCloserController)
+internal sealed class EscapeGapCloserController(Configuration config, DalamudServices services, BossModReflectionSafety bossModSafety, MobilityDecisionEvaluator mobilityEvaluator, GapCloserController gapCloserController, DashStyleController dashStyleController, FacingController facingController)
 {
     private DateTime nextEscapeGapCloserAttempt = DateTime.MinValue;
     private DateTime escapeDangerDetectedAt = DateTime.MinValue;
@@ -55,6 +55,14 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
         }
 
         var classJobId = player.ClassJob.RowId;
+        if (IsNinjaMudraWindow(player))
+        {
+            this.lastEscapeGapCloserSafety = "NIN mudra active";
+            this.lastSafeEscapeDestination = null;
+            mobilityEvaluator.RecordIdle(MobilityIntent.Safety, "Gap closer", this.lastEscapeGapCloserSafety);
+            return false;
+        }
+
         if (config.CombatStyle != CombatStyle.Normal && classJobId == 25 && this.HasActiveCircleOfPower())
         {
             this.lastEscapeGapCloserSafety = "disabled in Greed mode while in Ley Lines";
@@ -67,11 +75,18 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
             return false;
         }
 
-        if (currentSafe)
+        var hasSafeMovementIntent = bossModSafety.TryGetSafeMovementIntent(player.Position, out var safeMovementDestination, out var intentReason);
+        if (currentSafe && !hasSafeMovementIntent)
         {
             this.escapeDangerDetectedAt = DateTime.MinValue;
             this.lastEscapeGapCloserSafety = "current position safe";
             this.lastSafeEscapeDestination = null;
+            return false;
+        }
+
+        if (!currentSafe && !hasSafeMovementIntent)
+        {
+            this.lastEscapeGapCloserSafety = intentReason;
             return false;
         }
 
@@ -87,15 +102,9 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
             return false;
         }
 
-        if (!bossModSafety.TryGetSafeMovementIntent(player.Position, out var safeMovementDestination, out var intentReason))
+        if (Geometry.Distance2D(player.Position, safeMovementDestination) < config.MinimumGapCloserDistance)
         {
-            this.lastEscapeGapCloserSafety = intentReason;
-            return false;
-        }
-
-        if (Geometry.Distance2D(player.Position, safeMovementDestination) < config.MinimumEscapeGapCloserDistance)
-        {
-            this.lastEscapeGapCloserSafety = $"safe movement under {config.MinimumEscapeGapCloserDistance:0}y";
+            this.lastEscapeGapCloserSafety = $"safe movement under {config.MinimumGapCloserDistance:0}y";
             return false;
         }
 
@@ -108,59 +117,24 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
 
         return classJobId switch
         {
-            2 or 20 when config.EscapeGapCloserMNK => this.TryUseFriendlyEscapeGapCloser(ActionUse.MonkThunderclapActionId, CombatConstants.GapCloserMaxRange, safeMovementDestination),
-            4 or 22 when config.EscapeGapCloserDRG => this.TryUseBackstepEscapeGapCloser(ActionUse.DragoonElusiveJumpActionId, CombatConstants.FixedForwardGapCloserRange, "Elusive Jump", safeMovementDestination),
-            5 or 23 when config.EscapeGapCloserBRD => this.TryUseTargetBackstepEscapeGapCloser(ActionUse.BardRepellingShotActionId, "Repelling Shot", 15f, 10f, safeMovementDestination),
-            25 when config.EscapeGapCloserBLM => this.TryUseFriendlyEscapeGapCloser(ActionUse.BlackMageAetherialManipulationActionId, 25f, safeMovementDestination),
-            29 or 30 when config.EscapeGapCloserNIN => this.TryUseLocationEscapeGapCloser(ActionUse.NinjaShukuchiActionId, CombatConstants.GapCloserMaxRange, "Shukuchi", safeMovementDestination),
-            34 when config.EscapeGapCloserSAM => this.TryUseTargetBackstepEscapeGapCloser(ActionUse.SamuraiYatenActionId, "Yaten", 5f, 10f, safeMovementDestination),
-            39 when config.EscapeGapCloserRPR => gapCloserController.TryUseReaperRegress(ref this.lastEscapeGapCloserSafety, safeMovementDestination: safeMovementDestination) || this.TryUseBackstepEscapeGapCloser(ActionUse.ReaperHellsEgressActionId, CombatConstants.FixedForwardGapCloserRange, "Hell's Egress", safeMovementDestination) || this.TryUseForwardEscapeGapCloser(ActionUse.ReaperHellsIngressActionId, safeMovementDestination),
-            24 when config.EscapeGapCloserWHM => this.TryUseForwardEscapeGapCloser(ActionUse.WhiteMageAetherialShiftActionId, safeMovementDestination),
-            35 when config.EscapeGapCloserRDM => this.TryUseTargetBackstepEscapeGapCloser(ActionUse.RedMageDisplacementActionId, "Displacement", 5f, CombatConstants.FixedForwardGapCloserRange, safeMovementDestination),
-            40 when config.EscapeGapCloserSGE => this.TryUseFriendlyEscapeGapCloser(ActionUse.SageIcarusActionId, 25f, safeMovementDestination),
-            41 when config.EscapeGapCloserVPR => this.TryUseFriendlyEscapeGapCloser(ActionUse.ViperSlitherActionId, CombatConstants.GapCloserMaxRange, safeMovementDestination),
-            38 when config.EscapeGapCloserDNC => this.TryUseForwardEscapeGapCloser(ActionUse.DancerEnAvantActionId, safeMovementDestination),
-            42 when config.EscapeGapCloserPCT => this.TryUseForwardEscapeGapCloser(ActionUse.PictomancerSmudgeActionId, safeMovementDestination),
+            2 or 20 when config.GapCloserMNK => this.TryUseFriendlyEscapeGapCloser(ActionUse.MonkThunderclapActionId, "Thunderclap", CombatConstants.GapCloserMaxRange, safeMovementDestination) || this.TryUseGreedyTargetEscapeGapCloser(ActionUse.MonkThunderclapActionId, "Thunderclap", safeMovementDestination),
+            4 or 22 when config.GapCloserDRG => this.TryUseBackstepEscapeGapCloser(ActionUse.DragoonElusiveJumpActionId, CombatConstants.FixedForwardGapCloserRange, "Elusive Jump", safeMovementDestination) || this.TryUseGreedyTargetEscapeGapCloser(ActionUse.DragoonWingedGlideActionId, "Winged Glide", safeMovementDestination),
+            5 or 23 when config.GapCloserBRD => this.TryUseTargetBackstepEscapeGapCloser(ActionUse.BardRepellingShotActionId, "Repelling Shot", 15f, 10f, safeMovementDestination),
+            25 when config.GapCloserBLM => this.TryUseFriendlyEscapeGapCloser(ActionUse.BlackMageAetherialManipulationActionId, "Aetherial Manipulation", 25f, safeMovementDestination),
+            29 or 30 when config.GapCloserNIN => this.TryUseLocationEscapeGapCloser(ActionUse.NinjaShukuchiActionId, CombatConstants.GapCloserMaxRange, "Shukuchi", safeMovementDestination),
+            34 when config.GapCloserSAM => this.TryUseTargetBackstepEscapeGapCloser(ActionUse.SamuraiYatenActionId, "Yaten", 5f, 10f, safeMovementDestination) || this.TryUseGreedyTargetEscapeGapCloser(ActionUse.SamuraiGyotenActionId, "Gyoten", safeMovementDestination),
+            39 when config.GapCloserRPR => gapCloserController.TryUseReaperRegress(ref this.lastEscapeGapCloserSafety, safeMovementDestination: safeMovementDestination) || this.TryUseBackstepEscapeGapCloser(ActionUse.ReaperHellsEgressActionId, CombatConstants.FixedForwardGapCloserRange, "Hell's Egress", safeMovementDestination) || this.TryUseForwardEscapeGapCloser(ActionUse.ReaperHellsIngressActionId, "Hell's Ingress", safeMovementDestination),
+            24 when config.GapCloserWHM => this.TryUseForwardEscapeGapCloser(ActionUse.WhiteMageAetherialShiftActionId, "Aetherial Shift", safeMovementDestination),
+            35 when config.GapCloserRDM => this.TryUseTargetBackstepEscapeGapCloser(ActionUse.RedMageDisplacementActionId, "Displacement", 5f, CombatConstants.FixedForwardGapCloserRange, safeMovementDestination),
+            40 when config.GapCloserSGE => this.TryUseFriendlyEscapeGapCloser(ActionUse.SageIcarusActionId, "Icarus", 25f, safeMovementDestination),
+            41 when config.GapCloserVPR => this.TryUseFriendlyEscapeGapCloser(ActionUse.ViperSlitherActionId, "Slither", CombatConstants.GapCloserMaxRange, safeMovementDestination) || this.TryUseGreedyTargetEscapeGapCloser(ActionUse.ViperSlitherActionId, "Slither", safeMovementDestination),
+            38 when config.GapCloserDNC => this.TryUseForwardEscapeGapCloser(ActionUse.DancerEnAvantActionId, "En Avant", safeMovementDestination),
+            42 when config.GapCloserPCT => this.TryUseForwardEscapeGapCloser(ActionUse.PictomancerSmudgeActionId, "Smudge", safeMovementDestination),
             _ => false
         };
     }
 
-    public static bool TryValidateEscapeDestination(Configuration config, DalamudServices services, BossModReflectionSafety bossModSafety, VNavmeshIpc vnavmesh, Vector3 playerPosition, Vector3 destination, Vector3 safeMovementDestination, float minimumDistance, out string reason)
-    {
-        _ = services;
-        if (!IsUsefulEscapeDestination(playerPosition, destination, safeMovementDestination, minimumDistance, out reason))
-        {
-            return false;
-        }
-
-        if (!bossModSafety.TryIsPositionSafe(destination, out var destinationSafe, out var destinationReason))
-        {
-            reason = destinationReason;
-            return false;
-        }
-
-        if (!destinationSafe)
-        {
-            reason = "escape destination dangerous";
-            return false;
-        }
-
-        if (!bossModSafety.TryIsDashSafe(playerPosition, destination, out reason))
-        {
-            return false;
-        }
-
-        if (config.GuardUnknownBossNavigationWithVnavmesh &&
-            !vnavmesh.TryValidateReachable(playerPosition, destination, out var vnavmeshReason))
-        {
-            reason = vnavmeshReason;
-            return false;
-        }
-
-        return true;
-    }
-
-    private unsafe bool TryUseFriendlyEscapeGapCloser(uint actionId, float maxRange, Vector3 safeMovementDestination)
+    private unsafe bool TryUseFriendlyEscapeGapCloser(uint actionId, string actionName, float maxRange, Vector3 safeMovementDestination)
     {
         var player = services.ObjectTable.LocalPlayer;
         if (player == null)
@@ -174,23 +148,93 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
             return false;
         }
 
+        if (dashStyleController.EscapeStyleActive)
+        {
+            var styleCandidates = new List<DashStyleCandidate<IBattleChara>>();
+            foreach (var ally in this.EnumerateFriendlyEscapeTargets(player, maxRange))
+            {
+                if (!mobilityEvaluator.TryValidateDashDestination(
+                    player,
+                    ally.Position,
+                    services.TargetManager.Target as IBattleChara,
+                    safeMovementDestination,
+                    MobilityIntent.Safety,
+                    actionName,
+                    actionId,
+                    config.MinimumGapCloserDistance,
+                    requireSafetyProgress: true,
+                    requireUptimeProgress: false,
+                    requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                    out var decision))
+                {
+                    this.lastEscapeGapCloserSafety = decision.RiskReason;
+                    continue;
+                }
+
+                styleCandidates.Add(dashStyleController.ScoreCandidate(
+                    ally,
+                    player,
+                    ally.Position,
+                    services.TargetManager.Target as IBattleChara,
+                    safeMovementDestination,
+                    decision,
+                    "ally anchor"));
+            }
+
+            if (dashStyleController.TrySelectBest(styleCandidates, out var selected))
+            {
+                this.lastSafeEscapeDestination = selected.Destination;
+                var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, selected.Source.GameObjectId);
+                mobilityEvaluator.RecordActionResult(selected.Decision, used, used ? "action used" : "action failed");
+                if (used)
+                {
+                    dashStyleController.RecordStyleUse(selected.Reason);
+                    this.lastEscapeGapCloserSafety = $"used {actionName} on ally ({selected.Decision.IntentLabel}, {selected.Reason})";
+                    return true;
+                }
+
+                this.lastEscapeGapCloserSafety = $"failed to use {actionName} on ally ({selected.Decision.IntentLabel}, {selected.Reason})";
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(this.lastEscapeGapCloserSafety) || this.lastEscapeGapCloserSafety == "current position safe")
+            {
+                this.lastEscapeGapCloserSafety = "no safe ally found";
+            }
+
+            return false;
+        }
+
         foreach (var ally in this.EnumerateFriendlyEscapeTargets(player, maxRange))
         {
-            if (!TryValidateEscapeDestination(config, services, bossModSafety, vnavmesh, player.Position, ally.Position, safeMovementDestination, config.MinimumEscapeGapCloserDistance, out var reason))
+            if (!mobilityEvaluator.TryValidateDashDestination(
+                player,
+                ally.Position,
+                services.TargetManager.Target as IBattleChara,
+                safeMovementDestination,
+                MobilityIntent.Safety,
+                actionName,
+                actionId,
+                config.MinimumGapCloserDistance,
+                requireSafetyProgress: true,
+                requireUptimeProgress: false,
+                requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                out var decision))
             {
-                this.lastEscapeGapCloserSafety = reason;
+                this.lastEscapeGapCloserSafety = decision.RiskReason;
                 continue;
             }
 
             this.lastSafeEscapeDestination = ally.Position;
             var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, ally.GameObjectId);
+            mobilityEvaluator.RecordActionResult(decision, used, used ? "action used" : "action failed");
             if (used)
             {
-                this.lastEscapeGapCloserSafety = $"used {actionId} on ally";
+                this.lastEscapeGapCloserSafety = $"used {actionName} on ally ({decision.IntentLabel})";
                 return true;
             }
 
-            this.lastEscapeGapCloserSafety = $"failed to use {actionId} on ally";
+            this.lastEscapeGapCloserSafety = $"failed to use {actionName} on ally ({decision.IntentLabel})";
         }
 
         if (string.IsNullOrEmpty(this.lastEscapeGapCloserSafety) || this.lastEscapeGapCloserSafety == "current position safe")
@@ -215,18 +259,87 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
             return false;
         }
 
+        if (dashStyleController.EscapeStyleActive)
+        {
+            var styleCandidates = new List<DashStyleCandidate<Vector3>>();
+            foreach (var candidate in this.EnumerateGreedyEscapeLocationCandidates(player.Position, safeMovementDestination, maxRange))
+            {
+                if (!mobilityEvaluator.TryValidateDashDestination(
+                    player,
+                    candidate,
+                    services.TargetManager.Target as IBattleChara,
+                    safeMovementDestination,
+                    MobilityIntent.Safety,
+                    actionName,
+                    actionId,
+                    config.MinimumGapCloserDistance,
+                    requireSafetyProgress: true,
+                    requireUptimeProgress: false,
+                    requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                    out var decision))
+                {
+                    this.lastEscapeGapCloserSafety = decision.RiskReason;
+                    continue;
+                }
+
+                styleCandidates.Add(dashStyleController.ScoreCandidate(
+                    candidate,
+                    player,
+                    candidate,
+                    services.TargetManager.Target as IBattleChara,
+                    safeMovementDestination,
+                    decision,
+                    "precision Shukuchi"));
+            }
+
+            if (dashStyleController.TrySelectBest(styleCandidates, out var selected))
+            {
+                this.lastSafeEscapeDestination = selected.Destination;
+                var location = selected.Destination;
+                var used = ActionManager.Instance()->UseActionLocation(ActionType.Action, actionId, player.GameObjectId, &location);
+                mobilityEvaluator.RecordActionResult(selected.Decision, used, used ? "action used" : "action failed");
+                if (used)
+                {
+                    dashStyleController.RecordStyleUse(selected.Reason);
+                }
+
+                this.lastEscapeGapCloserSafety = used ? $"used {actionName} ({selected.Decision.IntentLabel}, {selected.Reason})" : $"failed to use {actionName} ({selected.Decision.IntentLabel}, {selected.Reason})";
+                return used;
+            }
+
+            if (string.IsNullOrEmpty(this.lastEscapeGapCloserSafety) || this.lastEscapeGapCloserSafety == "current position safe")
+            {
+                this.lastEscapeGapCloserSafety = $"no safe {actionName} escape destination";
+            }
+
+            return false;
+        }
+
         foreach (var candidate in this.EnumerateEscapeLocationCandidates(player.Position, maxRange))
         {
-            if (!TryValidateEscapeDestination(config, services, bossModSafety, vnavmesh, player.Position, candidate, safeMovementDestination, config.MinimumEscapeGapCloserDistance, out var reason))
+            if (!mobilityEvaluator.TryValidateDashDestination(
+                player,
+                candidate,
+                services.TargetManager.Target as IBattleChara,
+                safeMovementDestination,
+                MobilityIntent.Safety,
+                actionName,
+                actionId,
+                config.MinimumGapCloserDistance,
+                requireSafetyProgress: true,
+                requireUptimeProgress: false,
+                requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                out var decision))
             {
-                this.lastEscapeGapCloserSafety = reason;
+                this.lastEscapeGapCloserSafety = decision.RiskReason;
                 continue;
             }
 
             this.lastSafeEscapeDestination = candidate;
             var location = candidate;
             var used = ActionManager.Instance()->UseActionLocation(ActionType.Action, actionId, player.GameObjectId, &location);
-            this.lastEscapeGapCloserSafety = used ? $"used escape {actionName}" : $"failed to use escape {actionName}";
+            mobilityEvaluator.RecordActionResult(decision, used, used ? "action used" : "action failed");
+            this.lastEscapeGapCloserSafety = used ? $"used {actionName} ({decision.IntentLabel})" : $"failed to use {actionName} ({decision.IntentLabel})";
             return used;
         }
 
@@ -238,7 +351,7 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
         return false;
     }
 
-    private unsafe bool TryUseForwardEscapeGapCloser(uint actionId, Vector3 safeMovementDestination)
+    private unsafe bool TryUseForwardEscapeGapCloser(uint actionId, string actionName, Vector3 safeMovementDestination)
     {
         var player = services.ObjectTable.LocalPlayer;
         if (player == null)
@@ -253,15 +366,38 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
         }
 
         var destination = player.Position + Geometry.RotationToDirection(player.Rotation) * CombatConstants.FixedForwardGapCloserRange;
-        if (!TryValidateEscapeDestination(config, services, bossModSafety, vnavmesh, player.Position, destination, safeMovementDestination, config.MinimumEscapeGapCloserDistance, out var reason))
+        if (!mobilityEvaluator.TryValidateDashDestination(
+            player,
+            destination,
+            services.TargetManager.Target as IBattleChara,
+            safeMovementDestination,
+            MobilityIntent.Safety,
+            actionName,
+            actionId,
+            config.MinimumGapCloserDistance,
+            requireSafetyProgress: true,
+            requireUptimeProgress: false,
+            requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+            out var decision))
         {
-            this.lastEscapeGapCloserSafety = reason;
+            if (this.TryRequestFixedEscapeDashFacing(player, actionId, actionName, CombatConstants.FixedForwardGapCloserRange, safeMovementDestination, backward: false))
+            {
+                return true;
+            }
+
+            this.lastEscapeGapCloserSafety = decision.RiskReason;
             return false;
         }
 
         this.lastSafeEscapeDestination = destination;
         var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, player.GameObjectId);
-        this.lastEscapeGapCloserSafety = used ? $"used {actionId}" : $"failed to use {actionId}";
+        mobilityEvaluator.RecordActionResult(decision, used, used ? "action used" : "action failed");
+        if (used)
+        {
+            this.RecordEscapeActionUsed(actionId, actionName, dashStyleController.EscapeStyleActive ? "fixed escape" : null);
+        }
+
+        this.lastEscapeGapCloserSafety = used ? $"used {actionName} ({decision.IntentLabel})" : $"failed to use {actionName} ({decision.IntentLabel})";
         return used;
     }
 
@@ -280,15 +416,38 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
         }
 
         var destination = player.Position - Geometry.RotationToDirection(player.Rotation) * backstepDistance;
-        if (!TryValidateEscapeDestination(config, services, bossModSafety, vnavmesh, player.Position, destination, safeMovementDestination, config.MinimumEscapeGapCloserDistance, out var reason))
+        if (!mobilityEvaluator.TryValidateDashDestination(
+            player,
+            destination,
+            services.TargetManager.Target as IBattleChara,
+            safeMovementDestination,
+            MobilityIntent.Safety,
+            actionName,
+            actionId,
+            config.MinimumGapCloserDistance,
+            requireSafetyProgress: true,
+            requireUptimeProgress: false,
+            requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+            out var decision))
         {
-            this.lastEscapeGapCloserSafety = reason;
+            if (this.TryRequestFixedEscapeDashFacing(player, actionId, actionName, backstepDistance, safeMovementDestination, backward: true))
+            {
+                return true;
+            }
+
+            this.lastEscapeGapCloserSafety = decision.RiskReason;
             return false;
         }
 
         this.lastSafeEscapeDestination = destination;
         var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, player.GameObjectId);
-        this.lastEscapeGapCloserSafety = used ? $"used {actionName}" : $"failed to use {actionName}";
+        mobilityEvaluator.RecordActionResult(decision, used, used ? "action used" : "action failed");
+        if (used)
+        {
+            this.RecordEscapeActionUsed(actionId, actionName, dashStyleController.EscapeStyleActive ? "backstep escape" : null);
+        }
+
+        this.lastEscapeGapCloserSafety = used ? $"used {actionName} ({decision.IntentLabel})" : $"failed to use {actionName} ({decision.IntentLabel})";
         return used;
     }
 
@@ -306,6 +465,67 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
             return false;
         }
 
+        if (dashStyleController.EscapeStyleActive)
+        {
+            var styleCandidates = new List<DashStyleCandidate<IBattleNpc>>();
+            foreach (var enemy in this.EnumerateBackstepTargets(player, maxTargetRange))
+            {
+                if (!TryCalculateTargetBackstepDestination(player, enemy, backstepDistance, out var destination))
+                {
+                    this.lastEscapeGapCloserSafety = $"could not calculate {actionName} landing";
+                    continue;
+                }
+
+                if (!mobilityEvaluator.TryValidateDashDestination(
+                    player,
+                    destination,
+                    services.TargetManager.Target as IBattleChara,
+                    safeMovementDestination,
+                    MobilityIntent.Safety,
+                    actionName,
+                    actionId,
+                    config.MinimumGapCloserDistance,
+                    requireSafetyProgress: true,
+                    requireUptimeProgress: false,
+                    requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                    out var decision))
+                {
+                    this.lastEscapeGapCloserSafety = decision.RiskReason;
+                    continue;
+                }
+
+                styleCandidates.Add(dashStyleController.ScoreCandidate(
+                    enemy,
+                    player,
+                    destination,
+                    services.TargetManager.Target as IBattleChara,
+                    safeMovementDestination,
+                    decision,
+                    "safe backstep"));
+            }
+
+            if (dashStyleController.TrySelectBest(styleCandidates, out var selected))
+            {
+                this.lastSafeEscapeDestination = selected.Destination;
+                var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, selected.Source.GameObjectId);
+                mobilityEvaluator.RecordActionResult(selected.Decision, used, used ? "action used" : "action failed");
+                if (used)
+                {
+                    this.RecordEscapeActionUsed(actionId, actionName, selected.Reason);
+                }
+
+                this.lastEscapeGapCloserSafety = used ? $"used {actionName} ({selected.Decision.IntentLabel}, {selected.Reason})" : $"failed to use {actionName} ({selected.Decision.IntentLabel}, {selected.Reason})";
+                return used;
+            }
+
+            if (string.IsNullOrEmpty(this.lastEscapeGapCloserSafety) || this.lastEscapeGapCloserSafety == "current position safe")
+            {
+                this.lastEscapeGapCloserSafety = $"no safe {actionName} target";
+            }
+
+            return false;
+        }
+
         foreach (var enemy in this.EnumerateBackstepTargets(player, maxTargetRange))
         {
             if (!TryCalculateTargetBackstepDestination(player, enemy, backstepDistance, out var destination))
@@ -314,15 +534,33 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
                 continue;
             }
 
-            if (!TryValidateEscapeDestination(config, services, bossModSafety, vnavmesh, player.Position, destination, safeMovementDestination, config.MinimumEscapeGapCloserDistance, out var reason))
+            if (!mobilityEvaluator.TryValidateDashDestination(
+                player,
+                destination,
+                services.TargetManager.Target as IBattleChara,
+                safeMovementDestination,
+                MobilityIntent.Safety,
+                actionName,
+                actionId,
+                config.MinimumGapCloserDistance,
+                requireSafetyProgress: true,
+                requireUptimeProgress: false,
+                requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                out var decision))
             {
-                this.lastEscapeGapCloserSafety = reason;
+                this.lastEscapeGapCloserSafety = decision.RiskReason;
                 continue;
             }
 
             this.lastSafeEscapeDestination = destination;
             var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, enemy.GameObjectId);
-            this.lastEscapeGapCloserSafety = used ? $"used {actionName}" : $"failed to use {actionName}";
+            mobilityEvaluator.RecordActionResult(decision, used, used ? "action used" : "action failed");
+            if (used)
+            {
+                this.RecordEscapeActionUsed(actionId, actionName, null);
+            }
+
+            this.lastEscapeGapCloserSafety = used ? $"used {actionName} ({decision.IntentLabel})" : $"failed to use {actionName} ({decision.IntentLabel})";
             return used;
         }
 
@@ -334,22 +572,133 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
         return false;
     }
 
-    private static bool IsUsefulEscapeDestination(Vector3 playerPosition, Vector3 destination, Vector3 safeMovementDestination, float minimumDistance, out string reason)
+    private bool TryRequestFixedEscapeDashFacing(IBattleChara player, uint actionId, string actionName, float dashDistance, Vector3 safeMovementDestination, bool backward)
     {
-        if (Geometry.Distance2D(playerPosition, destination) < minimumDistance)
+        var movementDirection = safeMovementDestination - player.Position;
+        movementDirection.Y = 0f;
+        if (movementDirection.LengthSquared() <= 0.0001f)
         {
-            reason = $"escape destination under {minimumDistance:0}y";
             return false;
         }
 
-        if (Geometry.Distance2D(destination, safeMovementDestination) >= Geometry.Distance2D(playerPosition, safeMovementDestination))
+        movementDirection = Vector3.Normalize(movementDirection);
+        var desiredForward = backward ? -movementDirection : movementDirection;
+        var desiredRotation = Geometry.DirectionToRotation(desiredForward);
+        if (Geometry.AbsAngleDelta(player.Rotation, desiredRotation) <= FacingController.DirectionalDashToleranceRadians)
         {
-            reason = "escape destination not toward safety";
             return false;
         }
 
-        reason = "useful escape destination";
+        var destination = player.Position + movementDirection * dashDistance;
+        if (!mobilityEvaluator.TryValidateDashDestination(
+            player,
+            destination,
+            services.TargetManager.Target as IBattleChara,
+            safeMovementDestination,
+            MobilityIntent.Safety,
+            actionName,
+            actionId,
+            config.MinimumGapCloserDistance,
+            requireSafetyProgress: true,
+            requireUptimeProgress: false,
+            requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+            out var decision))
+        {
+            this.lastEscapeGapCloserSafety = decision.RiskReason;
+            return false;
+        }
+
+        facingController.RequestFacing(FacingController.CreateDirectionalDashRequest(desiredRotation, destination, $"turn for {actionName}", FacingBossModPolicy.AssistBmrMovementDash, safeMovementDestination));
+        this.lastSafeEscapeDestination = destination;
+        this.lastEscapeGapCloserSafety = $"turning for {actionName} ({decision.IntentLabel}, directional dash)";
         return true;
+    }
+
+    private unsafe bool TryUseGreedyTargetEscapeGapCloser(uint actionId, string actionName, Vector3 safeMovementDestination)
+    {
+        if (!this.GreedyUnsafeEscapeDashesEnabled())
+        {
+            return false;
+        }
+
+        var player = services.ObjectTable.LocalPlayer;
+        if (player == null)
+        {
+            return false;
+        }
+
+        if (!ActionUse.CanUseAction(actionId))
+        {
+            this.lastEscapeGapCloserSafety = $"{actionName} unavailable";
+            return false;
+        }
+
+        if (services.TargetManager.Target is not IBattleNpc target ||
+            target.BattleNpcKind != BattleNpcSubKind.Combatant ||
+            target.GameObjectId == 0 ||
+            target.IsDead ||
+            target.CurrentHp <= 0)
+        {
+            this.lastEscapeGapCloserSafety = "no emergency dash target";
+            return false;
+        }
+
+        var distanceToHitbox = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, target.Position, target.HitboxRadius);
+        if (distanceToHitbox > CombatConstants.GapCloserMaxRange)
+        {
+            this.lastEscapeGapCloserSafety = "target not in emergency dash range";
+            return false;
+        }
+
+        if (!Geometry.TryCalculateTargetDashDestination(player.Position, target.Position, distanceToHitbox, out var destination))
+        {
+            this.lastEscapeGapCloserSafety = $"could not calculate {actionName} landing";
+            return false;
+        }
+
+        if (mobilityEvaluator.TryValidateDashDestination(
+            player,
+            destination,
+            target,
+            safeMovementDestination,
+            MobilityIntent.Safety,
+            actionName,
+            actionId,
+            config.MinimumGapCloserDistance,
+            requireSafetyProgress: true,
+            requireUptimeProgress: false,
+            requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+            out var safeDecision))
+        {
+            return this.TryUseTargetEscapeAction(actionId, actionName, target, destination, safeDecision);
+        }
+
+        if (!mobilityEvaluator.TryValidateGreedyUnsafeEscapeDashDestination(
+            player,
+            destination,
+            target,
+            safeMovementDestination,
+            actionName,
+            actionId,
+            config.MinimumGapCloserDistance,
+            out var decision))
+        {
+            this.lastEscapeGapCloserSafety = decision.RiskReason == "landing is safe; normal escape validation required"
+                ? safeDecision.RiskReason
+                : decision.RiskReason;
+            return false;
+        }
+
+        return this.TryUseTargetEscapeAction(actionId, actionName, target, destination, decision);
+    }
+
+    private unsafe bool TryUseTargetEscapeAction(uint actionId, string actionName, IBattleNpc target, Vector3 destination, MobilityDecisionDiagnostics decision)
+    {
+        this.lastSafeEscapeDestination = destination;
+        var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, target.GameObjectId);
+        mobilityEvaluator.RecordActionResult(decision, used, used ? "action used" : "action failed");
+        this.lastEscapeGapCloserSafety = used ? $"used {actionName} ({decision.IntentLabel})" : $"failed to use {actionName} ({decision.IntentLabel})";
+        return used;
     }
 
     private IEnumerable<IBattleChara> EnumerateFriendlyEscapeTargets(IBattleChara player, float maxRange)
@@ -400,9 +749,67 @@ internal sealed class EscapeGapCloserController(Configuration config, DalamudSer
         }
     }
 
+    private IEnumerable<Vector3> EnumerateGreedyEscapeLocationCandidates(Vector3 playerPosition, Vector3 safeMovementDestination, float maxRange)
+    {
+        if (Geometry.Distance2D(playerPosition, safeMovementDestination) <= maxRange)
+        {
+            yield return safeMovementDestination;
+        }
+
+        for (var i = 0; i < 16; i++)
+        {
+            var angle = i * (MathF.Tau / 16f);
+            var direction = new Vector3(MathF.Cos(angle), 0f, MathF.Sin(angle));
+            foreach (var offset in new[] { 2f, 4f })
+            {
+                var candidate = safeMovementDestination + direction * offset;
+                candidate.Y = playerPosition.Y;
+                if (Geometry.Distance2D(playerPosition, candidate) <= maxRange)
+                {
+                    yield return candidate;
+                }
+            }
+        }
+
+        foreach (var candidate in this.EnumerateEscapeLocationCandidates(playerPosition, maxRange))
+        {
+            yield return candidate;
+        }
+    }
+
+    private void RecordEscapeActionUsed(uint actionId, string actionName, string? styleReason)
+    {
+        if (styleReason != null)
+        {
+            dashStyleController.RecordStyleUse(styleReason);
+        }
+
+        dashStyleController.RecordPairedReturn(actionId, actionName);
+    }
+
     private bool HasActiveCircleOfPower()
     {
         return services.ObjectTable.LocalPlayer?.StatusList.Any(status => status.StatusId == ActionUse.CircleOfPowerStatusId && status.RemainingTime > 0) == true;
+    }
+
+    private bool GreedyUnsafeEscapeDashesEnabled()
+    {
+        return config.UseGapCloser && config.CombatStyle != CombatStyle.Normal;
+    }
+
+    private static bool IsNinjaMudraWindow(IBattleChara player)
+    {
+        return player.ClassJob.RowId is 29 or 30 &&
+               HasAnyStatus(
+                   player,
+                   ActionUse.NinjaMudraStatusId,
+                   ActionUse.NinjaTenChiJinStatusId,
+                   ActionUse.NinjaThreeMudraStatusId);
+    }
+
+    private static bool HasAnyStatus(IBattleChara player, params uint[] statusIds)
+    {
+        return player.StatusList.Any(status => status.RemainingTime > 0f && statusIds.Contains(status.StatusId));
     }
 
     private static bool TryCalculateTargetBackstepDestination(IBattleChara player, IBattleNpc enemy, float backstepDistance, out Vector3 destination)

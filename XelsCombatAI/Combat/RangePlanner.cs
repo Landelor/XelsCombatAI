@@ -5,7 +5,20 @@ namespace XelsCombatAI.Combat;
 
 internal sealed class TargetUptimePlanner(DalamudServices services, BossModIpc bossMod, JobRangeProvider jobRangeProvider)
 {
-    public float CalculateTargetUptimeRange() => jobRangeProvider.EngagementRange;
+    public Func<float?> TargetUptimeRangeOverride { get; set; } = () => null;
+
+    public float CalculateTargetUptimeRange(bool targetUptimeEnabled)
+    {
+        var overrideRange = this.TargetUptimeRangeOverride();
+        if (overrideRange.HasValue)
+        {
+            return overrideRange.Value;
+        }
+
+        return targetUptimeEnabled
+            ? jobRangeProvider.EngagementRange
+            : Configuration.InternalDisabledUptimeRange;
+    }
 
     public bool CurrentTargetHasBossModule()
     {

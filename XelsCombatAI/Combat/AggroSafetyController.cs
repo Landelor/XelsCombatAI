@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Numerics;
@@ -20,6 +21,7 @@ internal sealed record AggroSafetyStatus(
     bool Injected,
     ulong ActiveMobId,
     ulong SelectedTankId,
+    Vector3? SelectedTankPosition,
     float AggroSeconds,
     bool PriorityDevalued);
 
@@ -27,10 +29,13 @@ internal sealed class AggroSafetyController(
     Configuration config,
     DalamudServices services,
     Func<bool> automatedMovementSuppressed)
-    : IBossModGoalZoneContributor
+    : IBossModGoalZoneContributor, IMovementCandidateSource
 {
     private static readonly TimeSpan AggroThreshold = TimeSpan.FromSeconds(3);
     private const float TankPickupSurfaceDistance = 8f;
+    private const float MaxDistantTankDragSurfaceDistance = 24f;
+    private const float CloseAggroSurfaceDistance = 5f;
+    private const float AggroSafetyLocalStepMaxDistance = 9.5f;
     private static readonly MethodInfo ScoreFromWPosMethod = typeof(AggroSafetyController).GetMethod(nameof(ScoreFromWPos), BindingFlags.Instance | BindingFlags.NonPublic)!;
 
     private readonly Dictionary<ulong, DateTime> aggroStartByMob = [];
@@ -61,8 +66,43 @@ internal sealed class AggroSafetyController(
         this.injected,
         this.activeMobId,
         this.selectedTankId,
+        this.injected ? new Vector3(this.tankPosition.X, services.ObjectTable.LocalPlayer?.Position.Y ?? 0f, this.tankPosition.Y) : null,
         this.aggroSeconds,
         this.priorityDevalued);
+
+    public void AddMovementCandidates(MovementPlannerContext context, ICollection<MovementCandidate> candidates)
+    {
+        if (!this.injected || this.selectedTankId == 0)
+        {
+            return;
+        }
+
+        var destination = new Vector3(this.tankPosition.X, context.PlayerPosition.Y, this.tankPosition.Y);
+        var reason = this.lastReason;
+        var destination2 = new Vector2(destination.X, destination.Z);
+        var player2 = new Vector2(context.PlayerPosition.X, context.PlayerPosition.Z);
+        var delta = destination2 - player2;
+        var distance = delta.Length();
+        if (distance > AggroSafetyLocalStepMaxDistance && distance > 0.01f)
+        {
+            var step = player2 + (delta / distance * AggroSafetyLocalStepMaxDistance);
+            destination = new Vector3(step.X, context.PlayerPosition.Y, step.Y);
+            reason = string.Create(
+                CultureInfo.InvariantCulture,
+                $"{reason}; local tank step {AggroSafetyLocalStepMaxDistance:0.0}y");
+        }
+
+        candidates.Add(new(
+            "Aggro safety",
+            reason,
+            destination,
+            MathF.Max(1.5f, this.tankRadius),
+            MovementCandidatePriority.Defensive,
+            1f,
+            0f,
+            0f,
+            0.8f));
+    }
 
     public void SetHookState(string state)
     {
@@ -149,6 +189,17 @@ internal sealed class AggroSafetyController(
         this.tankPosition = new Vector2(tank.Position.X, tank.Position.Z);
         this.tankRadius = MathF.Max(1.5f, tank.HitboxRadius + 1.5f);
         this.priorityDevalued = this.TryDevalueTarget(hints, active.Mob.GameObjectId);
+
+        var mobPlayerDistance = Geometry.DistanceToHitbox(active.Mob.Position, active.Mob.HitboxRadius, player.Position, player.HitboxRadius);
+        var playerTankDistance = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, tank.Position, tank.HitboxRadius);
+        if (playerTankDistance > MaxDistantTankDragSurfaceDistance &&
+            mobPlayerDistance <= CloseAggroSurfaceDistance)
+        {
+            this.lastReason = this.priorityDevalued
+                ? string.Create(CultureInfo.InvariantCulture, $"aggro held locally; tank too far ({playerTankDistance:0.#}y)")
+                : string.Create(CultureInfo.InvariantCulture, $"aggro held locally; tank too far ({playerTankDistance:0.#}y); priority unchanged");
+            return;
+        }
 
         var mobTankDistance = Geometry.DistanceToHitbox(active.Mob.Position, active.Mob.HitboxRadius, tank.Position, tank.HitboxRadius);
         if (mobTankDistance <= TankPickupSurfaceDistance)

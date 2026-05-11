@@ -17,6 +17,7 @@ internal enum DecisionOverlaySource
     EscapeLanding,
     PassageOfArms,
     SurvivabilityZone,
+    RedMageMeleeCombo,
 }
 
 internal enum DecisionOverlayState

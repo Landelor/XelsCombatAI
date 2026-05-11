@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Reflection;
 using Dalamud.Plugin;
@@ -34,10 +35,12 @@ internal sealed record RsrAoeActionSnapshot(
 internal sealed class RotationSolverActionReflection(IDalamudPluginInterface pluginInterface, IPluginLog log)
 {
     private const string ActionUpdaterTypeName = "RotationSolver.Updaters.ActionUpdater";
+    private static readonly TimeSpan LoadedCheckInterval = TimeSpan.FromSeconds(5);
 
     private Type? actionUpdaterType;
     private PropertyInfo? nextGcdActionProperty;
     private DateTime nextResolveAttempt = DateTime.MinValue;
+    private DateTime nextLoadedCheck = DateTime.MinValue;
     private string status = "unresolved";
 
     public string Status => this.status;
@@ -53,12 +56,13 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
         this.actionUpdaterType = null;
         this.nextGcdActionProperty = null;
         this.nextResolveAttempt = DateTime.MinValue;
+        this.nextLoadedCheck = DateTime.MinValue;
         this.status = "unresolved";
     }
 
-    public bool TryGetUpcomingGcd(bool requirePreview, out RsrAoeActionSnapshot snapshot, out string reason)
+    public bool TryGetUpcomingGcd(bool requirePreview, [NotNullWhen(true)] out RsrAoeActionSnapshot? snapshot, out string reason)
     {
-        snapshot = default!;
+        snapshot = null;
         reason = string.Empty;
 
         if (!this.EnsureResolved())
@@ -165,7 +169,7 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
             }
             else
             {
-                reason = $"RSR unsupported cast type {castType}";
+                reason = $"RSR unsupported cast type {castType} for {name}";
                 return false;
             }
 
@@ -176,8 +180,8 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
             var halfWidth = (RsrAoeShape)resolvedCastType switch
             {
                 RsrAoeShape.StraightLine => xAxisModifier > 0f ? xAxisModifier / 2f : 2f,
-                RsrAoeShape.Cone         => MathF.PI / 3f,
-                _                        => 0f,
+                RsrAoeShape.Cone => MathF.PI / 3f,
+                _ => 0f,
             };
 
             snapshot = new(
@@ -201,6 +205,7 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
         catch (Exception ex)
         {
             log.Verbose($"Could not query reflected RSR next GCD action: {ex.Message}");
+            this.ResetWithStatus("RSR action reflection query failed");
             reason = "RSR action reflection query failed";
             return false;
         }
@@ -208,26 +213,36 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
 
     private bool EnsureResolved()
     {
+        var now = DateTime.UtcNow;
         if (this.nextGcdActionProperty != null)
         {
+            if (now >= this.nextLoadedCheck)
+            {
+                this.nextLoadedCheck = now.Add(LoadedCheckInterval);
+                if (!IsRotationSolverLoaded(pluginInterface))
+                {
+                    this.ResetWithStatus("RSR plugin not loaded");
+                    return false;
+                }
+            }
+
             return true;
         }
 
-        if (DateTime.UtcNow < this.nextResolveAttempt)
+        if (now < this.nextResolveAttempt)
         {
             return false;
         }
 
-        this.nextResolveAttempt = DateTime.UtcNow.AddSeconds(5);
+        this.nextResolveAttempt = now.AddSeconds(5);
+        if (!IsRotationSolverLoaded(pluginInterface))
+        {
+            this.ResetWithStatus("RSR plugin not loaded");
+            return false;
+        }
 
         try
         {
-            if (!IsRotationSolverLoaded(pluginInterface))
-            {
-                this.ResetWithStatus("RSR plugin not loaded");
-                return false;
-            }
-
             var type = FindActionUpdaterType();
             if (type == null)
             {
@@ -244,6 +259,7 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
 
             this.actionUpdaterType = type;
             this.nextGcdActionProperty = property;
+            this.nextLoadedCheck = now.Add(LoadedCheckInterval);
             this.status = "available";
             return true;
         }
@@ -263,33 +279,31 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
             maxDepth: 2,
             "RotationSolver",
             "Rotation Solver Reborn");
-        if (plugin == null) return null;
+        if (plugin == null)
+        {
+            return null;
+        }
 
         var assembly = plugin.GetType().Assembly;
-        try { return assembly.GetType(ActionUpdaterTypeName, throwOnError: false); }
-        catch { return null; }
+        try
+        {
+            return assembly.GetType(ActionUpdaterTypeName, throwOnError: false);
+        }
+        catch (Exception ex)
+        {
+            log.Verbose(ex, "Could not resolve reflected RSR action updater type.");
+            return null;
+        }
     }
 
     private static bool IsRotationSolverLoaded(IDalamudPluginInterface pluginInterface)
     {
-        if (pluginInterface.InstalledPlugins == null)
-        {
-            return false;
-        }
-
-        foreach (var plugin in pluginInterface.InstalledPlugins)
-        {
-            if (plugin.IsLoaded &&
-                (string.Equals(plugin.InternalName, "RotationSolver", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(plugin.InternalName, "RotationSolverReborn", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(plugin.Name, "Rotation Solver Reborn", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(plugin.Name, "RotationSolver Reborn", StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return ReflectionObjectSearch.HasLoadedPlugin(
+            pluginInterface,
+            "RotationSolver",
+            "RotationSolverReborn",
+            "Rotation Solver Reborn",
+            "RotationSolver Reborn");
     }
 
     private void ResetWithStatus(string newStatus)

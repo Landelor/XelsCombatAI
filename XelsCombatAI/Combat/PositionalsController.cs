@@ -52,7 +52,10 @@ internal sealed class PositionalsController(
                     this.TryUseTrueNorth(positional);
                     var pending = !this.HasActiveTrueNorth() && !this.IsOutsideMeleeRange();
                     setPositional(Positional.Any);
-                    if (pending && this.IsOutsideMeleeRange()) return;
+                    if (pending && this.IsOutsideMeleeRange())
+                    {
+                        return;
+                    }
                 }
                 else
                 {
@@ -75,7 +78,13 @@ internal sealed class PositionalsController(
 
         try
         {
-            rotationSolver.DisableAutoTrueNorth();
+            if (!rotationSolver.DisableAutoTrueNorth())
+            {
+                this.RsrTrueNorthDisabled = false;
+                updateDtr();
+                return;
+            }
+
             this.RsrTrueNorthDisabled = true;
             services.Log.Verbose("Disabled Rotation Solver Reborn Auto True North.");
         }
@@ -111,17 +120,60 @@ internal sealed class PositionalsController(
 
     private unsafe bool TryUseTrueNorth(Positional positional)
     {
-        if (positional == Positional.Any) return false;
-        if (JobRoles.GetRangeRole(services.ObjectTable.LocalPlayer) != RangeRole.Melee) return false;
-        if (this.IsCurrentPositionalCorrect(positional)) return false;
-        if (this.HasActiveTrueNorth()) return false;
-        if (this.GetTrueNorthCharges() == 0) return false;
-        if (this.IsOutsideMeleeRange()) return false;
-        if (rotationSolver.IsNoCasting(services.Log)) return false;
+        if (positional == Positional.Any)
+        {
+            return false;
+        }
 
-        if (ActionManager.Instance()->AnimationLock > 0) return false;
-        if (services.ObjectTable.LocalPlayer?.IsCasting == true) return false;
-        if (ActionManager.Instance()->GetActionStatus(ActionType.Action, ActionUse.TrueNorthActionId) != 0) return false;
+        if (JobRoles.GetRangeRole(services.ObjectTable.LocalPlayer) != RangeRole.Melee)
+        {
+            return false;
+        }
+
+        if (this.IsCurrentPositionalCorrect(positional))
+        {
+            return false;
+        }
+
+        if (this.HasActiveTrueNorth())
+        {
+            return false;
+        }
+
+        if (this.IsNinjaMudraWindow())
+        {
+            return false;
+        }
+
+        if (this.GetTrueNorthCharges() == 0)
+        {
+            return false;
+        }
+
+        if (this.IsOutsideMeleeRange())
+        {
+            return false;
+        }
+
+        if (rotationSolver.IsNoCasting(services.Log))
+        {
+            return false;
+        }
+
+        if (ActionManager.Instance()->AnimationLock > 0)
+        {
+            return false;
+        }
+
+        if (services.ObjectTable.LocalPlayer?.IsCasting == true)
+        {
+            return false;
+        }
+
+        if (ActionManager.Instance()->GetActionStatus(ActionType.Action, ActionUse.TrueNorthActionId) != 0)
+        {
+            return false;
+        }
 
         ActionManager.Instance()->UseAction(ActionType.Action, ActionUse.TrueNorthActionId);
         return true;
@@ -146,21 +198,34 @@ internal sealed class PositionalsController(
     {
         var player = services.ObjectTable.LocalPlayer;
         var target = services.TargetManager.Target;
-        if (player == null || target == null) return false;
+        if (player == null || target == null)
+        {
+            return false;
+        }
+
         return Vector3.Distance(player.Position, target.Position) - player.HitboxRadius - target.HitboxRadius > CombatConstants.MeleeActionRange;
     }
 
     private bool IsCurrentPositionalCorrect(Positional positional)
     {
-        if (positional == Positional.Any) return true;
+        if (positional == Positional.Any)
+        {
+            return true;
+        }
 
         var player = services.ObjectTable.LocalPlayer;
         var target = services.TargetManager.Target;
-        if (player == null || target == null) return false;
+        if (player == null || target == null)
+        {
+            return false;
+        }
 
         var toPlayer = player.Position - target.Position;
         toPlayer.Y = 0;
-        if (toPlayer.LengthSquared() <= 0.0001f) return false;
+        if (toPlayer.LengthSquared() <= 0.0001f)
+        {
+            return false;
+        }
 
         var frontDot = Vector3.Dot(Geometry.RotationToDirection(target.Rotation), Vector3.Normalize(toPlayer));
         return positional switch
@@ -175,6 +240,15 @@ internal sealed class PositionalsController(
     private bool HasTrueNorthCoverage()
     {
         return this.HasActiveTrueNorth() || this.GetTrueNorthCharges() > 0;
+    }
+
+    private bool IsNinjaMudraWindow()
+    {
+        var player = services.ObjectTable.LocalPlayer;
+        return player?.ClassJob.RowId is 29 or 30 &&
+               player.StatusList.Any(status =>
+                   status.RemainingTime > 0f &&
+                   status.StatusId is ActionUse.NinjaMudraStatusId or ActionUse.NinjaTenChiJinStatusId or ActionUse.NinjaThreeMudraStatusId);
     }
 
     private unsafe uint GetTrueNorthChargesUnsafe()

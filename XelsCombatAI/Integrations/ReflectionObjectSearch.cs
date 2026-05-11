@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Dalamud.Plugin;
 
@@ -10,31 +11,81 @@ internal static class ReflectionObjectSearch
 {
     public static object? FindLoadedPlugin(IDalamudPluginInterface pluginInterface, string typeFullName, int maxDepth, params string[] pluginNames)
     {
-        if (pluginInterface.InstalledPlugins != null)
+        foreach (var plugin in EnumerateLoadedPlugins(pluginInterface, pluginNames))
         {
-            foreach (var plugin in pluginInterface.InstalledPlugins)
+            var found = FindObject(plugin, typeFullName, maxDepth);
+            if (found != null)
             {
-                if (!plugin.IsLoaded || !MatchesPlugin(plugin, pluginNames))
-                {
-                    continue;
-                }
-
-                var found = FindObject(plugin, typeFullName, maxDepth);
-                if (found != null)
-                {
-                    return found;
-                }
+                return found;
             }
         }
 
         return FindObject(pluginInterface, typeFullName, maxDepth);
     }
 
+    public static bool HasLoadedPlugin(IDalamudPluginInterface pluginInterface, params string[] pluginNames)
+    {
+        foreach (var _ in EnumerateLoadedPlugins(pluginInterface, pluginNames))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    public static IEnumerable<object> EnumerateLoadedPlugins(IDalamudPluginInterface pluginInterface, params string[] pluginNames)
+    {
+        IEnumerable<object>? plugins;
+        try
+        {
+            plugins = pluginInterface.InstalledPlugins?.Cast<object>().ToArray();
+        }
+        catch
+        {
+            yield break;
+        }
+
+        if (plugins == null)
+        {
+            yield break;
+        }
+
+        foreach (var plugin in plugins)
+        {
+            bool loaded;
+            try
+            {
+                loaded = (bool)(plugin.GetType().GetProperty("IsLoaded")?.GetValue(plugin) ?? false);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!loaded || !MatchesPlugin(plugin, pluginNames))
+            {
+                continue;
+            }
+
+            yield return plugin;
+        }
+    }
+
     private static bool MatchesPlugin(object plugin, string[] pluginNames)
     {
-        var type = plugin.GetType();
-        var internalName = type.GetProperty("InternalName")?.GetValue(plugin)?.ToString();
-        var name = type.GetProperty("Name")?.GetValue(plugin)?.ToString();
+        string? internalName;
+        string? name;
+        try
+        {
+            var type = plugin.GetType();
+            internalName = type.GetProperty("InternalName")?.GetValue(plugin)?.ToString();
+            name = type.GetProperty("Name")?.GetValue(plugin)?.ToString();
+        }
+        catch
+        {
+            return false;
+        }
+
         foreach (var pluginName in pluginNames)
         {
             if (string.Equals(internalName, pluginName, StringComparison.OrdinalIgnoreCase) ||

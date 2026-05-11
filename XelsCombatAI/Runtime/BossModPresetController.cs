@@ -10,7 +10,8 @@ internal sealed class BossModPresetController(
     TargetUptimePlanner targetUptimePlanner,
     PositionalsController positionalsController,
     GapCloserController gapCloserController,
-    EscapeGapCloserController escapeGapCloserController)
+    EscapeGapCloserController escapeGapCloserController,
+    RedMageMeleeComboController redMageMeleeComboController)
 {
     public Positional LastPositional { get; private set; } = Positional.Any;
     public float LastTargetUptimeRange { get; private set; } = -1f;
@@ -84,9 +85,7 @@ internal sealed class BossModPresetController(
     {
         try
         {
-            this.SetTargetUptimeRange(config.ManageTargetUptime
-                ? targetUptimePlanner.CalculateTargetUptimeRange()
-                : Configuration.InternalDisabledUptimeRange);
+            this.SetTargetUptimeRange(targetUptimePlanner.CalculateTargetUptimeRange(config.ManageTargetUptime));
 
             this.SetForbiddenZoneCushion(config.ManageForbiddenZoneDistance
                 ? MapForbiddenZoneCushion(config.PreferredForbiddenZoneDistance)
@@ -136,6 +135,7 @@ internal sealed class BossModPresetController(
         positionalsController.Reset();
         gapCloserController.Reset();
         escapeGapCloserController.Reset();
+        redMageMeleeComboController.Reset();
         bossModSafety.Reset();
     }
 
@@ -213,10 +213,10 @@ internal sealed class BossModPresetController(
     {
         return style switch
         {
-            CombatStyle.Greed           => "GreedAutomatic",
-            CombatStyle.GreedGCD        => "GreedGCDExplicit",
+            CombatStyle.Greed => "GreedAutomatic",
+            CombatStyle.GreedGCD => "GreedGCDExplicit",
             CombatStyle.GreedLastMoment => "GreedLastMomentExplicit",
-            _                           => "Any"
+            _ => "Any"
         };
     }
 
@@ -260,15 +260,27 @@ internal sealed class BossModPresetController(
             return;
         }
 
-        if (config.UseEscapeGapCloser && escapeGapCloserController.TryUseEscapeGapCloser())
+        if (!config.UseGapCloser)
+        {
+            if (redMageMeleeComboController.TryUseComboJump())
+            {
+                return;
+            }
+
+            return;
+        }
+
+        if (escapeGapCloserController.TryUseEscapeGapCloser())
         {
             return;
         }
 
-        if (config.UseGapCloser)
+        if (redMageMeleeComboController.TryUseComboJump())
         {
-            gapCloserController.TryUseReengageGapCloser();
+            return;
         }
+
+        gapCloserController.TryUseReengageGapCloser();
     }
 
     private void WriteNeutralStrategies(string presetName)

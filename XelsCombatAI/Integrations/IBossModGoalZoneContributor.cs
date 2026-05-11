@@ -11,7 +11,17 @@ internal enum BossModGoalPriority
     DefensiveMechanic = 400
 }
 
-internal sealed record BossModGoalContribution(Delegate Goal, BossModGoalPriority Priority, string Label);
+internal enum BossModGoalScoreMode
+{
+    Advisory,
+    Raw
+}
+
+internal sealed record BossModGoalContribution(
+    Delegate Goal,
+    BossModGoalPriority Priority,
+    string Label,
+    BossModGoalScoreMode ScoreMode = BossModGoalScoreMode.Advisory);
 
 internal interface IBossModGoalZoneContributor
 {
