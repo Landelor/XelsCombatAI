@@ -49,6 +49,7 @@ internal sealed class CombatRuntime(
     private string? lastMissingDependencies;
     private readonly CombatHistory combatHistory = new();
     private bool combatHistorySaved;
+    private bool combatHistoryActive;
 
     public bool AutomatedMovementSuppressed => DateTime.UtcNow < this.manualMovementSuppressUntil;
 
@@ -83,6 +84,7 @@ internal sealed class CombatRuntime(
 
         if (!dependencyChecker.DependenciesAvailable(out var missing))
         {
+            this.UpdateFightReviewLogging(CombatEngagementDetector.IsEffectivelyInCombat(services), "dependencies unavailable");
             this.WaitForDependencies(missing);
             return;
         }
@@ -94,10 +96,12 @@ internal sealed class CombatRuntime(
         {
             if (this.wasInCombat || presetController.InitializedPreset)
             {
-                this.FlushCombatHistory("combat ended");
                 this.HandleOutOfCombat();
             }
 
+            this.UpdateFightReviewLogging(
+                combatEngagement.EffectiveInCombat,
+                this.combatHistoryActive && !this.IsDutyContextActive() ? "duty ended" : "combat ended");
             this.wasInCombat = false;
             this.wasDead = false;
             this.manualMovementSuppressUntil = DateTime.MinValue;
@@ -106,8 +110,6 @@ internal sealed class CombatRuntime(
 
         if (!this.wasInCombat)
         {
-            this.combatHistory.Reset();
-            this.combatHistorySaved = false;
             this.wasInCombat = true;
         }
 
@@ -119,6 +121,7 @@ internal sealed class CombatRuntime(
                 this.HandleDeath();
             }
 
+            this.UpdateFightReviewLogging(combatEngagement.EffectiveInCombat, "dead");
             this.wasDead = true;
             return;
         }
@@ -145,21 +148,14 @@ internal sealed class CombatRuntime(
 
         if (!presetController.InitializedPreset && !presetController.Initialize())
         {
+            this.UpdateFightReviewLogging(combatEngagement.EffectiveInCombat, "preset unavailable");
             return;
         }
 
         var suppressAutomatedMovement = this.ShouldSuppressAutomatedMovement(now);
         presetController.ApplyStrategies(suppressAutomatedMovement);
         facingController.Update(now, suppressAutomatedMovement, aoeGoalHook.MovementDiagnostics);
-        if (config.FightReviewLoggingEnabled)
-        {
-            this.combatHistory.Record(this.GetStatus(), aoePackPositioningController.Status, this.BuildActorSnapshots());
-        }
-        else if (this.combatHistory.HasFrames)
-        {
-            this.combatHistory.Reset();
-            this.combatHistorySaved = false;
-        }
+        this.UpdateFightReviewLogging(combatEngagement.EffectiveInCombat, "logging disabled");
     }
 
     public bool SetEnabled(bool enabled, bool warn = true)
@@ -304,7 +300,7 @@ internal sealed class CombatRuntime(
 
     public void DisposeRuntime()
     {
-        if (this.wasInCombat)
+        if (this.combatHistoryActive || this.combatHistory.HasFrames)
         {
             this.FlushCombatHistory("plugin disposed");
         }
@@ -379,7 +375,7 @@ internal sealed class CombatRuntime(
             return;
         }
 
-        if (this.wasInCombat)
+        if (this.wasInCombat || this.combatHistoryActive || this.combatHistory.HasFrames)
         {
             this.FlushCombatHistory("disabled");
         }
@@ -425,6 +421,7 @@ internal sealed class CombatRuntime(
         {
             this.combatHistory.Reset();
             this.combatHistorySaved = false;
+            this.combatHistoryActive = false;
             return;
         }
 
@@ -435,6 +432,57 @@ internal sealed class CombatRuntime(
 
         this.combatHistorySaved = true;
         combatLogWriter.WriteFight(this.combatHistory, config, reason);
+        this.combatHistory.Reset();
+        this.combatHistorySaved = false;
+        this.combatHistoryActive = false;
+    }
+
+    private void UpdateFightReviewLogging(bool effectiveInCombat, string inactiveReason)
+    {
+        if (!config.FightReviewLoggingEnabled)
+        {
+            if (this.combatHistoryActive || this.combatHistory.HasFrames)
+            {
+                this.FlushCombatHistory(inactiveReason);
+            }
+
+            return;
+        }
+
+        if (!this.IsFightReviewRunActive(effectiveInCombat))
+        {
+            if (this.combatHistoryActive || this.combatHistory.HasFrames)
+            {
+                this.FlushCombatHistory(inactiveReason);
+            }
+
+            return;
+        }
+
+        if (!this.combatHistoryActive)
+        {
+            this.combatHistory.Reset(this.IsDutyContextActive() ? "instance-run" : "combat");
+            this.combatHistorySaved = false;
+            this.combatHistoryActive = true;
+        }
+
+        if (!this.combatHistory.ShouldRecord(effectiveInCombat))
+        {
+            return;
+        }
+
+        this.combatHistory.Record(this.GetStatus(), aoePackPositioningController.Status, this.BuildActorSnapshots());
+    }
+
+    private bool IsFightReviewRunActive(bool effectiveInCombat)
+    {
+        return this.IsDutyContextActive() || effectiveInCombat;
+    }
+
+    private bool IsDutyContextActive()
+    {
+        return services.DutyState.IsDutyStarted ||
+               services.Condition[ConditionFlag.BoundByDuty];
     }
 
     private IReadOnlyList<CombatHistoryActorSnapshot> BuildActorSnapshots()

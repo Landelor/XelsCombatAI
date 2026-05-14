@@ -492,11 +492,11 @@ internal sealed class ConfigWindow : Window, IDisposable
 
         this.DrawSectionHeader("Fight Review");
         changed |= this.Checkbox(
-            "Write fight-review logs",
+            "Write run-review logs",
             this.config.FightReviewLoggingEnabled,
             this.defaultConfig.FightReviewLoggingEnabled,
             v => this.config.FightReviewLoggingEnabled = v,
-            "Saves per-fight JSONL logs for offline review.\nOnly records while this option is enabled.");
+            "Saves one JSONL log for the current duty or fallback combat.\nDowntime is sampled slower to keep logging lightweight.");
         ImGui.Unindent(8f);
         ImGui.Spacing();
 

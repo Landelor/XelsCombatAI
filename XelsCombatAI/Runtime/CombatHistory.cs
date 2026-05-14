@@ -15,9 +15,10 @@ namespace XelsCombatAI.Runtime;
 
 internal sealed class CombatHistory
 {
-    // One hour at the current 250 ms sample rate; fights should fit without dropping early context.
+    // One hour at the combat sample rate; downtime is sampled slower so full duties fit without dropping early context.
     private const int MaxFrames = 14400;
-    private static readonly TimeSpan RecordInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan CombatRecordInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan DowntimeRecordInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MobilityDecisionFreshness = TimeSpan.FromMilliseconds(750);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -35,25 +36,32 @@ internal sealed class CombatHistory
     private DateTime combatStart = DateTime.MinValue;
     private DateTime lastRecordedAt = DateTime.MinValue;
     private StateCommandType lastSeenRsrSnapshotMode;
+    private string logScope = "instance-run";
 
     public bool HasFrames => this.count > 0;
     public DateTime CombatStartUtc => this.combatStart;
     public CombatHistoryFrame? FirstFrame => this.count == 0 ? null : this.frames[this.head];
     public CombatHistoryFrame? LastFrame => this.count == 0 ? null : this.frames[(this.head + this.count - 1) % MaxFrames];
 
-    public void Reset()
+    public bool ShouldRecord(bool inCombat)
+    {
+        return this.ShouldRecord(DateTime.UtcNow, inCombat);
+    }
+
+    public void Reset(string logScope = "instance-run")
     {
         this.head = 0;
         this.count = 0;
         this.combatStart = DateTime.MinValue;
         this.lastRecordedAt = DateTime.MinValue;
         this.lastSeenRsrSnapshotMode = default;
+        this.logScope = logScope;
     }
 
     public void Record(RuntimeStatus status, AoePackPositioningStatus aoe, IReadOnlyList<CombatHistoryActorSnapshot> actors)
     {
         var now = DateTime.UtcNow;
-        if (now - this.lastRecordedAt < RecordInterval)
+        if (!this.ShouldRecord(now, status.InCombat))
             return;
 
         if (this.combatStart == DateTime.MinValue)
@@ -152,6 +160,12 @@ internal sealed class CombatHistory
             this.count++;
         else
             this.head = (this.head + 1) % MaxFrames;
+    }
+
+    private bool ShouldRecord(DateTime now, bool inCombat)
+    {
+        var recordInterval = inCombat ? CombatRecordInterval : DowntimeRecordInterval;
+        return now - this.lastRecordedAt >= recordInterval;
     }
 
     public string Build(Configuration config)
@@ -322,7 +336,10 @@ internal sealed class CombatHistory
                 new CombatHistoryJsonHeader(
                     Type: "header",
                     SchemaVersion: 3,
+                    LogScope: this.logScope,
                     PluginVersion: PluginVersion(),
+                    RunStartUtc: this.combatStart,
+                    RunEndUtc: this.combatStart,
                     CombatStartUtc: this.combatStart,
                     CombatEndUtc: this.combatStart,
                     DurationSeconds: 0,
@@ -343,7 +360,10 @@ internal sealed class CombatHistory
             new CombatHistoryJsonHeader(
                 Type: "header",
                 SchemaVersion: 3,
+                LogScope: this.logScope,
                 PluginVersion: PluginVersion(),
+                RunStartUtc: this.combatStart,
+                RunEndUtc: last.TimestampUtc,
                 CombatStartUtc: this.combatStart,
                 CombatEndUtc: last.TimestampUtc,
                 DurationSeconds: last.T,
@@ -484,7 +504,10 @@ internal sealed class CombatHistory
     private sealed record CombatHistoryJsonHeader(
         string Type,
         int SchemaVersion,
+        string LogScope,
         string PluginVersion,
+        DateTime RunStartUtc,
+        DateTime RunEndUtc,
         DateTime CombatStartUtc,
         DateTime CombatEndUtc,
         float DurationSeconds,

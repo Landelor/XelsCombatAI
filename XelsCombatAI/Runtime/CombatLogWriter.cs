@@ -42,7 +42,9 @@ internal sealed class CombatLogWriter(string rootDirectory, IPluginLog log)
             "_",
             started.ToString("yyyyMMdd-HHmmss'Z'"),
             $"job{first?.PlayerClassJobId ?? 0}",
-            $"target{last?.TargetBaseId ?? 0}",
+            $"territory{first?.TerritoryType ?? 0}",
+            $"cfcid{first?.ContentFinderConditionId ?? 0}",
+            $"lasttarget{last?.TargetBaseId ?? 0}",
             Sanitize(reason));
 
         var path = Path.Combine(rootDirectory, $"{name}.jsonl");

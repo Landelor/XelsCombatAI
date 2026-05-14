@@ -28,7 +28,7 @@ While you are in combat, the plugin automatically:
 - **Brings stray aggro to a party tank** when a non-tank is targeted by a mob for more than 3 seconds
 - **Avoids hugging the arena edge** as a weak preference when stronger movement goals do not matter
 - **Shows a decision overlay** with projected in-world markers for current movement decisions, candidates, and debug context, plus an optional movable debug HUD (off by default)
-- **Can write opt-in fight-review logs** for offline analysis with BossMod Reborn replay files (off by default)
+- **Can write opt-in run-review logs** for offline analysis with BossMod Reborn replay files (off by default)
 - **Pauses automated movement** briefly when you move manually, including remapped movement or gamepad input reported by BossMod
 - **Manages True North** usage and disables RSR's Auto True North to prevent conflicts (optional, requires RSR)
 
@@ -93,6 +93,6 @@ When the Gap closers option is enabled and Movement timing is set to a greedy pr
 
 ### Troubleshooting tab
 
-**Troubleshooting** — Show the movement overlay, toggle the movable debug HUD, copy a debug snapshot, or enable fight-review logging.
+**Troubleshooting** — Show the movement overlay, toggle the movable debug HUD, copy a debug snapshot, or enable run-review logging.
 
-Fight-review logging is off by default. When enabled, the plugin writes detailed JSONL files to the plugin config directory under `XelsCombatAI/combat-logs`. These logs are intended for offline review with BossMod Reborn replay files and may be larger than normal debug snapshots. Movement review data includes bounded vnavmesh query diagnostics such as path status, detour distance, waypoint distance, and off-mesh probes; it does not copy cached navmesh files.
+Run-review logging is off by default. When enabled, the plugin writes one detailed JSONL file for the current duty, matching BossMod Reborn's whole-replay style so dungeon pulls can be compared in one analyzer run. If no duty is active, it falls back to a single combat log. Files are written to the plugin config directory under `XelsCombatAI/combat-logs`. Combat is sampled at the normal review cadence and downtime is sampled slower to keep resource cost bounded. Movement review data includes bounded vnavmesh query diagnostics such as path status, detour distance, waypoint distance, and off-mesh probes; it does not copy cached navmesh files.
