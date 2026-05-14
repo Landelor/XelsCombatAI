@@ -292,7 +292,7 @@ internal sealed class AoePackPositioningController(
             return;
         }
 
-        if (!services.Condition[ConditionFlag.InCombat] || services.Condition[ConditionFlag.Unconscious])
+        if (!CombatEngagementDetector.IsEffectivelyInCombat(services) || services.Condition[ConditionFlag.Unconscious])
         {
             this.lastReason = "not active in combat";
             this.bossLikeCombatActive = false;
@@ -1895,7 +1895,7 @@ internal sealed class AoePackPositioningController(
             .ToArray();
         var observation = new TrashPullObservation(
             DateTime.UtcNow,
-            services.Condition[ConditionFlag.InCombat],
+            CombatEngagementDetector.IsEffectivelyInCombat(services),
             trashContext,
             bossContext,
             automatedMovementSuppressed(),

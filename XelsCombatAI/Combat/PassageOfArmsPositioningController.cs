@@ -136,7 +136,7 @@ internal sealed class PassageOfArmsPositioningController(
             return;
         }
 
-        if (!services.Condition[ConditionFlag.InCombat] || services.Condition[ConditionFlag.Unconscious])
+        if (!CombatEngagementDetector.IsEffectivelyInCombat(services) || services.Condition[ConditionFlag.Unconscious])
         {
             this.SetInactive("not active in combat");
             return;

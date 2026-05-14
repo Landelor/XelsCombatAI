@@ -833,7 +833,7 @@ internal sealed class MovementIntentPlanner(
             return true;
         }
 
-        if (!services.Condition[ConditionFlag.InCombat])
+        if (!CombatEngagementDetector.IsEffectivelyInCombat(services))
         {
             reason = "OutOfCombat";
             return true;

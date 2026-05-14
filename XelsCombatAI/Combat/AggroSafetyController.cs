@@ -124,7 +124,7 @@ internal sealed class AggroSafetyController(
             return;
         }
 
-        if (!services.Condition[ConditionFlag.InCombat])
+        if (!CombatEngagementDetector.IsEffectivelyInCombat(services))
         {
             this.ResetTracking("out of combat");
             return;

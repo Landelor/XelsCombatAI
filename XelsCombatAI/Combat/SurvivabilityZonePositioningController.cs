@@ -168,7 +168,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             return;
         }
 
-        if (!services.Condition[ConditionFlag.InCombat] || services.Condition[ConditionFlag.Unconscious])
+        if (!CombatEngagementDetector.IsEffectivelyInCombat(services) || services.Condition[ConditionFlag.Unconscious])
         {
             this.SetInactive("not active in combat");
             return;

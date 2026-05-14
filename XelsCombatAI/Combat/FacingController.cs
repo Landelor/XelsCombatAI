@@ -319,7 +319,7 @@ internal sealed class FacingController(
             return false;
         }
 
-        if (!services.Condition[ConditionFlag.InCombat])
+        if (!CombatEngagementDetector.IsEffectivelyInCombat(services))
         {
             reason = "not in combat";
             return false;

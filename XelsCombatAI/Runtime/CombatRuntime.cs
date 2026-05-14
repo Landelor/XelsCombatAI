@@ -89,7 +89,8 @@ internal sealed class CombatRuntime(
 
         this.ClearDependencyWaitState();
 
-        if (!services.Condition[ConditionFlag.InCombat])
+        var combatEngagement = CombatEngagementDetector.Detect(services);
+        if (!combatEngagement.EffectiveInCombat)
         {
             if (this.wasInCombat || presetController.InitializedPreset)
             {
@@ -227,7 +228,7 @@ internal sealed class CombatRuntime(
 
         return new RuntimeStatus(
             config.Enabled,
-            services.Condition[ConditionFlag.InCombat],
+            CombatEngagementDetector.IsEffectivelyInCombat(services),
             services.Condition[ConditionFlag.Unconscious],
             player?.ClassJob.RowId ?? 0,
             services.ClientState.TerritoryType,

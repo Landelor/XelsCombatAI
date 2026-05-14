@@ -133,7 +133,7 @@ internal sealed class HealerAoePositioningController(
             return;
         }
 
-        if (!services.Condition[ConditionFlag.InCombat] || services.Condition[ConditionFlag.Unconscious])
+        if (!CombatEngagementDetector.IsEffectivelyInCombat(services) || services.Condition[ConditionFlag.Unconscious])
         {
             this.lastReason = "not active in combat";
             return;

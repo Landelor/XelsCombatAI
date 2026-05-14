@@ -756,7 +756,7 @@ internal sealed class BossModGoalZoneHook : IDisposable
             }
 
             var player = this.services.ObjectTable.LocalPlayer;
-            if (!this.services.Condition[ConditionFlag.InCombat] || player == null)
+            if (!CombatEngagementDetector.IsEffectivelyInCombat(this.services) || player == null)
             {
                 this.vnavmeshGuardStatus = "not in combat";
                 return;

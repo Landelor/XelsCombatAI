@@ -803,7 +803,7 @@ internal sealed class RedMageMeleeComboController : IMovementCandidateSource, ID
             return false;
         }
 
-        if (!services.Condition[ConditionFlag.InCombat])
+        if (!CombatEngagementDetector.IsEffectivelyInCombat(services))
         {
             reason = "not in combat";
             return false;
