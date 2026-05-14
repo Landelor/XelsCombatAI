@@ -30,7 +30,10 @@ internal sealed class MovementIntentPlanner(
     private const string LineOfSightRecoverySource = "Line of sight recovery";
     private const string ObstacleRecoverySource = "Obstacle recovery";
     private const string BmrSafetyEscapeSource = "BMR safety escape";
+    private const string BmrSafetyHoldSource = "BMR safety hold";
+    private const string HealerSafetyAnchorSource = "Healer safety anchor";
     private static readonly TimeSpan HoldDuration = TimeSpan.FromMilliseconds(1250);
+    private static readonly TimeSpan TrashRangeHoldDuration = TimeSpan.FromMilliseconds(2500);
     private static readonly TimeSpan PendingPathHoldDuration = TimeSpan.FromSeconds(2);
     private const float MeaningfullyBetterMultiplier = 1.3f;
     private const float CloseScoreTie = 8f;
@@ -58,6 +61,12 @@ internal sealed class MovementIntentPlanner(
     private const float BmrSafetyEscapeSearchRadius = 7f;
     private const float BmrSafetyEscapeBoundaryDistance = 1f;
     private const float BmrSafetyEscapeAcceptanceRadius = 1.1f;
+    private const float BmrSafetyHoldBoundaryDistance = 1.75f;
+    private const float BmrSafetyHoldAcceptanceRadius = 1.2f;
+    private const float HealerSafetyCoverageRadius = 20f;
+    private const float HealerSafetyCoverageRadiusSquared = HealerSafetyCoverageRadius * HealerSafetyCoverageRadius;
+    private const float HealerSafetyAnchorAcceptanceRadius = 1.35f;
+    private const float HealerSafetyAnchorMaxAnchorRegression = 2f;
     private const float LineOfSightRecoveryAcceptanceRadius = 1.1f;
     private const float LineOfSightRecoveryMaxAnchorDistance = 8f;
     private const float BossCenterRouteBuffer = 0.25f;
@@ -70,6 +79,7 @@ internal sealed class MovementIntentPlanner(
     private static readonly float[] ObstacleRecoveryDistances = [2.5f, 4f];
     private static readonly float[] ObstacleBoundaryRecoveryDistances = [2.25f, 3.5f];
     private static readonly float[] LineOfSightRecoveryDistances = [2.25f, 3.75f, 5.5f, 7.5f];
+    private static readonly float[] HealerSafetyAnchorDistances = [2.5f, 4.5f, 6.5f, 8.5f];
     private static readonly TimeSpan StuckIntentDuration = TimeSpan.FromMilliseconds(1250);
     private static readonly TimeSpan StuckDestinationCooldown = TimeSpan.FromSeconds(3);
 
@@ -209,7 +219,9 @@ internal sealed class MovementIntentPlanner(
             this.AddTargetRangeCandidates(context, candidates);
         }
 
+        this.AddBmrSafetyHoldCandidates(context, candidates);
         this.AddBmrSafetyEscapeCandidates(context, candidates);
+        this.AddHealerSafetyAnchorCandidates(context, candidates);
         this.AddLineOfSightRecoveryCandidates(context, candidates);
         this.AddObstacleRecoveryCandidates(context, candidates);
         foreach (var source in candidateSources)
@@ -424,7 +436,7 @@ internal sealed class MovementIntentPlanner(
                 return this.currentIntent with
                 {
                     Score = best,
-                    HoldUntilUtc = now.Add(HoldDuration)
+                    HoldUntilUtc = now.Add(HoldDurationForSource(this.currentIntent.Source))
                 };
             }
 
@@ -515,6 +527,8 @@ internal sealed class MovementIntentPlanner(
                source.Equals("Pack engagement", StringComparison.Ordinal) ||
                source.Equals("Tank pull lead", StringComparison.Ordinal) ||
                source.Equals(BmrSafetyEscapeSource, StringComparison.Ordinal) ||
+               source.Equals(BmrSafetyHoldSource, StringComparison.Ordinal) ||
+               source.Equals(HealerSafetyAnchorSource, StringComparison.Ordinal) ||
                source.Equals(TrashRouteMemory.CandidateSource, StringComparison.Ordinal) ||
                source.Equals(RedMageMeleeComboController.CandidateSource, StringComparison.Ordinal);
     }
@@ -528,7 +542,7 @@ internal sealed class MovementIntentPlanner(
             score.AcceptanceRadius,
             score,
             now,
-            now.Add(HoldDuration));
+            now.Add(HoldDurationForSource(score.Source)));
     }
 
     private bool ValidateCurrentIntent(MovementPlannerContext context, out MovementCandidateScore? score)
@@ -897,7 +911,7 @@ internal sealed class MovementIntentPlanner(
             return false;
         }
 
-        if (bossModSafety.TryIsPositionSafe(context.PlayerPosition, out var currentSafe, out _) && !currentSafe)
+        if (this.TryGetCurrentBmrSafetyState(context, out _, out var currentUnsafe, out _) && currentUnsafe)
         {
             return true;
         }
@@ -915,6 +929,60 @@ internal sealed class MovementIntentPlanner(
         return context.BmrMoveRequested ||
                context.BmrMoveImminent ||
                context.BmrForcedMovement is { } forced && forced.LengthSquared() > 0.01f;
+    }
+
+    private bool TryGetCurrentBmrSafetyState(
+        MovementPlannerContext context,
+        out bool currentSafe,
+        out bool currentUnsafe,
+        out string unsafeReason)
+    {
+        currentSafe = false;
+        currentUnsafe = false;
+        unsafeReason = string.Empty;
+        var known = false;
+        var allSafe = true;
+
+        if (bossModSafety.TryIsPositionSafe(context.PlayerPosition, out var positionSafe, out var positionReason))
+        {
+            known = true;
+            if (!positionSafe)
+            {
+                allSafe = false;
+                AppendSafetyReason(ref unsafeReason, positionReason);
+            }
+        }
+
+        if (bossModSafety.TryIsNavigationCellSafe(context.PlayerPosition, out var cellSafe, out var cellReason))
+        {
+            known = true;
+            if (!cellSafe)
+            {
+                allSafe = false;
+                AppendSafetyReason(ref unsafeReason, cellReason);
+            }
+        }
+
+        if (!known)
+        {
+            return false;
+        }
+
+        currentSafe = allSafe;
+        currentUnsafe = !allSafe;
+        return true;
+    }
+
+    private static void AppendSafetyReason(ref string reasons, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return;
+        }
+
+        reasons = string.IsNullOrWhiteSpace(reasons)
+            ? reason
+            : $"{reasons}; {reason}";
     }
 
     private bool ShouldUseLineOfSightReengage(MovementPlannerContext context)
@@ -1174,6 +1242,13 @@ internal sealed class MovementIntentPlanner(
                source.Equals(LineOfSightRecoverySource, StringComparison.Ordinal);
     }
 
+    private static bool IsBmrSafetyAssistSource(string source)
+    {
+        return source.Equals(BmrSafetyEscapeSource, StringComparison.Ordinal) ||
+               source.Equals(BmrSafetyHoldSource, StringComparison.Ordinal) ||
+               source.Equals(HealerSafetyAnchorSource, StringComparison.Ordinal);
+    }
+
     private static bool IsPendingFallbackSource(string source)
     {
         return source.Equals("Pack engagement", StringComparison.Ordinal) ||
@@ -1190,6 +1265,19 @@ internal sealed class MovementIntentPlanner(
                source.Equals(TrashRouteMemory.CandidateSource, StringComparison.Ordinal);
     }
 
+    private static bool IsTrashRangeStickinessSource(string source)
+    {
+        return source.Equals("Target range", StringComparison.Ordinal) ||
+               IsTrashEngagementSource(source);
+    }
+
+    private static TimeSpan HoldDurationForSource(string source)
+    {
+        return IsTrashRangeStickinessSource(source)
+            ? TrashRangeHoldDuration
+            : HoldDuration;
+    }
+
     private bool IsPathRecoveryIntent(MovementIntent intent)
     {
         return IsPathRecoverySource(intent.Source);
@@ -1204,6 +1292,11 @@ internal sealed class MovementIntentPlanner(
             return false;
         }
 
+        if (best.Source.Equals("Pack engagement", StringComparison.Ordinal))
+        {
+            return best.TotalScore >= currentScore * MeaningfullyBetterMultiplier;
+        }
+
         return best.TotalScore >= currentScore - CloseScoreTie;
     }
 
@@ -1216,6 +1309,7 @@ internal sealed class MovementIntentPlanner(
         if (!this.ShouldCheckBmrNavigationLine(context) ||
             IsPathRecoverySource(candidate.Source) ||
             candidate.Source.Equals(LineOfSightReengageSource, StringComparison.Ordinal) ||
+            candidate.Source.Equals(HealerSafetyAnchorSource, StringComparison.Ordinal) ||
             candidate.Source.Equals(TrashRouteMemory.CandidateSource, StringComparison.Ordinal))
         {
             return false;
@@ -1297,7 +1391,7 @@ internal sealed class MovementIntentPlanner(
     private static bool IsOffMeshSnapSource(string source)
     {
         return IsPathRecoverySource(source) ||
-               source.Equals(BmrSafetyEscapeSource, StringComparison.Ordinal) ||
+               IsBmrSafetyAssistSource(source) ||
                source.Equals("Pack engagement", StringComparison.Ordinal) ||
                source.Equals("AoE pack", StringComparison.Ordinal) ||
                source.Equals("Tank pull lead", StringComparison.Ordinal) ||
@@ -1387,7 +1481,7 @@ internal sealed class MovementIntentPlanner(
 
     private static void SuppressNonBmrSafetyEscapeCandidates(List<MovementCandidate> candidates)
     {
-        candidates.RemoveAll(candidate => !candidate.Source.Equals(BmrSafetyEscapeSource, StringComparison.Ordinal));
+        candidates.RemoveAll(candidate => !IsBmrSafetyAssistSource(candidate.Source));
     }
 
     private void AddTargetRangeCandidates(MovementPlannerContext context, ICollection<MovementCandidate> candidates)
@@ -1448,6 +1542,46 @@ internal sealed class MovementIntentPlanner(
         }
     }
 
+    private void AddBmrSafetyHoldCandidates(MovementPlannerContext context, ICollection<MovementCandidate> candidates)
+    {
+        if (!config.ManageMovement ||
+            context.AutomatedMovementSuppressed ||
+            !context.BossModEncounterActive ||
+            context.BmrForbiddenZones <= 0 ||
+            context.BmrGoalZones > 0 ||
+            HasExplicitBmrMovement(context))
+        {
+            return;
+        }
+
+        if (!this.TryGetCurrentBmrSafetyState(context, out var currentSafe, out _, out _) ||
+            !currentSafe)
+        {
+            return;
+        }
+
+        if (!bossModSafety.TryGetNearestNavigationBlocker(
+                context.PlayerPosition,
+                BmrSafetyHoldBoundaryDistance,
+                includeAvoidBuffer: true,
+                out var blocker) ||
+            !blocker.Found)
+        {
+            return;
+        }
+
+        candidates.Add(new(
+            BmrSafetyHoldSource,
+            "holding current safe spot near BMR boundary",
+            context.PlayerPosition,
+            BmrSafetyHoldAcceptanceRadius,
+            MovementCandidatePriority.Defensive,
+            1f,
+            0f,
+            0f,
+            0.95f));
+    }
+
     private void AddBmrSafetyEscapeCandidates(MovementPlannerContext context, ICollection<MovementCandidate> candidates)
     {
         if (!config.ManageMovement ||
@@ -1456,8 +1590,7 @@ internal sealed class MovementIntentPlanner(
             return;
         }
 
-        var safetyKnown = bossModSafety.TryIsPositionSafe(context.PlayerPosition, out var currentSafe, out var currentSafetyReason);
-        var currentUnsafe = safetyKnown && !currentSafe;
+        var safetyKnown = this.TryGetCurrentBmrSafetyState(context, out _, out var currentUnsafe, out var currentSafetyReason);
         var safetyPressure = context.BmrForbiddenZones > 0;
         if (!currentUnsafe && !safetyPressure)
         {
@@ -1471,16 +1604,7 @@ internal sealed class MovementIntentPlanner(
                 includeAvoidBuffer: true,
                 out var blocker) &&
             blocker.Found;
-        if (!currentUnsafe &&
-            safetyKnown &&
-            currentSafe &&
-            !nearBoundary)
-        {
-            return;
-        }
-
-        if (!safetyKnown &&
-            !nearBoundary)
+        if (!currentUnsafe && !nearBoundary)
         {
             return;
         }
@@ -1504,7 +1628,7 @@ internal sealed class MovementIntentPlanner(
                 BmrSafetyEscapeSearchRadius,
                 out var safePoint))
         {
-            var reason = safetyKnown && !currentSafe
+            var reason = safetyKnown && currentUnsafe
                 ? string.Create(CultureInfo.InvariantCulture, $"escaping BMR danger: {currentSafetyReason}; {safePoint.Reason}")
                 : string.Create(CultureInfo.InvariantCulture, $"stepping clear of BMR boundary: {safePoint.Reason}");
             candidates.Add(new(
@@ -1517,6 +1641,210 @@ internal sealed class MovementIntentPlanner(
                 0f,
                 0f,
                 0.95f));
+        }
+    }
+
+    private void AddHealerSafetyAnchorCandidates(MovementPlannerContext context, ICollection<MovementCandidate> candidates)
+    {
+        if (!this.ShouldUseHealerSafetyAnchor(context))
+        {
+            return;
+        }
+
+        var party = PartyAllyProvider.GetVisiblePartyAllies(services, context.Player).Members;
+        if (party.Count == 0)
+        {
+            return;
+        }
+
+        var tank = PartyAllyProvider.SelectBestTank(services, context.Player);
+        var anchor = ResolveHealerSafetyAnchor(context, party, tank);
+        if (!anchor.HasValue)
+        {
+            return;
+        }
+
+        var tankPosition = tank == null
+            ? (Vector3?)null
+            : new Vector3(tank.Position.X, context.PlayerPosition.Y, tank.Position.Z);
+        var currentCovered = CountHealerSafetyCovered(context.PlayerPosition, party);
+        var currentCoversTank = tankPosition.HasValue &&
+                                CoversHealerSafetyPosition(context.PlayerPosition, tankPosition.Value);
+        var currentAnchorDistance = Distance2D(context.PlayerPosition, anchor.Value);
+        var added = new List<Vector3>();
+        foreach (var destination in this.EnumerateHealerSafetyAnchorDestinations(context, anchor.Value))
+        {
+            if (!IsFinite(destination) ||
+                Distance2D(context.PlayerPosition, destination) < TinyMovementThreshold ||
+                added.Any(existing => Distance2D(existing, destination) < 0.75f))
+            {
+                continue;
+            }
+
+            var covered = CountHealerSafetyCovered(destination, party);
+            var coversTank = tankPosition.HasValue &&
+                             CoversHealerSafetyPosition(destination, tankPosition.Value);
+            var coverageGain = covered - currentCovered;
+            if (currentCoversTank && !coversTank)
+            {
+                continue;
+            }
+
+            if (coverageGain < -1 && (!coversTank || currentCoversTank))
+            {
+                continue;
+            }
+
+            var anchorDistance = Distance2D(destination, anchor.Value);
+            if (anchorDistance > currentAnchorDistance + HealerSafetyAnchorMaxAnchorRegression &&
+                coverageGain <= 0 &&
+                (!coversTank || currentCoversTank))
+            {
+                continue;
+            }
+
+            var progress = currentAnchorDistance - anchorDistance;
+            var coverageScore = party.Count == 0
+                ? 0f
+                : Math.Clamp(covered / (float)party.Count, 0f, 1f);
+            if (coversTank)
+            {
+                coverageScore = Math.Clamp(coverageScore + (currentCoversTank ? 0.1f : 0.25f), 0f, 1f);
+            }
+
+            var humanScore = Math.Clamp(
+                0.65f +
+                (coversTank ? 0.15f : 0f) +
+                (progress > 0f ? 0.1f : 0f),
+                0f,
+                1f);
+            var tankText = tankPosition.HasValue
+                ? coversTank ? "tank covered" : "tank missed"
+                : "no tank";
+            var reason = string.Create(
+                CultureInfo.InvariantCulture,
+                $"safe healer anchor; coverage {currentCovered}->{covered}/{party.Count}; {tankText}; anchor {currentAnchorDistance:0.0}->{anchorDistance:0.0}y");
+            candidates.Add(new(
+                HealerSafetyAnchorSource,
+                reason,
+                destination,
+                HealerSafetyAnchorAcceptanceRadius,
+                MovementCandidatePriority.Defensive,
+                1f,
+                0f,
+                coverageScore,
+                humanScore));
+            added.Add(destination);
+        }
+    }
+
+    private bool ShouldUseHealerSafetyAnchor(MovementPlannerContext context)
+    {
+        if (!config.ManageHealerCoverageZone ||
+            !config.ManageMovement ||
+            context.AutomatedMovementSuppressed ||
+            context.BmrForbiddenZones <= 0 ||
+            HasExplicitBmrMovement(context) ||
+            JobRoles.GetRangeRole(context.Player) != RangeRole.Healer)
+        {
+            return false;
+        }
+
+        var safetyKnown = this.TryGetCurrentBmrSafetyState(context, out _, out var currentUnsafe, out _);
+        if (safetyKnown && currentUnsafe)
+        {
+            return true;
+        }
+
+        if (context.BossModEncounterActive)
+        {
+            return false;
+        }
+
+        return bossModSafety.TryGetNearestNavigationBlocker(
+                   context.PlayerPosition,
+                   BmrSafetyHoldBoundaryDistance,
+                   includeAvoidBuffer: true,
+                   out var blocker) &&
+               blocker.Found;
+    }
+
+    private static Vector3? ResolveHealerSafetyAnchor(
+        MovementPlannerContext context,
+        IReadOnlyList<IBattleChara> party,
+        IBattleChara? tank)
+    {
+        if (tank is { IsDead: false, CurrentHp: > 0 })
+        {
+            return new Vector3(tank.Position.X, context.PlayerPosition.Y, tank.Position.Z);
+        }
+
+        if (party.Count == 0)
+        {
+            return null;
+        }
+
+        var sum = Vector3.Zero;
+        foreach (var member in party)
+        {
+            sum += new Vector3(member.Position.X, context.PlayerPosition.Y, member.Position.Z);
+        }
+
+        return sum / party.Count;
+    }
+
+    private IEnumerable<Vector3> EnumerateHealerSafetyAnchorDestinations(MovementPlannerContext context, Vector3 anchor)
+    {
+        var player2 = new Vector2(context.PlayerPosition.X, context.PlayerPosition.Z);
+        var anchor2 = new Vector2(anchor.X, anchor.Z);
+        var toAnchor = anchor2 - player2;
+        foreach (var direction in this.EnumerateHealerSafetyAnchorDirections(context, toAnchor))
+        {
+            foreach (var distance in HealerSafetyAnchorDistances)
+            {
+                var dest2 = player2 + (direction * distance);
+                yield return new Vector3(dest2.X, context.PlayerPosition.Y, dest2.Y);
+            }
+        }
+    }
+
+    private IEnumerable<Vector2> EnumerateHealerSafetyAnchorDirections(MovementPlannerContext context, Vector2 toAnchor)
+    {
+        if (TryNormalize(toAnchor, out var towardAnchor))
+        {
+            var left = new Vector2(-towardAnchor.Y, towardAnchor.X);
+            var right = -left;
+            yield return towardAnchor;
+            yield return Vector2.Normalize((towardAnchor * 0.8f) + (left * 0.45f));
+            yield return Vector2.Normalize((towardAnchor * 0.8f) + (right * 0.45f));
+            yield return left;
+            yield return right;
+        }
+
+        if (!bossModSafety.TryGetNearestNavigationBlocker(
+                context.PlayerPosition,
+                BmrSafetyHoldBoundaryDistance,
+                includeAvoidBuffer: true,
+                out var blocker) ||
+            blocker is not { Found: true, Point: { } blockerPoint })
+        {
+            yield break;
+        }
+
+        var away = new Vector2(context.PlayerPosition.X - blockerPoint.X, context.PlayerPosition.Z - blockerPoint.Z);
+        if (!TryNormalize(away, out var awayFromBlocker))
+        {
+            yield break;
+        }
+
+        var tangent = new Vector2(-awayFromBlocker.Y, awayFromBlocker.X);
+        yield return awayFromBlocker;
+        yield return Vector2.Normalize((awayFromBlocker * 0.8f) + (tangent * 0.35f));
+        yield return Vector2.Normalize((awayFromBlocker * 0.8f) - (tangent * 0.35f));
+        if (TryNormalize(toAnchor, out towardAnchor))
+        {
+            yield return Vector2.Normalize((tangent * 0.85f) + (towardAnchor * 0.35f));
+            yield return Vector2.Normalize((-tangent * 0.85f) + (towardAnchor * 0.35f));
         }
     }
 
@@ -2178,9 +2506,15 @@ internal sealed class MovementIntentPlanner(
     private bool IsRecentlyStuckDestination(DateTime now, MovementCandidate candidate)
     {
         return now < this.stuckSuppressedUntilUtc &&
-               this.stuckSuppressedDestination.HasValue &&
                string.Equals(candidate.Source, this.stuckSuppressedSource, StringComparison.Ordinal) &&
-               Distance2D(candidate.Destination, this.stuckSuppressedDestination.Value) <= DestinationSameThreshold;
+               (SuppressStuckSourceAcrossDestinations(candidate.Source) ||
+                this.stuckSuppressedDestination.HasValue &&
+                Distance2D(candidate.Destination, this.stuckSuppressedDestination.Value) <= DestinationSameThreshold);
+    }
+
+    private static bool SuppressStuckSourceAcrossDestinations(string source)
+    {
+        return source.Equals(AggroSafetyController.CandidateSource, StringComparison.Ordinal);
     }
 
     private void ResetProgressTracking()
@@ -2221,6 +2555,39 @@ internal sealed class MovementIntentPlanner(
         }
 
         return value;
+    }
+
+    private static bool TryNormalize(Vector2 value, out Vector2 normalized)
+    {
+        if (value.LengthSquared() <= 0.0001f)
+        {
+            normalized = default;
+            return false;
+        }
+
+        normalized = Vector2.Normalize(value);
+        return true;
+    }
+
+    private static int CountHealerSafetyCovered(Vector3 candidate, IReadOnlyList<IBattleChara> members)
+    {
+        var covered = 0;
+        foreach (var member in members)
+        {
+            if (CoversHealerSafetyPosition(candidate, member.Position))
+            {
+                ++covered;
+            }
+        }
+
+        return covered;
+    }
+
+    private static bool CoversHealerSafetyPosition(Vector3 candidate, Vector3 member)
+    {
+        var dx = candidate.X - member.X;
+        var dz = candidate.Z - member.Z;
+        return (dx * dx) + (dz * dz) <= HealerSafetyCoverageRadiusSquared;
     }
 
     private static float Distance2D(Vector3 a, Vector3 b)

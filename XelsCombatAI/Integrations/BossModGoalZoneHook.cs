@@ -421,6 +421,8 @@ internal sealed class BossModGoalZoneHook : IDisposable
         private static readonly TimeSpan MovementDiagnosticsCaptureInterval = TimeSpan.FromMilliseconds(250);
         private static readonly TimeSpan BmrForwardBrakeHoldDuration = TimeSpan.FromMilliseconds(175);
         private const string BmrSafetyEscapeSource = "BMR safety escape";
+        private const string BmrSafetyHoldSource = "BMR safety hold";
+        private const string HealerSafetyAnchorSource = "Healer safety anchor";
         private const float VnavPathfindDestinationTolerance = 1.5f;
         private const float VnavPathfindStartTolerance = 5f;
         private const float BmrForwardBrakeProbeDistance = 2.25f;
@@ -992,7 +994,7 @@ internal sealed class BossModGoalZoneHook : IDisposable
                 return;
             }
 
-            if (planner.BmrForbiddenZones > 0 && !IsBmrSafetyEscapeSource(planner.ChosenSource))
+            if (planner.BmrForbiddenZones > 0 && !IsBmrSafetyAssistSource(planner.ChosenSource))
             {
                 this.movementPlannerSteerStatus = "BMR safety pressure active";
                 return;
@@ -1028,6 +1030,8 @@ internal sealed class BossModGoalZoneHook : IDisposable
         private static bool IsPlannerSteerSource(string source, bool encounterActive)
         {
             return IsBmrSafetyEscapeSource(source) ||
+                   source.Equals(BmrSafetyHoldSource, StringComparison.Ordinal) ||
+                   source.Equals(HealerSafetyAnchorSource, StringComparison.Ordinal) ||
                    (!encounterActive &&
                     (source.Equals("Pack engagement", StringComparison.Ordinal) ||
                      source.Equals("AoE pack", StringComparison.Ordinal) ||
@@ -1037,6 +1041,13 @@ internal sealed class BossModGoalZoneHook : IDisposable
         private static bool IsBmrSafetyEscapeSource(string source)
         {
             return source.Equals(BmrSafetyEscapeSource, StringComparison.Ordinal);
+        }
+
+        private static bool IsBmrSafetyAssistSource(string source)
+        {
+            return IsBmrSafetyEscapeSource(source) ||
+                   source.Equals(BmrSafetyHoldSource, StringComparison.Ordinal) ||
+                   source.Equals(HealerSafetyAnchorSource, StringComparison.Ordinal);
         }
 
         private static bool HasExplicitBmrMovement(MovementPlannerDiagnostics planner)

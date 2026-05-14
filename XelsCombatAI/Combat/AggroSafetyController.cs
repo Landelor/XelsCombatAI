@@ -31,6 +31,7 @@ internal sealed class AggroSafetyController(
     Func<bool> automatedMovementSuppressed)
     : IBossModGoalZoneContributor, IMovementCandidateSource
 {
+    internal const string CandidateSource = "Aggro safety";
     private static readonly TimeSpan AggroThreshold = TimeSpan.FromSeconds(3);
     private const float TankPickupSurfaceDistance = 8f;
     private const float MaxDistantTankDragSurfaceDistance = 24f;
@@ -93,7 +94,7 @@ internal sealed class AggroSafetyController(
         }
 
         candidates.Add(new(
-            "Aggro safety",
+            CandidateSource,
             reason,
             destination,
             MathF.Max(1.5f, this.tankRadius),
@@ -211,7 +212,7 @@ internal sealed class AggroSafetyController(
         }
 
         this.lastGoalDelegate = this.CreateGoalDelegate();
-        contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.ImmediateAction, "Aggro safety"));
+        contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.ImmediateAction, CandidateSource));
         this.injected = true;
         this.lastReason = this.priorityDevalued ? "bringing aggro to tank" : "bringing aggro to tank; priority unchanged";
     }

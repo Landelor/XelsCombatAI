@@ -43,6 +43,7 @@ internal sealed class HealerAoePositioningController(
     private const float MaxConvenienceMoveDistance = 8f;
     private const int MinimumCoverageGain = 2;
     private const float PreferredScore = GoalZoneScorePolicy.NormalPreference;
+    private const float TankCoverageBonus = 0.25f;
 
     private FieldInfo? goalZonesField;
     private FieldInfo? forcedMovementField;
@@ -177,13 +178,18 @@ internal sealed class HealerAoePositioningController(
             return;
         }
 
-        var plan = this.BuildPlan(player, members);
+        var tank = PartyAllyProvider.SelectBestTank(services, player);
+        var plan = this.BuildPlan(player, members, tank);
 
         this.lastDistanceToCenter = plan.DistanceToCenter;
         this.lastCoveredMembers = plan.BestCoveredCount;
         var coverageGain = plan.BestCoveredCount - plan.CurrentCoveredCount;
+        var restoresTankCoverage = plan.HasTank &&
+                                    !plan.CurrentCoversTank &&
+                                    plan.BestCoversTank;
         var shouldMove = coverageGain >= MinimumCoverageGain ||
-                         (plan.CurrentCoveredCount == 0 && coverageGain > 0);
+                         (plan.CurrentCoveredCount == 0 && coverageGain > 0) ||
+                         restoresTankCoverage;
 
         if (this.lastPlan == null || !this.lastPlan.SameSource(plan))
         {
@@ -205,6 +211,10 @@ internal sealed class HealerAoePositioningController(
         {
             this.lastReason = $"minor coverage gain ignored: {plan.CurrentCoveredCount}/{plan.TotalMembers} -> {plan.BestCoveredCount}/{plan.TotalMembers}";
         }
+        else if (!shouldMove && plan.HasTank && !plan.CurrentCoversTank)
+        {
+            this.lastReason = "tank out of coverage; no better safe coverage point";
+        }
         else
         {
             this.lastReason = $"covering {plan.CurrentCoveredCount}/{plan.TotalMembers}";
@@ -213,31 +223,61 @@ internal sealed class HealerAoePositioningController(
         if (shouldMove)
         {
             contributions.Add(new(this.lastGoalDelegate!, BossModGoalPriority.Convenience, "Healer coverage zone"));
-            this.lastReason = $"covering {plan.CurrentCoveredCount}/{plan.TotalMembers}, can cover {plan.BestCoveredCount}/{plan.TotalMembers}";
+            this.lastReason = restoresTankCoverage
+                ? $"tank out of coverage; covering {plan.CurrentCoveredCount}/{plan.TotalMembers}, can cover {plan.BestCoveredCount}/{plan.TotalMembers}"
+                : $"covering {plan.CurrentCoveredCount}/{plan.TotalMembers}, can cover {plan.BestCoveredCount}/{plan.TotalMembers}";
         }
 
         this.lastInjected = shouldMove;
         this.lastOverlay = plan.CreateOverlay(player.Position.Y, injected: shouldMove);
     }
 
-    private HealerCoverageGoalPlan BuildPlan(IBattleChara player, IReadOnlyList<IBattleChara> members)
+    private HealerCoverageGoalPlan BuildPlan(IBattleChara player, IReadOnlyList<IBattleChara> members, IBattleChara? tank)
     {
         var playerPos = new Vector2(player.Position.X, player.Position.Z);
         var allPositions = new List<Vector2>(members.Count);
+        Vector2? tankPosition = null;
         foreach (var m in members)
-            allPositions.Add(new Vector2(m.Position.X, m.Position.Z));
+        {
+            var position = new Vector2(m.Position.X, m.Position.Z);
+            if (tank != null && m.GameObjectId == tank.GameObjectId)
+            {
+                tankPosition = position;
+            }
+
+            allPositions.Add(position);
+        }
+
+        if (tank != null && !tankPosition.HasValue)
+        {
+            tankPosition = new Vector2(tank.Position.X, tank.Position.Z);
+        }
 
         var currentCovered = CountCovered(playerPos, allPositions);
-        var bestCenter = AveragePosition(allPositions);
+        var currentCoversTank = tankPosition.HasValue &&
+                                Vector2.DistanceSquared(playerPos, tankPosition.Value) <= CoverageRadiusSquared;
+        var bestCenter = SelectBestCenter(playerPos, allPositions, tankPosition);
         var bestCovered = GetCoveredMembers(bestCenter, allPositions);
+        var bestCoversTank = tankPosition.HasValue &&
+                             Vector2.DistanceSquared(bestCenter, tankPosition.Value) <= CoverageRadiusSquared;
 
-        if (bestCovered.Count <= currentCovered)
+        if (bestCovered.Count < currentCovered ||
+            (bestCovered.Count == currentCovered && currentCoversTank && !bestCoversTank))
         {
             bestCenter = playerPos;
             bestCovered = GetCoveredMembers(playerPos, allPositions);
+            bestCoversTank = currentCoversTank;
         }
 
-        return new HealerCoverageGoalPlan(bestCenter, bestCovered, allPositions, Vector2.Distance(playerPos, bestCenter), currentCovered);
+        return new HealerCoverageGoalPlan(
+            bestCenter,
+            bestCovered,
+            allPositions,
+            tankPosition,
+            Vector2.Distance(playerPos, bestCenter),
+            currentCovered,
+            currentCoversTank,
+            bestCoversTank);
     }
 
     private static Vector2 AveragePosition(IReadOnlyList<Vector2> members)
@@ -249,6 +289,49 @@ internal sealed class HealerAoePositioningController(
         }
 
         return average / members.Count;
+    }
+
+    private static Vector2 SelectBestCenter(Vector2 playerPosition, IReadOnlyList<Vector2> members, Vector2? tankPosition)
+    {
+        var best = playerPosition;
+        var bestCovered = CountCovered(best, members);
+        var bestCoversTank = tankPosition.HasValue &&
+                             Vector2.DistanceSquared(best, tankPosition.Value) <= CoverageRadiusSquared;
+        var bestDistance = 0f;
+
+        foreach (var candidate in EnumerateCoverageCenters(playerPosition, members))
+        {
+            var covered = CountCovered(candidate, members);
+            var coversTank = tankPosition.HasValue &&
+                             Vector2.DistanceSquared(candidate, tankPosition.Value) <= CoverageRadiusSquared;
+            var distance = Vector2.Distance(playerPosition, candidate);
+            if (covered > bestCovered ||
+                (covered == bestCovered && coversTank && !bestCoversTank) ||
+                (covered == bestCovered && coversTank == bestCoversTank && distance < bestDistance))
+            {
+                best = candidate;
+                bestCovered = covered;
+                bestCoversTank = coversTank;
+                bestDistance = distance;
+            }
+        }
+
+        return best;
+    }
+
+    private static IEnumerable<Vector2> EnumerateCoverageCenters(Vector2 playerPosition, IReadOnlyList<Vector2> members)
+    {
+        yield return playerPosition;
+        yield return AveragePosition(members);
+
+        for (var i = 0; i < members.Count; ++i)
+        {
+            yield return members[i];
+            for (var j = i + 1; j < members.Count; ++j)
+            {
+                yield return (members[i] + members[j]) * 0.5f;
+            }
+        }
     }
 
     private static int CountCovered(Vector2 candidate, IReadOnlyList<Vector2> members)
@@ -358,28 +441,48 @@ internal sealed class HealerAoePositioningController(
         private readonly IReadOnlyList<Vector2> coveredMembers;
         // All visible party member positions (for scoring any candidate healer position).
         private readonly IReadOnlyList<Vector2> allMembers;
+        private readonly Vector2? tankPosition;
         private readonly float distanceToCenter;
         private readonly int currentCoveredCount;
+        private readonly bool currentCoversTank;
+        private readonly bool bestCoversTank;
 
-        public HealerCoverageGoalPlan(Vector2 optimalCenter, IReadOnlyList<Vector2> coveredMembers, IReadOnlyList<Vector2> allMembers, float distanceToCenter, int currentCoveredCount)
+        public HealerCoverageGoalPlan(
+            Vector2 optimalCenter,
+            IReadOnlyList<Vector2> coveredMembers,
+            IReadOnlyList<Vector2> allMembers,
+            Vector2? tankPosition,
+            float distanceToCenter,
+            int currentCoveredCount,
+            bool currentCoversTank,
+            bool bestCoversTank)
         {
             this.optimalCenter = optimalCenter;
             this.coveredMembers = coveredMembers;
             this.allMembers = allMembers;
+            this.tankPosition = tankPosition;
             this.distanceToCenter = distanceToCenter;
             this.currentCoveredCount = currentCoveredCount;
+            this.currentCoversTank = currentCoversTank;
+            this.bestCoversTank = bestCoversTank;
         }
 
         public float DistanceToCenter => this.distanceToCenter;
         public int BestCoveredCount => this.coveredMembers.Count;
         public int CurrentCoveredCount => this.currentCoveredCount;
         public int TotalMembers => this.allMembers.Count;
+        public bool HasTank => this.tankPosition.HasValue;
+        public bool CurrentCoversTank => this.currentCoversTank;
+        public bool BestCoversTank => this.bestCoversTank;
 
         public bool SameSource(HealerCoverageGoalPlan other)
         {
             if (Vector2.DistanceSquared(this.optimalCenter, other.optimalCenter) > 9f ||
                 this.coveredMembers.Count != other.coveredMembers.Count ||
-                this.allMembers.Count != other.allMembers.Count)
+                this.allMembers.Count != other.allMembers.Count ||
+                this.tankPosition.HasValue != other.tankPosition.HasValue ||
+                this.tankPosition.HasValue &&
+                Vector2.DistanceSquared(this.tankPosition.Value, other.tankPosition!.Value) > 9f)
             {
                 return false;
             }
@@ -428,7 +531,16 @@ internal sealed class HealerAoePositioningController(
                 return 0f;
 
             var fraction = (float)covered / allMembers.Count;
-            return PreferredScore * fraction;
+            var score = PreferredScore * fraction;
+            if (this.tankPosition.HasValue)
+            {
+                var coversTank = Vector2.DistanceSquared(candidatePos, this.tankPosition.Value) <= CoverageRadiusSquared;
+                score = coversTank
+                    ? MathF.Min(GoalZoneScorePolicy.StrongPreference, score + TankCoverageBonus)
+                    : score * 0.8f;
+            }
+
+            return score;
         }
     }
 }

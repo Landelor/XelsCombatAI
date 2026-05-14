@@ -973,6 +973,8 @@ internal sealed class DecisionOverlayController(
             "Pack engagement" => "Following trash pack",
             "AoE pack" => "Moving for AoE hits",
             "Healer coverage" => "Improving healer coverage",
+            "Healer safety anchor" => "Staying near party safely",
+            "BMR safety hold" => "Holding safe spot",
             "Passage of Arms" => "Moving behind Passage",
             "Defensive zone" => "Entering defensive zone",
             "Aggro safety" => "Taking aggro to tank",
@@ -1027,6 +1029,8 @@ internal sealed class DecisionOverlayController(
             "Pack engagement" => "follow pack",
             "AoE pack" => "AoE spot",
             "Healer coverage" => "coverage",
+            "Healer safety anchor" => "safe coverage",
+            "BMR safety hold" => "hold",
             "Passage of Arms" => "Passage",
             "Defensive zone" => "defensive",
             "Aggro safety" => "to tank",
@@ -1048,6 +1052,8 @@ internal sealed class DecisionOverlayController(
             "Pack engagement" => "pack",
             "AoE pack" => "AoE spot",
             "Healer coverage" => "coverage",
+            "Healer safety anchor" => "safe coverage",
+            "BMR safety hold" => "safe spot",
             "Passage of Arms" => "Passage",
             "Defensive zone" => "zone",
             "Aggro safety" => "tank",
@@ -1104,6 +1110,16 @@ internal sealed class DecisionOverlayController(
         if (reason.StartsWith("restores line of sight", StringComparison.OrdinalIgnoreCase))
         {
             return "moving where the target is visible";
+        }
+
+        if (reason.StartsWith("safe healer anchor", StringComparison.OrdinalIgnoreCase))
+        {
+            return "safe spot that keeps healing range";
+        }
+
+        if (reason.StartsWith("holding current safe spot", StringComparison.OrdinalIgnoreCase))
+        {
+            return "current spot is still safe";
         }
 
         if (reason.StartsWith("following reachable route to line of sight", StringComparison.OrdinalIgnoreCase))
