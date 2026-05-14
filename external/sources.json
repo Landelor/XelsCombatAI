@@ -19,6 +19,18 @@
     "url": "https://github.com/goatcorp/Dalamud.git",
     "branch": "master"
   },
+  "SamplePlugin": {
+    "url": "https://github.com/goatcorp/SamplePlugin.git",
+    "branch": "master"
+  },
+  "DalamudPackager": {
+    "url": "https://github.com/goatcorp/DalamudPackager.git",
+    "branch": "master"
+  },
+  "DalamudPluginsD17": {
+    "url": "https://github.com/goatcorp/DalamudPluginsD17.git",
+    "branch": "main"
+  },
   "FFXIVClientStructs": {
     "url": "https://github.com/aers/FFXIVClientStructs.git",
     "branch": "main"

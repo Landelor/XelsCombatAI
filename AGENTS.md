@@ -136,6 +136,9 @@ Do not guess Dalamud APIs. Before using a Dalamud service, method, event, or typ
 
 - Prefer existing usage in this repository.
 - Prefer installed package metadata, IDE completion, generated bindings, or build errors over memory.
+- Use `external/` as a read-only API reference before guessing. Start with `external/Dalamud/` for framework services and generated bindings, `external/SamplePlugin/` for official plugin lifecycle patterns, `external/DalamudPackager/` for packaging behavior, and `external/DalamudPluginsD17/` for public repo metadata examples.
+- For game data or native structures behind Dalamud services, inspect `external/FFXIVClientStructs/`, `external/Lumina/`, and `external/FfxivDatamining/` as applicable.
+- If a checkout is missing or stale and the answer depends on current upstream behavior, run `external/fetch-sources.sh` before drawing conclusions.
 - If unsure, inspect the current API in the installed package or say that the API needs verification.
 
 Follow these Dalamud plugin conventions:
