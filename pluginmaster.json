@@ -4,7 +4,7 @@
     "Name": "Xel's Combat AI",
     "InternalName": "XelsCombatAI",
     "AssemblyVersion": "2.2.1.0",
-    "TestingAssemblyVersion": "2.2.1.4",
+    "TestingAssemblyVersion": "2.3.0.0",
     "Description": "Tired of manually babysitting your BossMod settings mid-fight? XCAI handles your positioning, distances, and Ley Lines automatically so you can focus on not dying. Results may vary on the not dying part.",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
@@ -20,7 +20,7 @@
     "LastUpdate": 0,
     "DownloadLinkInstall": "https://github.com/xeltor/XelsCombatAI/releases/download/v2.2.1.0/XelsCombatAI.zip",
     "DownloadLinkUpdate": "https://github.com/xeltor/XelsCombatAI/releases/download/v2.2.1.0/XelsCombatAI.zip",
-    "DownloadLinkTesting": "https://github.com/Xeltor/XelsCombatAI/releases/download/v2.2.1.4-pre/XelsCombatAI.zip",
+    "DownloadLinkTesting": "https://github.com/Xeltor/XelsCombatAI/releases/download/v2.3.0.0-pre/XelsCombatAI.zip",
     "RepoUrl": "https://github.com/xeltor/XelsCombatAI",
     "IconUrl": "https://raw.githubusercontent.com/xeltor/XelsCombatAI/master/XelsCombatAI/images/icon.png",
     "Tags": [
