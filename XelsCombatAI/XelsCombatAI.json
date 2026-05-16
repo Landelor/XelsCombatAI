@@ -6,7 +6,7 @@
   "InternalName": "XelsCombatAI",
   "DalamudApiLevel": "15",
   "MinimumDalamudVersion": "15.0.0.0",
-  "IconUrl": "https://raw.githubusercontent.com/Xeltor/XelsCombatAI/main/XelsCombatAI/images/icon.png",
+  "IconUrl": "https://raw.githubusercontent.com/XelsPlugins/XelsCombatAI/main/XelsCombatAI/images/icon.png",
   "Tags": [
     "combat",
     "bossmod",

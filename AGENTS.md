@@ -76,10 +76,10 @@ A change is not aligned if it primarily:
 - `XelsCombatAI/Models/` - small shared enums and simple types.
 - `XelsCombatAI/GlobalUsings.cs` - global imports for internal XCAI namespaces.
 - `scripts/package-release.sh` - release build and zip packaging script.
-- `.github/workflows/validate.yml` - thin wrapper calling `Xeltor/XelsDalamud.Workflows` validation.
+- `.github/workflows/validate.yml` - thin wrapper calling `XelsPlugins/XelsDalamud.Workflows` validation.
 - `.github/workflows/pr-preview.yml` - thin wrapper calling reusable PR preview release automation.
 - `.github/workflows/release.yml` - thin wrapper calling reusable manual stable release automation.
-- `pluginmaster.json` - historical local feed metadata. The active feed lives in `Xeltor/XelsDalamudRepo`.
+- `pluginmaster.json` - historical local feed metadata. The active feed lives in `XelsPlugins/XelsDalamudRepo`.
 - `external/` - read-only external reference workspace. See `external/AGENTS.md`; its instructions override this file inside that directory.
 
 ## Build And Validation
@@ -222,7 +222,7 @@ Commit messages and PR titles must use Conventional Commits:
 - `!` or `BREAKING CHANGE:` creates a major release.
 - `docs:`, `style:`, `refactor:`, `test:`, `build:`, `ci:`, and `chore:` do not create a user-facing release bump unless breaking.
 
-PR previews are published by `.github/workflows/pr-preview.yml` through `Xeltor/XelsDalamud.Workflows`. Preview releases use mutable `pr-<PR_NUMBER>` tags and may only update central feed testing fields:
+PR previews are published by `.github/workflows/pr-preview.yml` through `XelsPlugins/XelsDalamud.Workflows`. Preview releases use mutable `pr-<PR_NUMBER>` tags and may only update central feed testing fields:
 
 - `TestingAssemblyVersion`
 - `TestingChangelog`
@@ -238,11 +238,11 @@ Stable releases are published only by manually running `.github/workflows/releas
 
 Do not manually edit versions unless explicitly instructed. Do not use timestamp versions or CI run numbers as stable public versions. Do not publish to the official Dalamud repo.
 
-The active custom feed is `Xeltor/XelsDalamudRepo`. Keep this repository listed in that repo's `repos.txt`. `pluginmaster.json` in this repository is historical metadata and should not be treated as the active feed.
+The active custom feed is `XelsPlugins/XelsDalamudRepo`. Keep this repository listed in that repo's `repos.txt`. `pluginmaster.json` in this repository is historical metadata and should not be treated as the active feed.
 
 When changing plugin description, tags, icon URL, name, or Dalamud API metadata, check `XelsCombatAI/XelsCombatAI.json` and the generated feed output.
 
-`scripts/package-release.sh` writes `artifacts/XelsCombatAI.zip`. The reusable release workflow uses `Xeltor/XelsDalamud.Workflows/scripts/package-plugin.py`. Treat `artifacts/`, `bin/`, and `obj/` as generated output.
+`scripts/package-release.sh` writes `artifacts/XelsCombatAI.zip`. The reusable release workflow uses `XelsPlugins/XelsDalamud.Workflows/scripts/package-plugin.py`. Treat `artifacts/`, `bin/`, and `obj/` as generated output.
 
 ## External References And Generated Files
 

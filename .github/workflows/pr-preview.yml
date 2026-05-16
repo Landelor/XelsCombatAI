@@ -11,10 +11,10 @@ permissions:
 jobs:
   preview:
     if: github.event.pull_request.head.repo.full_name == github.repository
-    uses: Xeltor/XelsDalamud.Workflows/.github/workflows/plugin-pr-preview.yml@main
+    uses: XelsPlugins/XelsDalamud.Workflows/.github/workflows/plugin-pr-preview.yml@main
     with:
       plugin_project_path: XelsCombatAI/XelsCombatAI.csproj
-      feed_repo: Xeltor/XelsDalamudRepo
+      feed_repo: XelsPlugins/XelsDalamudRepo
       dotnet_version: 10.0.x
       internal_name: XelsCombatAI
     secrets:

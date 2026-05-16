@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   validate:
-    uses: Xeltor/XelsDalamud.Workflows/.github/workflows/plugin-validate.yml@main
+    uses: XelsPlugins/XelsDalamud.Workflows/.github/workflows/plugin-validate.yml@main
     with:
       plugin_project_path: XelsCombatAI/XelsCombatAI.csproj
       dotnet_version: 10.0.x

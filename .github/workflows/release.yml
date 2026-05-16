@@ -24,10 +24,10 @@ permissions:
 
 jobs:
   release:
-    uses: Xeltor/XelsDalamud.Workflows/.github/workflows/plugin-release.yml@main
+    uses: XelsPlugins/XelsDalamud.Workflows/.github/workflows/plugin-release.yml@main
     with:
       plugin_project_path: XelsCombatAI/XelsCombatAI.csproj
-      feed_repo: Xeltor/XelsDalamudRepo
+      feed_repo: XelsPlugins/XelsDalamudRepo
       release_type: ${{ inputs.release_type }}
       dry_run: ${{ inputs.dry_run }}
       dotnet_version: 10.0.x
