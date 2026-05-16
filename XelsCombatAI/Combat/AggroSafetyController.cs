@@ -177,7 +177,7 @@ internal sealed class AggroSafetyController(
         }
 
         this.lastGoalDelegate = this.CreateGoalDelegate();
-        contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.ImmediateAction, CandidateSource));
+        contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.ImmediateAction, CandidateSource, this.tankPosition, MechanicWhisperConfidence.Confident));
         this.injected = true;
         this.lastReason = this.priorityDevalued ? "bringing aggro to tank" : "bringing aggro to tank; priority unchanged";
     }

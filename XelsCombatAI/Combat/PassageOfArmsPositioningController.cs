@@ -160,7 +160,7 @@ internal sealed class PassageOfArmsPositioningController(
             this.lastPlan = plan;
         }
 
-        contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.DefensiveMechanic, "Passage of Arms"));
+        contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.DefensiveMechanic, "Passage of Arms", plan.PreferredPosition, MechanicWhisperConfidence.Confident));
         this.lastInjected = true;
         this.lastPaladinName = plan.PaladinName;
         this.lastDistanceToPreferred = Vector2.Distance(plan.PlayerPosition, plan.PreferredPosition);

@@ -27,12 +27,20 @@ var tests = new (string Name, Action Body)[]
     ("friendly anchor dash requires meaningful gain", FriendlyAnchorDashRequiresMeaningfulGain),
     ("gap closer follows RSR auto target", GapCloserFollowsRsrAutoTarget),
     ("hostile relay dash requires target momentum", HostileRelayDashRequiresTargetMomentum),
+    ("trash gap closer rejects stale pack", TrashGapCloserRejectsStalePack),
     ("healer coverage restores single missing member", HealerCoverageRestoresSingleMissingMember),
     ("healer coverage uses stable natural centers", HealerCoverageUsesStableNaturalCenters),
+    ("healer coverage pre-positions for comfort", HealerCoveragePrepositionsForComfort),
     ("healer coverage catches up for party-saving AoE heals", HealerCoverageCatchesUpForPartySavingAoeHeals),
     ("healer coverage catches up from critical party isolation", HealerCoverageCatchesUpFromCriticalPartyIsolation),
     ("healer coverage combines with forbidden zones", HealerCoverageCombinesWithForbiddenZones),
     ("pack movement combines with forbidden zones", PackMovementCombinesWithForbiddenZones),
+    ("mechanic whisper guard keeps aligned, shorter, or confident goals", MechanicWhisperGuardKeepsAlignedShorterOrConfidentGoals),
+    ("mechanic escape margin follows BMR movement", MechanicEscapeMarginFollowsBmrMovement),
+    ("target uptime contributes during mechanic exits", TargetUptimeContributesDuringMechanicExits),
+    ("trash AoE short one-hit gain is worth moving", TrashAoeShortOneHitGainIsWorthMoving),
+    ("trash AoE retains equal-hit candidate", TrashAoeRetainsEqualHitCandidate),
+    ("trash target retention yields to tank pack", TrashTargetRetentionYieldsToTankPack),
     ("multi-target large trash remains trash context", MultiTargetLargeTrashRemainsTrashContext),
     ("trash pull tracker phase transitions", TrashPullTrackerPhaseTransitions),
     ("trash pull tracker remote settled pack remains catch-up", TrashPullTrackerRemoteSettledPackRemainsCatchUp),
@@ -244,11 +252,12 @@ static void PathfindCenter2dParsing()
         path,
         """
 {"Type":"header","SchemaVersion":3,"PluginVersion":"tests","CombatStartUtc":"2026-01-01T00:00:00.0000000Z","CombatEndUtc":"2026-01-01T00:00:01.0000000Z","DurationSeconds":1,"FrameCount":1,"PlayerClassJobId":25,"TerritoryType":1234,"ContentFinderConditionId":0,"BossModActiveModule":"Boss","BossModActiveZoneModule":"<none>","Config":{"FightReviewLoggingEnabled":true}}
-{"Type":"frame","Frame":{"TimestampUtc":"2026-01-01T00:00:00.0000000Z","T":0,"InCombat":true,"IsDead":false,"PlayerClassJobId":25,"TerritoryType":1234,"ContentFinderConditionId":0,"PlayerPosition":{"X":84,"Y":0,"Z":388},"PlayerRotation":0,"TargetBaseId":1,"TargetObjectId":1,"TargetPosition":{"X":84,"Y":0,"Z":370},"TargetRotation":0,"TargetRadius":4.5,"TargetUptimeRange":25,"BossModActiveModule":"Boss","BossModActiveZoneModule":"<none>","MovementPlanner":{"IntentId":"<none>","ChosenSource":"<none>","Destination":null,"AcceptanceRadius":null,"SwitchReason":"none","SuppressionReason":"none","GeneratedCount":0,"AcceptedCount":0,"RejectedByReason":{},"TopCandidates":[],"ScoreBreakdown":"<none>","PathStatus":"None","BmrForcedMovement":null,"BmrForbiddenZones":0,"BmrMoveRequested":false,"BmrMoveImminent":false},"BossModMovement":{"MovementOverride":"<none>","HintSummary":"none","HintDetails":{"PathfindMapCenter":{"X":84,"Y":370},"PathfindMapBounds":{"Radius":19.5,"HalfWidth":19.5,"HalfHeight":19.5},"GoalZones":0,"ForbiddenZones":0,"ImminentSpecialMode":"<none>"}},"Actors":[]},"Motion":{"TargetDistance":18,"TargetSurfaceDistance":13.5}}
+{"Type":"frame","Frame":{"TimestampUtc":"2026-01-01T00:00:00.0000000Z","T":0,"InCombat":true,"IsDead":false,"PlayerClassJobId":25,"TerritoryType":1234,"ContentFinderConditionId":0,"PlayerPosition":{"X":84,"Y":0,"Z":388},"PlayerRotation":0,"TargetBaseId":1,"TargetObjectId":1,"TargetPosition":{"X":84,"Y":0,"Z":370},"TargetRotation":0,"TargetRadius":4.5,"TargetUptimeRange":25,"BossModActiveModule":"Boss","BossModActiveZoneModule":"<none>","MovementPlanner":{"IntentId":"<none>","ChosenSource":"<none>","Destination":null,"AcceptanceRadius":null,"SwitchReason":"none","SuppressionReason":"none","GeneratedCount":0,"AcceptedCount":0,"RejectedByReason":{},"TopCandidates":[],"ScoreBreakdown":"<none>","PathStatus":"None","BmrForcedMovement":null,"BmrForbiddenZones":0,"BmrMoveRequested":false,"BmrMoveImminent":false},"BossModMovement":{"MovementOverride":"<none>","HintSummary":"none","PlannerSteer":"legacy direct contributors","MechanicWhisper":"guard active; Target uptime:accepted/confident-redirect","HintDetails":{"PathfindMapCenter":{"X":84,"Y":370},"PathfindMapBounds":{"Radius":19.5,"HalfWidth":19.5,"HalfHeight":19.5},"GoalZones":0,"ForbiddenZones":0,"ImminentSpecialMode":"<none>"}},"Actors":[]},"Motion":{"TargetDistance":18,"TargetSurfaceDistance":13.5}}
 """);
 
     var log = XcaiLogReader.Read(path);
     AssertEqual(new Vec3(84, 0, 370), log.Frames[0].BossMod.PathfindMapCenter!, "2D center");
+    AssertContains("confident-redirect", log.Frames[0].BossMod.MechanicWhisper, "mechanic whisper parse");
 }
 
 static void TrashPullDiagnosticsParsing()
@@ -459,6 +468,26 @@ static void HostileRelayDashRequiresTargetMomentum()
     AssertContains("low target gain", lowGainReason, "low-gain relay rejection reason");
 }
 
+static void TrashGapCloserRejectsStalePack()
+{
+    AssertFalse(
+        GapCloserController.ShouldAllowTrashPullGapCloserTarget(
+            playerPosition: new Vector3(0f, 0f, 0f),
+            targetPosition: new Vector3(-8f, 0f, 0f),
+            anchorPosition: new Vector3(12f, 0f, 0f),
+            out var reason),
+        "trash gap closer should not dash away from tank pack");
+    AssertContains("away from tank pack", reason, "trash gap closer rejection reason");
+
+    AssertTrue(
+        GapCloserController.ShouldAllowTrashPullGapCloserTarget(
+            playerPosition: new Vector3(0f, 0f, 0f),
+            targetPosition: new Vector3(10f, 0f, 0f),
+            anchorPosition: new Vector3(12f, 0f, 0f),
+            out _),
+        "trash gap closer can move toward tank pack");
+}
+
 static void HealerCoverageRestoresSingleMissingMember()
 {
     AssertTrue(
@@ -515,6 +544,63 @@ static void HealerCoverageUsesStableNaturalCenters()
     AssertTrue(
         Vector2.Distance(retained, previous) < 0.01f,
         "equivalent coverage should retain the previous center instead of jumping to another party member");
+}
+
+static void HealerCoveragePrepositionsForComfort()
+{
+    var player = new Vector2(18f, 0f);
+    var members = new[]
+    {
+        new Vector2(0f, 0f),
+        new Vector2(5f, 0f),
+        new Vector2(15f, 0f)
+    };
+
+    AssertTrue(
+        HealerAoePositioningController.TrySelectComfortCoverageCenter(
+            player,
+            members,
+            tankPosition: null,
+            previousCenter: null,
+            out var center),
+        "healer should find a more central point without dropping covered members");
+    AssertTrue(center.X < 12f, "comfort point should move toward party center");
+
+    AssertTrue(
+        HealerAoePositioningController.ShouldImproveCoverageComfort(
+            currentCoveredCount: 3,
+            bestCoveredCount: 3,
+            totalMembers: 3,
+            currentCoverageComfortSlack: 2f,
+            bestCoverageComfortSlack: 11f,
+            distanceToCenter: 11.5f,
+            downtimeLikely: true,
+            mechanicPositioningActive: false),
+        "downtime should allow a bounded comfort move before healing is urgent");
+
+    AssertFalse(
+        HealerAoePositioningController.ShouldImproveCoverageComfort(
+            currentCoveredCount: 3,
+            bestCoveredCount: 3,
+            totalMembers: 3,
+            currentCoverageComfortSlack: 2f,
+            bestCoverageComfortSlack: 11f,
+            distanceToCenter: 11.5f,
+            downtimeLikely: false,
+            mechanicPositioningActive: false),
+        "routine comfort movement should stay tighter when uptime is active");
+
+    AssertTrue(
+        HealerAoePositioningController.ShouldImproveCoverageComfort(
+            currentCoveredCount: 5,
+            bestCoveredCount: 6,
+            totalMembers: 7,
+            currentCoverageComfortSlack: 6f,
+            bestCoverageComfortSlack: 6f,
+            distanceToCenter: 7.5f,
+            downtimeLikely: false,
+            mechanicPositioningActive: false),
+        "short proactive coverage gains should not wait for a heal cast");
 }
 
 static void HealerCoverageCatchesUpForPartySavingAoeHeals()
@@ -631,7 +717,16 @@ static void PackMovementCombinesWithForbiddenZones()
             bmrMoveRequested: false,
             bmrMoveImminent: false,
             bossModuleContext: true),
-        "pack movement should be allowed to bias safe mechanic gaps");
+        "boss-context pack movement should be allowed to bias safe mechanic gaps");
+
+    AssertTrue(
+        AoePackPositioningController.ShouldYieldPackMovementForSafety(
+            forcedMovementActive: false,
+            forbiddenSafetyActive: true,
+            bmrMoveRequested: false,
+            bmrMoveImminent: false,
+            bossModuleContext: false),
+        "trash pack movement should yield to active ground danger");
 
     AssertFalse(
         AoePackPositioningController.ShouldYieldPackMovementForSafety(
@@ -650,6 +745,225 @@ static void PackMovementCombinesWithForbiddenZones()
             bmrMoveImminent: false,
             bossModuleContext: false),
         "forced mechanic movement remains authoritative");
+}
+
+static void MechanicWhisperGuardKeepsAlignedShorterOrConfidentGoals()
+{
+    AssertTrue(
+        BossModGoalZoneHook.ShouldAllowMechanicWhisperCandidate(
+            candidate: new Vector2(11f, 0f),
+            bossModDestination: new Vector2(12f, 0f),
+            playerPosition: Vector2.Zero,
+            stableFor: TimeSpan.Zero),
+        "aligned mechanic whispers should pass immediately");
+
+    AssertFalse(
+        BossModGoalZoneHook.ShouldAllowMechanicWhisperCandidate(
+            candidate: new Vector2(10f, 0f),
+            bossModDestination: new Vector2(30f, 0f),
+            playerPosition: Vector2.Zero,
+            stableFor: TimeSpan.FromMilliseconds(100)),
+        "shorter but unstable mechanic whispers should wait");
+
+    AssertTrue(
+        BossModGoalZoneHook.ShouldAllowMechanicWhisperCandidate(
+            candidate: new Vector2(10f, 0f),
+            bossModDestination: new Vector2(30f, 0f),
+            playerPosition: Vector2.Zero,
+            stableFor: TimeSpan.FromMilliseconds(300)),
+        "stable shorter mechanic whispers should pass");
+
+    AssertFalse(
+        BossModGoalZoneHook.ShouldAllowMechanicWhisperCandidate(
+            candidate: new Vector2(25f, 0f),
+            bossModDestination: new Vector2(30f, 0f),
+            playerPosition: Vector2.Zero,
+            stableFor: TimeSpan.FromMilliseconds(300)),
+        "non-shorter side whispers need explicit confidence");
+
+    AssertFalse(
+        BossModGoalZoneHook.ShouldAllowMechanicWhisperCandidate(
+            candidate: new Vector2(25f, 0f),
+            bossModDestination: new Vector2(30f, 0f),
+            playerPosition: Vector2.Zero,
+            stableFor: TimeSpan.FromMilliseconds(700)),
+        "routine side whispers should not redirect BMR just because they lingered");
+
+    AssertTrue(
+        BossModGoalZoneHook.ShouldAllowMechanicWhisperCandidate(
+            candidate: new Vector2(25f, 0f),
+            bossModDestination: new Vector2(30f, 0f),
+            playerPosition: Vector2.Zero,
+            stableFor: TimeSpan.FromMilliseconds(500),
+            confidence: MechanicWhisperConfidence.Confident),
+        "confident stable side whispers should redirect BMR");
+}
+
+static void MechanicEscapeMarginFollowsBmrMovement()
+{
+    AssertTrue(
+        BossModGoalZoneHook.TryResolveMechanicEscapeMarginCandidate(
+            playerPosition: new Vector2(140.57f, -443.75f),
+            desiredMovement: new Vector3(6.18f, -28f, 0f),
+            forbiddenZonesActive: true,
+            forcedMovementActive: false,
+            moveRequested: true,
+            moveImminent: true,
+            out var firstCandidate),
+        "mechanic margin should follow BMR's direct safety movement");
+    AssertTrue(
+        MathF.Abs(firstCandidate.X - 146.75f) < 0.02f &&
+        MathF.Abs(firstCandidate.Y + 443.75f) < 0.02f,
+        "mechanic margin candidate should extend along BMR movement");
+
+    AssertTrue(
+        BossModGoalZoneHook.TryResolveMechanicEscapeMarginCandidate(
+            playerPosition: new Vector2(145.07f, -443.75f),
+            desiredMovement: new Vector3(1.56f, -28f, 0f),
+            forbiddenZonesActive: true,
+            forcedMovementActive: false,
+            moveRequested: true,
+            moveImminent: true,
+            out var lateCandidate),
+        "late mechanic margin should remain active while BMR still asks for movement");
+    AssertTrue(
+        Vector2.Distance(firstCandidate, lateCandidate) < 0.25f,
+        "mechanic margin candidate should remain stable as the player approaches it");
+
+    AssertFalse(
+        BossModGoalZoneHook.TryResolveMechanicEscapeMarginCandidate(
+            playerPosition: Vector2.Zero,
+            desiredMovement: new Vector3(4f, 0f, 0f),
+            forbiddenZonesActive: true,
+            forcedMovementActive: true,
+            moveRequested: true,
+            moveImminent: true,
+            out _),
+        "forced mechanic movement remains authoritative");
+
+    AssertFalse(
+        BossModGoalZoneHook.TryResolveMechanicEscapeMarginCandidate(
+            playerPosition: Vector2.Zero,
+            desiredMovement: new Vector3(4f, 0f, 0f),
+            forbiddenZonesActive: false,
+            forcedMovementActive: false,
+            moveRequested: true,
+            moveImminent: true,
+            out _),
+        "mechanic margin requires active forbidden zones");
+}
+
+static void TargetUptimeContributesDuringMechanicExits()
+{
+    AssertTrue(
+        TargetUptimePositioningController.ShouldContributeDuringMechanic(
+            forbiddenZonesActive: true,
+            forcedMovementActive: false,
+            bmrMoveRequested: true,
+            bmrMoveImminent: false),
+        "target uptime should whisper during active BMR mechanic exits");
+
+    AssertFalse(
+        TargetUptimePositioningController.ShouldContributeDuringMechanic(
+            forbiddenZonesActive: true,
+            forcedMovementActive: true,
+            bmrMoveRequested: true,
+            bmrMoveImminent: true),
+        "forced movement remains authoritative");
+
+    AssertFalse(
+        TargetUptimePositioningController.ShouldContributeDuringMechanic(
+            forbiddenZonesActive: false,
+            forcedMovementActive: false,
+            bmrMoveRequested: true,
+            bmrMoveImminent: true),
+        "target uptime exits require an active mechanic safety field");
+
+    var candidate = TargetUptimePositioningController.ResolveCandidate(
+        playerPosition: new Vector2(20f, 0f),
+        targetPosition: Vector2.Zero,
+        targetRotation: 0f,
+        targetRadius: 4f,
+        engagementRange: 25f);
+    AssertTrue(
+        MathF.Abs(candidate.X - 28.5f) < 0.01f &&
+        MathF.Abs(candidate.Y) < 0.01f,
+        "target uptime candidate should stay on the player's side inside job range");
+}
+
+static void TrashAoeShortOneHitGainIsWorthMoving()
+{
+    AssertFalse(
+        AoePackPositioningController.ShouldSkipMarginalAoeReposition(
+            currentHits: 5,
+            bestHits: 6,
+            targetCount: 6,
+            moveDistance: 4f,
+            out _),
+        "short movement for one extra trash AoE hit should be allowed");
+
+    AssertTrue(
+        AoePackPositioningController.ShouldSkipMarginalAoeReposition(
+            currentHits: 5,
+            bestHits: 6,
+            targetCount: 6,
+            moveDistance: 6f,
+            out var reason),
+        "long movement for one extra trash AoE hit should remain bounded");
+    AssertContains("skipped", reason, "marginal AoE skip reason");
+}
+
+static void TrashAoeRetainsEqualHitCandidate()
+{
+    var targets = new[]
+    {
+        new TargetSnapshot(1, new Vector2(0f, 0f), 0.5f),
+        new TargetSnapshot(2, new Vector2(1f, 0f), 0.5f),
+        new TargetSnapshot(3, new Vector2(0f, 1f), 0.5f)
+    };
+    var plan = new GoalPlan(
+        RsrAoeShape.Circle,
+        targets,
+        targets[0],
+        radius: 5f,
+        range: 5f,
+        halfWidth: 0f,
+        minHits: 2);
+    var retained = new Vector2(-2f, -2f);
+    var best = plan.FindBestCandidate(
+        playerPosition: new Vector2(10f, 10f),
+        candidateAllowed: null,
+        retainedPosition: retained);
+
+    AssertEqual(retained, best.Position, "equal-hit retained AoE candidate");
+    AssertEqual(3, best.Hits, "retained candidate hits");
+}
+
+static void TrashTargetRetentionYieldsToTankPack()
+{
+    AssertFalse(
+        AoePackPositioningController.ShouldRetainLocalTrashTarget(
+            playerAnchorDistance: 24f,
+            currentSurfaceDistance: 2f,
+            currentAnchorDistance: 28f,
+            remoteAnchorDistance: 4f),
+        "local trash target should not be retained when tank-side pack is clearly better");
+
+    AssertTrue(
+        AoePackPositioningController.ShouldRetainLocalTrashTarget(
+            playerAnchorDistance: 6f,
+            currentSurfaceDistance: 2f,
+            currentAnchorDistance: 8f,
+            remoteAnchorDistance: 4f),
+        "nearby local trash target can be retained while still near tank");
+
+    AssertFalse(
+        AoePackPositioningController.ShouldRetainLocalTrashTarget(
+            playerAnchorDistance: 6f,
+            currentSurfaceDistance: 8f,
+            currentAnchorDistance: 8f,
+            remoteAnchorDistance: 4f),
+        "distant current target should not be retained");
 }
 
 static void MultiTargetLargeTrashRemainsTrashContext()
@@ -1802,6 +2116,7 @@ static XcaiFrame Frame(
         new BossModSnapshot(
             "<none>",
             "none",
+            "not logged",
             "not logged",
             new Vec3(0, 0, 0),
             pathfindRadius,

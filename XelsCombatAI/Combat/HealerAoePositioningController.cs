@@ -32,6 +32,7 @@ internal sealed record HealerCoverageOverlaySnapshot(
 internal sealed class HealerAoePositioningController(
     Configuration config,
     DalamudServices services,
+    BossModIpc bossMod,
     RotationSolverActionReflection rotationSolverActions,
     Func<bool> automatedMovementSuppressed)
     : IBossModGoalZoneContributor
@@ -44,9 +45,14 @@ internal sealed class HealerAoePositioningController(
     private const float MaxConvenienceMoveDistance = 6f;
     private const float MaxTankCoverageRestoreDistance = 4.5f;
     private const float MaxSingleMemberFullCoverageMoveDistance = 6f;
+    private const float MaxRoutineCoverageComfortMoveDistance = 8f;
+    private const float MaxMechanicCoverageComfortMoveDistance = 10f;
+    private const float MaxDowntimeCoverageComfortMoveDistance = 14f;
     private const float MaxCriticalCoverageCatchUpMoveDistance = 60f;
     private const float MaxPartyAoeHealCatchUpMoveDistance = 30f;
     private const float MinimumPartyAoeHealEffectRange = 8f;
+    private const float MinimumCoverageComfortSlackGain = 3f;
+    private const float MaxCoverageComfortScoreBonus = 0.15f;
     private const int MinimumCoverageGain = 2;
     private const float PreferredScore = GoalZoneScorePolicy.NormalPreference;
     private const float TankCoverageBonus = 0.25f;
@@ -191,6 +197,19 @@ internal sealed class HealerAoePositioningController(
             plan.TotalMembers,
             plan.DistanceToCenter);
         var partyAoeHealPending = this.TryGetUpcomingPartyAoeHeal(out var partyAoeHealActionName);
+        var forcedMovementActive = VectorLengthSquared(this.forcedMovementField?.GetValue(hints)) > 0.01f;
+        var forbiddenSafetyActive = this.forbiddenZonesField?.GetValue(hints) is ICollection { Count: > 0 };
+        var downtimeLikely = this.IsDowntimeLikely();
+        var mechanicPositioningActive = forbiddenSafetyActive || this.bmrMoveRequested || this.bmrMoveImminent;
+        var proactiveCoverageComfort = ShouldImproveCoverageComfort(
+            plan.CurrentCoveredCount,
+            plan.BestCoveredCount,
+            plan.TotalMembers,
+            plan.CurrentCoverageComfortSlack,
+            plan.BestCoverageComfortSlack,
+            plan.DistanceToCenter,
+            downtimeLikely,
+            mechanicPositioningActive);
         var criticalCoverageCatchUp = ShouldCatchUpCriticalCoverage(
             plan.CurrentCoveredCount,
             plan.BestCoveredCount,
@@ -204,11 +223,13 @@ internal sealed class HealerAoePositioningController(
             partyAoeHealPending);
         var boundedTankRestore = restoresTankCoverage &&
                                  plan.DistanceToCenter <= MaxTankCoverageRestoreDistance;
-        var shouldMove = strongCoverageGain || restoresFullCoverage || criticalCoverageCatchUp || partyAoeHealCatchUp || boundedTankRestore;
+        var shouldMove = strongCoverageGain || restoresFullCoverage || proactiveCoverageComfort || criticalCoverageCatchUp || partyAoeHealCatchUp || boundedTankRestore;
         var maxMoveDistance = criticalCoverageCatchUp
             ? MaxCriticalCoverageCatchUpMoveDistance
             : partyAoeHealCatchUp
             ? MaxPartyAoeHealCatchUpMoveDistance
+            : proactiveCoverageComfort
+            ? ResolveCoverageComfortMoveDistance(downtimeLikely, mechanicPositioningActive)
             : MaxConvenienceMoveDistance;
         var priority = criticalCoverageCatchUp || partyAoeHealCatchUp
             ? BossModGoalPriority.DefensiveMechanic
@@ -220,7 +241,11 @@ internal sealed class HealerAoePositioningController(
             this.lastPlan = plan;
         }
 
-        if (shouldMove && this.BossModHardSafetyActive(hints))
+        if (shouldMove && ShouldYieldCoverageForSafety(
+                forcedMovementActive,
+                forbiddenSafetyActive,
+                this.bmrMoveRequested,
+                this.bmrMoveImminent))
         {
             shouldMove = false;
             this.lastReason = "forced mechanic movement active";
@@ -251,13 +276,25 @@ internal sealed class HealerAoePositioningController(
 
         if (shouldMove)
         {
-            contributions.Add(new(this.lastGoalDelegate!, priority, "Healer coverage zone"));
+            contributions.Add(new(this.lastGoalDelegate!, priority, "Healer coverage zone", plan.OptimalCenter, MechanicWhisperConfidence.Confident));
             var prefix = partyAoeHealCatchUp
                 ? $"party AoE heal ({partyAoeHealActionName}); "
                 : criticalCoverageCatchUp
                 ? "critical party coverage; "
                 : restoresTankCoverage
                 ? "tank out of coverage; "
+                : proactiveCoverageComfort && coverageGain > 0
+                ? downtimeLikely
+                    ? "downtime coverage setup; "
+                    : mechanicPositioningActive
+                    ? "mechanic coverage setup; "
+                    : "proactive coverage setup; "
+                : proactiveCoverageComfort
+                ? downtimeLikely
+                    ? "downtime healer comfort; "
+                    : mechanicPositioningActive
+                    ? "mechanic healer comfort; "
+                    : "healer comfort; "
                 : string.Empty;
             this.lastReason = $"{prefix}covering {plan.CurrentCoveredCount}/{plan.TotalMembers}, can cover {plan.BestCoveredCount}/{plan.TotalMembers}";
         }
@@ -287,7 +324,8 @@ internal sealed class HealerAoePositioningController(
             tankPosition = new Vector2(tank.Position.X, tank.Position.Z);
         }
 
-        var currentCovered = CountCovered(playerPos, allPositions);
+        var currentCoveredMembers = GetCoveredMembers(playerPos, allPositions);
+        var currentCovered = currentCoveredMembers.Count;
         var currentCoversTank = tankPosition.HasValue &&
                                 Vector2.DistanceSquared(playerPos, tankPosition.Value) <= CoverageRadiusSquared;
         var bestCenter = SelectBestCenter(playerPos, allPositions, tankPosition, this.lastPlan?.OptimalCenter);
@@ -299,9 +337,27 @@ internal sealed class HealerAoePositioningController(
             (bestCovered.Count == currentCovered && currentCoversTank && !bestCoversTank))
         {
             bestCenter = playerPos;
-            bestCovered = GetCoveredMembers(playerPos, allPositions);
+            bestCovered = currentCoveredMembers;
             bestCoversTank = currentCoversTank;
         }
+
+        if (bestCovered.Count == currentCovered &&
+            TrySelectComfortCoverageCenter(playerPos, allPositions, tankPosition, this.lastPlan?.OptimalCenter, out var comfortCenter))
+        {
+            var comfortCovered = GetCoveredMembers(comfortCenter, allPositions);
+            var comfortCoversTank = tankPosition.HasValue &&
+                                    Vector2.DistanceSquared(comfortCenter, tankPosition.Value) <= CoverageRadiusSquared;
+            var mustCoverTank = bestCoversTank || currentCoversTank;
+            if (comfortCovered.Count >= bestCovered.Count && (!mustCoverTank || comfortCoversTank))
+            {
+                bestCenter = comfortCenter;
+                bestCovered = comfortCovered;
+                bestCoversTank = comfortCoversTank;
+            }
+        }
+
+        var currentComfortSlack = MinimumCoverageSlack(playerPos, currentCoveredMembers);
+        var bestComfortSlack = MinimumCoverageSlack(bestCenter, bestCovered);
 
         return new HealerCoverageGoalPlan(
             bestCenter,
@@ -311,7 +367,9 @@ internal sealed class HealerAoePositioningController(
             Vector2.Distance(playerPos, bestCenter),
             currentCovered,
             currentCoversTank,
-            bestCoversTank);
+            bestCoversTank,
+            currentComfortSlack,
+            bestComfortSlack);
     }
 
     private static Vector2 AveragePosition(IReadOnlyList<Vector2> members)
@@ -364,6 +422,68 @@ internal sealed class HealerAoePositioningController(
         }
 
         return best;
+    }
+
+    internal static bool TrySelectComfortCoverageCenter(
+        Vector2 playerPosition,
+        IReadOnlyList<Vector2> members,
+        Vector2? tankPosition,
+        Vector2? previousCenter,
+        out Vector2 comfortCenter)
+    {
+        comfortCenter = playerPosition;
+        var currentCovered = GetCoveredMembers(playerPosition, members);
+        if (currentCovered.Count <= 1)
+        {
+            return false;
+        }
+
+        var currentCoversTank = CoversTank(playerPosition, tankPosition);
+        var best = playerPosition;
+        var bestMinSlack = MinimumCoverageSlack(playerPosition, currentCovered);
+        var bestAverageSlack = AverageCoverageSlack(playerPosition, currentCovered);
+        var bestDistanceSq = 0f;
+
+        foreach (var candidate in EnumerateComfortCoverageCenters(playerPosition, currentCovered, previousCenter))
+        {
+            if (Vector2.DistanceSquared(candidate, playerPosition) <= 0.25f)
+            {
+                continue;
+            }
+
+            if (!PreservesCoverage(candidate, currentCovered))
+            {
+                continue;
+            }
+
+            if (currentCoversTank && !CoversTank(candidate, tankPosition))
+            {
+                continue;
+            }
+
+            var minSlack = MinimumCoverageSlack(candidate, currentCovered);
+            var averageSlack = AverageCoverageSlack(candidate, currentCovered);
+            var distanceSq = Vector2.DistanceSquared(candidate, playerPosition);
+            if (minSlack > bestMinSlack + 0.05f ||
+                MathF.Abs(minSlack - bestMinSlack) <= 0.05f &&
+                (averageSlack > bestAverageSlack + 0.05f ||
+                 MathF.Abs(averageSlack - bestAverageSlack) <= 0.05f && distanceSq < bestDistanceSq))
+            {
+                best = candidate;
+                bestMinSlack = minSlack;
+                bestAverageSlack = averageSlack;
+                bestDistanceSq = distanceSq;
+            }
+        }
+
+        if (Vector2.DistanceSquared(best, playerPosition) <= 0.25f ||
+            bestMinSlack < MinimumCoverageSlack(playerPosition, currentCovered) + MinimumCoverageComfortSlackGain)
+        {
+            return false;
+        }
+
+        comfortCenter = best;
+        return true;
     }
 
     private static bool TrySelectNaturalCoverageCenter(
@@ -423,6 +543,26 @@ internal sealed class HealerAoePositioningController(
         }
     }
 
+    private static IEnumerable<Vector2> EnumerateComfortCoverageCenters(Vector2 playerPosition, IReadOnlyList<Vector2> currentCoveredMembers, Vector2? previousCenter)
+    {
+        yield return playerPosition;
+        yield return AveragePosition(currentCoveredMembers);
+
+        if (previousCenter.HasValue)
+        {
+            yield return previousCenter.Value;
+        }
+
+        for (var i = 0; i < currentCoveredMembers.Count; ++i)
+        {
+            yield return currentCoveredMembers[i];
+            for (var j = i + 1; j < currentCoveredMembers.Count; ++j)
+            {
+                yield return (currentCoveredMembers[i] + currentCoveredMembers[j]) * 0.5f;
+            }
+        }
+    }
+
     private static int CountCovered(Vector2 candidate, IReadOnlyList<Vector2> members)
     {
         var covered = 0;
@@ -439,6 +579,51 @@ internal sealed class HealerAoePositioningController(
     {
         return tankPosition.HasValue &&
                Vector2.DistanceSquared(candidate, tankPosition.Value) <= CoverageRadiusSquared;
+    }
+
+    private static bool PreservesCoverage(Vector2 candidate, IReadOnlyList<Vector2> coveredMembers)
+    {
+        foreach (var member in coveredMembers)
+        {
+            if (Vector2.DistanceSquared(candidate, member) > CoverageRadiusSquared)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static float MinimumCoverageSlack(Vector2 candidate, IReadOnlyList<Vector2> coveredMembers)
+    {
+        if (coveredMembers.Count == 0)
+        {
+            return 0f;
+        }
+
+        var slack = float.MaxValue;
+        foreach (var member in coveredMembers)
+        {
+            slack = MathF.Min(slack, CoverageRadius - Vector2.Distance(candidate, member));
+        }
+
+        return slack;
+    }
+
+    private static float AverageCoverageSlack(Vector2 candidate, IReadOnlyList<Vector2> coveredMembers)
+    {
+        if (coveredMembers.Count == 0)
+        {
+            return 0f;
+        }
+
+        var slack = 0f;
+        foreach (var member in coveredMembers)
+        {
+            slack += CoverageRadius - Vector2.Distance(candidate, member);
+        }
+
+        return slack / coveredMembers.Count;
     }
 
     private static IReadOnlyList<Vector2> GetCoveredMembers(Vector2 candidate, IReadOnlyList<Vector2> members)
@@ -549,6 +734,46 @@ internal sealed class HealerAoePositioningController(
                distanceToCenter <= MaxPartyAoeHealCatchUpMoveDistance;
     }
 
+    internal static bool ShouldImproveCoverageComfort(
+        int currentCoveredCount,
+        int bestCoveredCount,
+        int totalMembers,
+        float currentCoverageComfortSlack,
+        float bestCoverageComfortSlack,
+        float distanceToCenter,
+        bool downtimeLikely,
+        bool mechanicPositioningActive)
+    {
+        if (totalMembers <= 1 ||
+            bestCoveredCount < currentCoveredCount ||
+            bestCoveredCount <= 0 ||
+            distanceToCenter > ResolveCoverageComfortMoveDistance(downtimeLikely, mechanicPositioningActive))
+        {
+            return false;
+        }
+
+        var usefulCluster = Math.Max(2, (totalMembers + 1) / 2);
+        if (bestCoveredCount > currentCoveredCount)
+        {
+            return bestCoveredCount >= usefulCluster;
+        }
+
+        return currentCoveredCount >= usefulCluster &&
+               bestCoverageComfortSlack >= currentCoverageComfortSlack + MinimumCoverageComfortSlackGain;
+    }
+
+    private static float ResolveCoverageComfortMoveDistance(bool downtimeLikely, bool mechanicPositioningActive)
+    {
+        if (downtimeLikely)
+        {
+            return MaxDowntimeCoverageComfortMoveDistance;
+        }
+
+        return mechanicPositioningActive
+            ? MaxMechanicCoverageComfortMoveDistance
+            : MaxRoutineCoverageComfortMoveDistance;
+    }
+
     internal static bool IsPartyAoeHealAction(RsrAoeActionSnapshot action)
     {
         if (IsKnownOffensivePartyHeal(action.ActionName))
@@ -572,14 +797,21 @@ internal sealed class HealerAoePositioningController(
         return forcedMovementActive;
     }
 
-    private bool BossModHardSafetyActive(object hints)
+    private bool IsDowntimeLikely()
     {
-        return ShouldYieldCoverageForSafety(
-            VectorLengthSquared(this.forcedMovementField?.GetValue(hints)) > 0.01f,
-            this.forbiddenZonesField?.GetValue(hints) is ICollection { Count: > 0 },
-            this.bmrMoveRequested,
-            this.bmrMoveImminent);
+        var target = services.TargetManager.Target;
+        if (target == null || !target.IsTargetable)
+        {
+            return true;
+        }
+
+        var nextDowntimeStart = bossMod.NextDowntimeIn();
+        var nextDowntimeEnd = bossMod.NextDowntimeEndIn();
+        return IsFiniteTimelineValue(nextDowntimeEnd) &&
+               (!IsFiniteTimelineValue(nextDowntimeStart) || nextDowntimeEnd < nextDowntimeStart);
     }
+
+    private static bool IsFiniteTimelineValue(float value) => !float.IsNaN(value) && !float.IsInfinity(value) && value < float.MaxValue * 0.5f;
 
     private bool TryGetUpcomingPartyAoeHeal(out string actionName)
     {
@@ -643,6 +875,8 @@ internal sealed class HealerAoePositioningController(
         private readonly int currentCoveredCount;
         private readonly bool currentCoversTank;
         private readonly bool bestCoversTank;
+        private readonly float currentCoverageComfortSlack;
+        private readonly float bestCoverageComfortSlack;
 
         public HealerCoverageGoalPlan(
             Vector2 optimalCenter,
@@ -652,7 +886,9 @@ internal sealed class HealerAoePositioningController(
             float distanceToCenter,
             int currentCoveredCount,
             bool currentCoversTank,
-            bool bestCoversTank)
+            bool bestCoversTank,
+            float currentCoverageComfortSlack,
+            float bestCoverageComfortSlack)
         {
             this.optimalCenter = optimalCenter;
             this.coveredMembers = coveredMembers;
@@ -662,6 +898,8 @@ internal sealed class HealerAoePositioningController(
             this.currentCoveredCount = currentCoveredCount;
             this.currentCoversTank = currentCoversTank;
             this.bestCoversTank = bestCoversTank;
+            this.currentCoverageComfortSlack = currentCoverageComfortSlack;
+            this.bestCoverageComfortSlack = bestCoverageComfortSlack;
         }
 
         public float DistanceToCenter => this.distanceToCenter;
@@ -672,6 +910,8 @@ internal sealed class HealerAoePositioningController(
         public bool HasTank => this.tankPosition.HasValue;
         public bool CurrentCoversTank => this.currentCoversTank;
         public bool BestCoversTank => this.bestCoversTank;
+        public float CurrentCoverageComfortSlack => this.currentCoverageComfortSlack;
+        public float BestCoverageComfortSlack => this.bestCoverageComfortSlack;
 
         public bool SameSource(HealerCoverageGoalPlan other)
         {
@@ -730,6 +970,15 @@ internal sealed class HealerAoePositioningController(
 
             var fraction = (float)covered / allMembers.Count;
             var score = PreferredScore * fraction;
+            if (this.bestCoverageComfortSlack >= this.currentCoverageComfortSlack + MinimumCoverageComfortSlackGain &&
+                covered >= this.currentCoveredCount &&
+                PreservesCoverage(candidatePos, this.coveredMembers))
+            {
+                var candidateComfortSlack = MinimumCoverageSlack(candidatePos, this.coveredMembers);
+                var comfortGain = Math.Clamp((candidateComfortSlack - this.currentCoverageComfortSlack) / CoverageRadius, 0f, 1f);
+                score = MathF.Min(GoalZoneScorePolicy.StrongPreference, score + MathF.Min(MaxCoverageComfortScoreBonus, comfortGain * MaxCoverageComfortScoreBonus));
+            }
+
             if (this.tankPosition.HasValue)
             {
                 var coversTank = Vector2.DistanceSquared(candidatePos, this.tankPosition.Value) <= CoverageRadiusSquared;

@@ -265,6 +265,7 @@ internal sealed record BossModSnapshot(
     string MovementOverride,
     string HintSummary,
     string PlannerSteer,
+    string MechanicWhisper,
     Vec3? PathfindMapCenter,
     float? PathfindMapRadius,
     float? PathfindMapHalfWidth,

@@ -206,7 +206,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             this.lastGoalDelegate = plan.CreateGoalDelegate(this.resolvedWPosType!, this.wposXField!, this.wposZField!);
         }
 
-        contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.DefensiveMechanic, "Defensive zone"));
+        contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.DefensiveMechanic, "Defensive zone", plan.PreferredEntryPosition, MechanicWhisperConfidence.Confident));
         this.lastInjected = true;
         this.lastOverlay = plan.CreateOverlay(player.Position.Y, injected: true);
         this.nextOverlayRefresh = DateTime.UtcNow.Add(OverlayRefreshInterval);
@@ -750,6 +750,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         public string CasterName => this.casterName;
         public float DistanceToCenter { get; }
         public bool PlayerInZone => this.playerInZone;
+        public Vector2 PreferredEntryPosition => this.preferredEntryPosition;
 
         public Vector3 MovementDestination(float y)
         {

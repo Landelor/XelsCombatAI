@@ -249,7 +249,7 @@ internal sealed class ConfigWindow : Window, IDisposable
             this.config.ManageHealerCoverageZone,
             this.defaultConfig.ManageHealerCoverageZone,
             v => this.config.ManageHealerCoverageZone = v,
-            "Healers only: prefers safe spots where more party members are in AoE healing range.",
+            "Healers only: prefers safe spots where more party members are comfortably in AoE healing range.",
             movementDisabledTooltip);
         changed |= this.Checkbox(
             "Stand in defensive ground effects",

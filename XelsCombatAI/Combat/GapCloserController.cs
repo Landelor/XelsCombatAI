@@ -27,6 +27,7 @@ internal sealed class GapCloserController(
     private const float ConservativeTrashGapCloserRangeReserve = 2.5f;
     private const float ConservativeTrashMinimumConfidence = 0.55f;
     private const int ConservativeTrashMinimumTargets = 3;
+    private const float TrashGapCloserAwayFromAnchorTolerance = 2f;
     private const float FriendlyAnchorMinimumMoveDistance = 6f;
     private const float FriendlyAnchorMinimumUptimeGain = 4f;
     private const float HostileRelayMinimumTargetGain = 4f;
@@ -173,6 +174,14 @@ internal sealed class GapCloserController(
             this.lastGapCloserSafety = trashConserveReason;
             this.lastSafeLandingPosition = null;
             mobilityEvaluator.RecordIdle(MobilityIntent.Uptime, "Gap closer", trashConserveReason);
+            return false;
+        }
+
+        if (!this.ShouldAllowTrashPullGapCloserTarget(player, target, out var trashTargetReason))
+        {
+            this.lastGapCloserSafety = trashTargetReason;
+            this.lastSafeLandingPosition = null;
+            mobilityEvaluator.RecordIdle(MobilityIntent.Uptime, "Gap closer", trashTargetReason);
             return false;
         }
 
@@ -1245,6 +1254,56 @@ internal sealed class GapCloserController(
         }
 
         reason = $"trash pull conserving gap closer: {triggerDistance:0.#}y / {useThreshold:0.#}y";
+        return true;
+    }
+
+    private bool ShouldAllowTrashPullGapCloserTarget(IBattleChara player, IGameObject target, out string reason)
+    {
+        reason = string.Empty;
+
+        var trash = trashPullDiagnostics();
+        if (!IsConservativeTrashPullContext(trash))
+        {
+            return true;
+        }
+
+        if (trash.Phase != TrashPullPhase.Gathering)
+        {
+            return true;
+        }
+
+        if (target is IBattleNpc battleNpc &&
+            trash.DominantTargetIds.Count > 0 &&
+            !trash.DominantTargetIds.Contains(battleNpc.GameObjectId))
+        {
+            reason = "trash pull target is not in tank pack";
+            return false;
+        }
+
+        var anchor = ResolveTrashPullGapCloserAnchor(trash, target);
+        if (!ShouldAllowTrashPullGapCloserTarget(
+                player.Position,
+                target.Position,
+                anchor,
+                out reason))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    internal static bool ShouldAllowTrashPullGapCloserTarget(Vector3 playerPosition, Vector3 targetPosition, Vector3 anchorPosition, out string reason)
+    {
+        var playerAnchorDistance = Geometry.Distance2D(playerPosition, anchorPosition);
+        var targetAnchorDistance = Geometry.Distance2D(targetPosition, anchorPosition);
+        if (targetAnchorDistance > playerAnchorDistance + TrashGapCloserAwayFromAnchorTolerance)
+        {
+            reason = $"trash pull dash would move away from tank pack: target={targetAnchorDistance:0.#}y anchor, player={playerAnchorDistance:0.#}y";
+            return false;
+        }
+
+        reason = string.Empty;
         return true;
     }
 

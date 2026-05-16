@@ -83,12 +83,13 @@ public sealed class Plugin : IDalamudPlugin
         var facingController = new FacingController(this.config, this.services, bossMod, manualMovement, new LocalPlayerFacingActuator());
         var redMageMeleeComboController = new RedMageMeleeComboController(this.config, this.services, rotationSolverActions, bossModSafety, mobilityDecisionEvaluator, facingController, () => targetUptimePlanner.CurrentTargetHasBossModule());
         targetUptimePlanner.TargetUptimeRangeOverride = redMageMeleeComboController.GetTargetUptimeRangeOverride;
+        var targetUptimePositioningController = new TargetUptimePositioningController(this.config, this.services, this.jobRangeProvider, () => runtime?.AutomatedMovementSuppressed == true, () => targetUptimePlanner.CurrentTargetHasBossModule());
         var aoePackPositioningController = new AoePackPositioningController(this.config, this.services, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true, rotationSolver, () => targetUptimePlanner.CurrentTargetHasBossModule(), this.jobRangeProvider);
         var passageOfArmsPositioningController = new PassageOfArmsPositioningController(this.config, this.services, () => runtime?.AutomatedMovementSuppressed == true);
-        var healerAoePositioningController = new HealerAoePositioningController(this.config, this.services, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true);
+        var healerAoePositioningController = new HealerAoePositioningController(this.config, this.services, bossMod, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true);
         var survivabilityZonePositioningController = new SurvivabilityZonePositioningController(this.config, this.services, () => runtime?.AutomatedMovementSuppressed == true);
         var aggroSafetyController = new AggroSafetyController(this.config, this.services, () => runtime?.AutomatedMovementSuppressed == true);
-        IBossModGoalZoneContributor[] legacyMovementContributors = [aggroSafetyController, aoePackPositioningController, passageOfArmsPositioningController, healerAoePositioningController, survivabilityZonePositioningController, arenaEdgePositioningController];
+        IBossModGoalZoneContributor[] legacyMovementContributors = [aggroSafetyController, targetUptimePositioningController, aoePackPositioningController, passageOfArmsPositioningController, healerAoePositioningController, survivabilityZonePositioningController, arenaEdgePositioningController];
         var aoeGoalHook = new BossModGoalZoneHook(this.config, PluginInterface, this.services, Log, vnavmesh, legacyMovementContributors);
         var gapCloserController = new GapCloserController(
             this.config,

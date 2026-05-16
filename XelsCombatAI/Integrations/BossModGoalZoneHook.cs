@@ -24,6 +24,7 @@ internal sealed record BossModMovementDiagnostics(
     string NavigationStats,
     string VnavmeshGuard,
     string PlannerSteer,
+    string MechanicWhisper,
     string ControllerTarget,
     string MovementOverride,
     string HintSummary,
@@ -43,6 +44,7 @@ internal sealed record BossModMovementDiagnostics(
         "<none>",
         "disabled",
         "not checked",
+        "not logged",
         "<none>",
         "<none>",
         "<none>",
@@ -184,6 +186,15 @@ internal sealed class BossModGoalZoneHook : IDisposable
     private const string BossModPluginTypeName = "BossMod.Plugin";
     private const int MaxFailures = 3;
     private static readonly TimeSpan OwnerLivenessCheckInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan MechanicWhisperCloserStability = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan MechanicWhisperConfidentRedirectStability = TimeSpan.FromMilliseconds(450);
+    private const float MechanicWhisperCandidateResetDistance = 3f;
+    private const float MechanicWhisperAlignedDistance = 4f;
+    private const float MechanicWhisperCloserDistanceGain = 6f;
+    private const float MechanicEscapeMarginMinimumMoveDistance = 0.75f;
+    private const float MechanicEscapeMarginMaximumMoveDistance = 8f;
+    private const float MechanicEscapeMarginCandidateResetDistance = 0.75f;
+    private const float MechanicEscapeMarginRadius = 2.5f;
 
     private readonly IDalamudPluginInterface pluginInterface;
     private readonly Configuration config;
@@ -219,9 +230,89 @@ internal sealed class BossModGoalZoneHook : IDisposable
         $"DrawActive={this.draw != null}",
         $"Failures={this.failures}",
         $"DisabledAfterFailure={this.disabledAfterFailure}",
+        $"MechanicWhisper={this.draw?.MovementDiagnostics.MechanicWhisper ?? "not logged"}",
         $"ActiveGoalPriority={this.draw?.LastGoalPriority ?? "None"}",
         $"ActiveGoalSources={this.draw?.LastGoalSources ?? "<none>"}",
         $"NextResolveUtc={this.nextResolveAttempt:O}");
+
+    internal static bool ShouldAllowMechanicWhisperCandidate(
+        Vector2 candidate,
+        Vector2? bossModDestination,
+        Vector2? playerPosition,
+        TimeSpan stableFor,
+        MechanicWhisperConfidence confidence = MechanicWhisperConfidence.Routine)
+        => EvaluateMechanicWhisperCandidate(candidate, bossModDestination, playerPosition, stableFor, confidence).Allowed;
+
+    private static MechanicWhisperDecision EvaluateMechanicWhisperCandidate(
+        Vector2 candidate,
+        Vector2? bossModDestination,
+        Vector2? playerPosition,
+        TimeSpan stableFor,
+        MechanicWhisperConfidence confidence)
+    {
+        if (bossModDestination.HasValue &&
+            Vector2.Distance(candidate, bossModDestination.Value) <= MechanicWhisperAlignedDistance)
+        {
+            return new MechanicWhisperDecision(true, "aligned", stableFor);
+        }
+
+        if (bossModDestination.HasValue && playerPosition.HasValue)
+        {
+            var bossModDistance = Vector2.Distance(playerPosition.Value, bossModDestination.Value);
+            var candidateDistance = Vector2.Distance(playerPosition.Value, candidate);
+            if (candidateDistance + MechanicWhisperCloserDistanceGain <= bossModDistance)
+            {
+                return stableFor >= MechanicWhisperCloserStability
+                    ? new MechanicWhisperDecision(true, "shorter", stableFor)
+                    : new MechanicWhisperDecision(false, "shorter-stabilizing", stableFor);
+            }
+        }
+
+        if (confidence == MechanicWhisperConfidence.Confident)
+        {
+            return stableFor >= MechanicWhisperConfidentRedirectStability
+                ? new MechanicWhisperDecision(true, "confident-redirect", stableFor)
+                : new MechanicWhisperDecision(false, "confident-redirect-stabilizing", stableFor);
+        }
+
+        return new MechanicWhisperDecision(false, "routine-not-redirecting", stableFor);
+    }
+
+    private readonly record struct MechanicWhisperDecision(bool Allowed, string Reason, TimeSpan StableFor);
+
+    internal static bool TryResolveMechanicEscapeMarginCandidate(
+        Vector2 playerPosition,
+        Vector3? desiredMovement,
+        bool forbiddenZonesActive,
+        bool forcedMovementActive,
+        bool moveRequested,
+        bool moveImminent,
+        out Vector2 candidate)
+    {
+        candidate = default;
+        if (!forbiddenZonesActive ||
+            forcedMovementActive ||
+            (!moveRequested && !moveImminent) ||
+            !desiredMovement.HasValue)
+        {
+            return false;
+        }
+
+        var move = new Vector2(desiredMovement.Value.X, desiredMovement.Value.Z);
+        var distance = move.Length();
+        if (distance < MechanicEscapeMarginMinimumMoveDistance)
+        {
+            return false;
+        }
+
+        if (distance > MechanicEscapeMarginMaximumMoveDistance)
+        {
+            move *= MechanicEscapeMarginMaximumMoveDistance / distance;
+        }
+
+        candidate = playerPosition + move;
+        return true;
+    }
 
     public void EnsureActive()
     {
@@ -414,9 +505,18 @@ internal sealed class BossModGoalZoneHook : IDisposable
         private string vnavmeshGuardStatus = "not checked";
         private string lastGoalPriority = "None";
         private string lastGoalSources = "<none>";
+        private string lastMechanicWhisperStatus = "<none>";
         private BossModMovementDiagnostics movementDiagnostics = BossModMovementDiagnostics.Empty;
         private DateTime nextMovementDiagnosticsCapture = DateTime.MinValue;
         private DateTime nextDiagnosticsFailureLog = DateTime.MinValue;
+        private bool currentMoveRequested;
+        private bool currentMoveImminent;
+        private readonly Dictionary<string, MechanicWhisperState> mechanicWhisperStates = new(StringComparer.Ordinal);
+        private Delegate? lastMechanicEscapeMarginGoalDelegate;
+        private Vector2 lastMechanicEscapeMarginCandidate;
+        private Type? mechanicEscapeMarginWPosType;
+        private FieldInfo? mechanicEscapeMarginWPosXField;
+        private FieldInfo? mechanicEscapeMarginWPosZField;
         private static readonly TimeSpan VnavPathfindCacheDuration = TimeSpan.FromSeconds(1);
         private static readonly TimeSpan MovementDiagnosticsCaptureInterval = TimeSpan.FromMilliseconds(250);
         private const float VnavPathfindDestinationTolerance = 1.5f;
@@ -426,6 +526,7 @@ internal sealed class BossModGoalZoneHook : IDisposable
         private const int MaxSafetyRasterDimension = 48;
         private const float UnknownBossHitboxRadius = 4f;
         private const float UnknownBossThreatRadius = 80f;
+        private static readonly MethodInfo ScoreMechanicEscapeMarginMethod = typeof(ReflectedDraw).GetMethod(nameof(ScoreMechanicEscapeMargin), BindingFlags.Static | BindingFlags.NonPublic)!;
 
         private ReflectedDraw(
             object plugin,
@@ -675,6 +776,8 @@ internal sealed class BossModGoalZoneHook : IDisposable
             var preventMovingWhileCasting = ReadBoolMember(this.actionManagerConfig, this.preventMovingWhileCastingMember);
             var forceUnblocked = (bool)this.isForceUnblockedMethod.Invoke(this.movementOverride, [])!;
             var moveImminent = moveRequested && (!preventMovingWhileCasting || forceUnblocked);
+            this.currentMoveRequested = moveRequested;
+            this.currentMoveImminent = moveImminent;
             this.SetContributorBossModMovementState(moveRequested, moveImminent);
 
             this.dtrUpdateMethod.Invoke(this.dtr, []);
@@ -720,6 +823,7 @@ internal sealed class BossModGoalZoneHook : IDisposable
             {
                 this.lastGoalPriority = "None";
                 this.lastGoalSources = "BMR goal zone list unavailable";
+                this.lastMechanicWhisperStatus = "BMR goal zone list unavailable";
                 return;
             }
 
@@ -736,10 +840,14 @@ internal sealed class BossModGoalZoneHook : IDisposable
                 }
             }
 
+            this.TryAddMechanicEscapeMarginGoal(contributions);
+
             if (contributions.Count == 0)
             {
+                this.mechanicWhisperStates.Clear();
                 this.lastGoalPriority = "None";
                 this.lastGoalSources = "<none>";
+                this.lastMechanicWhisperStatus = "<none>";
                 return;
             }
 
@@ -747,7 +855,25 @@ internal sealed class BossModGoalZoneHook : IDisposable
             var activeContributions = contributions
                 .Where(c => c.Priority == highestPriority)
                 .ToArray();
-            this.lastGoalPriority = highestPriority.ToString();
+            var mechanicWhisperGuardActive = this.ShouldApplyMechanicWhisperGuard();
+            if (mechanicWhisperGuardActive)
+            {
+                activeContributions = this.FilterMechanicWhispers(activeContributions);
+            }
+            else
+            {
+                this.mechanicWhisperStates.Clear();
+                this.lastMechanicWhisperStatus = "<none>";
+            }
+
+            if (activeContributions.Length == 0)
+            {
+                this.lastGoalPriority = $"{highestPriority} (guarded)";
+                this.lastGoalSources = "mechanic whisper stabilizing";
+                return;
+            }
+
+            this.lastGoalPriority = mechanicWhisperGuardActive ? $"{highestPriority} (guarded)" : highestPriority.ToString();
             this.lastGoalSources = string.Join(", ", activeContributions.Select(c => c.Label).Distinct(StringComparer.Ordinal));
 
             var advisoryContributions = activeContributions
@@ -762,6 +888,161 @@ internal sealed class BossModGoalZoneHook : IDisposable
             {
                 goalZones.Add(rawContribution.Goal);
             }
+        }
+
+        private void TryAddMechanicEscapeMarginGoal(ICollection<BossModGoalContribution> contributions)
+        {
+            if (!this.config.Enabled ||
+                !this.config.ManageMovement ||
+                this.services.Condition[ConditionFlag.Unconscious])
+            {
+                return;
+            }
+
+            var player = this.services.ObjectTable.LocalPlayer;
+            if (player == null || player.IsDead || player.CurrentHp == 0)
+            {
+                return;
+            }
+
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var forbiddenZonesActive = CountField(this.hints, "ForbiddenZones", Flags) > 0;
+            var forcedMovementActive = XzLengthSquared(ReadVector3(ReadField(this.hints, "ForcedMovement", Flags))) > 0.01f;
+            var desiredMovement = ReadVector3(this.movementDesiredDirectionField?.GetValue(this.movementOverride));
+            if (!BossModGoalZoneHook.TryResolveMechanicEscapeMarginCandidate(
+                    new Vector2(player.Position.X, player.Position.Z),
+                    desiredMovement,
+                    forbiddenZonesActive,
+                    forcedMovementActive,
+                    this.currentMoveRequested,
+                    this.currentMoveImminent,
+                    out var candidate))
+            {
+                return;
+            }
+
+            if (!this.TryEnsureMechanicEscapeMarginWPosFields())
+            {
+                return;
+            }
+
+            if (this.lastMechanicEscapeMarginGoalDelegate == null ||
+                Vector2.Distance(this.lastMechanicEscapeMarginCandidate, candidate) > MechanicEscapeMarginCandidateResetDistance)
+            {
+                this.lastMechanicEscapeMarginGoalDelegate = this.CreateMechanicEscapeMarginGoalDelegate(candidate);
+                this.lastMechanicEscapeMarginCandidate = candidate;
+            }
+
+            contributions.Add(new(
+                this.lastMechanicEscapeMarginGoalDelegate,
+                BossModGoalPriority.DefensiveMechanic,
+                "Mechanic exit margin",
+                candidate,
+                MechanicWhisperConfidence.Confident));
+        }
+
+        private bool ShouldApplyMechanicWhisperGuard()
+        {
+            if (!this.currentMoveRequested && !this.currentMoveImminent)
+            {
+                return false;
+            }
+
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            return CountField(this.hints, "ForbiddenZones", Flags) > 0;
+        }
+
+        private BossModGoalContribution[] FilterMechanicWhispers(BossModGoalContribution[] contributions)
+        {
+            var now = DateTime.UtcNow;
+            var bossModDestination = this.ReadCurrentBossModDestination();
+            var playerPosition = this.ReadCurrentPlayerPosition();
+            var filtered = new List<BossModGoalContribution>(contributions.Length);
+            var decisions = new List<string>(contributions.Length);
+            var activeKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var contribution in contributions)
+            {
+                var key = MechanicWhisperKey(contribution);
+                activeKeys.Add(key);
+                if (!contribution.Candidate.HasValue)
+                {
+                    decisions.Add($"{contribution.Label}:blocked/no-candidate");
+                    continue;
+                }
+
+                var allowed = this.ShouldAllowMechanicWhisper(contribution, key, bossModDestination, playerPosition, now, out var decision);
+                decisions.Add(this.FormatMechanicWhisperDecision(contribution, decision, bossModDestination, playerPosition));
+                if (allowed)
+                {
+                    filtered.Add(contribution);
+                }
+            }
+
+            foreach (var staleKey in this.mechanicWhisperStates.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
+            {
+                this.mechanicWhisperStates.Remove(staleKey);
+            }
+
+            this.lastMechanicWhisperStatus = decisions.Count == 0
+                ? "guard active; no active contributions"
+                : $"guard active; {string.Join(" | ", decisions)}";
+            return filtered.ToArray();
+        }
+
+        private bool ShouldAllowMechanicWhisper(
+            BossModGoalContribution contribution,
+            string key,
+            Vector2? bossModDestination,
+            Vector2? playerPosition,
+            DateTime now,
+            out MechanicWhisperDecision decision)
+        {
+            var candidate = contribution.Candidate!.Value;
+            if (!this.mechanicWhisperStates.TryGetValue(key, out var state) ||
+                Vector2.Distance(candidate, state.Candidate) > MechanicWhisperCandidateResetDistance)
+            {
+                state = new MechanicWhisperState(candidate, now);
+                this.mechanicWhisperStates[key] = state;
+            }
+            else
+            {
+                state.Candidate = candidate;
+            }
+
+            decision = EvaluateMechanicWhisperCandidate(candidate, bossModDestination, playerPosition, now - state.StableSince, contribution.Confidence);
+            return decision.Allowed;
+        }
+
+        private static string MechanicWhisperKey(BossModGoalContribution contribution) => $"{contribution.Priority}:{contribution.Label}";
+
+        private string FormatMechanicWhisperDecision(
+            BossModGoalContribution contribution,
+            MechanicWhisperDecision decision,
+            Vector2? bossModDestination,
+            Vector2? playerPosition)
+        {
+            var state = decision.Allowed ? "accepted" : "waiting";
+            var candidateDistance = playerPosition.HasValue && contribution.Candidate.HasValue
+                ? Vector2.Distance(playerPosition.Value, contribution.Candidate.Value)
+                : (float?)null;
+            var bossModDistance = playerPosition.HasValue && bossModDestination.HasValue
+                ? Vector2.Distance(playerPosition.Value, bossModDestination.Value)
+                : (float?)null;
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"{contribution.Label}:{state}/{decision.Reason}/conf={contribution.Confidence}/stable={decision.StableFor.TotalMilliseconds:0}ms/cand={FormatNullableVector(contribution.Candidate)}/bmr={FormatNullableVector(bossModDestination)}/dist={FormatNullableNumber(candidateDistance)}->{FormatNullableNumber(bossModDistance)}");
+        }
+
+        private Vector2? ReadCurrentBossModDestination()
+        {
+            var controller = this.aiControllerField?.GetValue(this.ai);
+            return ReadWPos(this.controllerNaviTargetPosField?.GetValue(controller));
+        }
+
+        private Vector2? ReadCurrentPlayerPosition()
+        {
+            var player = this.services.ObjectTable.LocalPlayer;
+            return player == null ? null : new Vector2(player.Position.X, player.Position.Z);
         }
 
         private void ApplyVnavmeshReachabilityGuard(object? activeModule)
@@ -1050,9 +1331,11 @@ internal sealed class BossModGoalZoneHook : IDisposable
                         $"ForceMoveIn={FormatNumber(forceMovementIn)}",
                         $"VnavGuard={this.vnavmeshGuardStatus}",
                         $"PlannerSteer={LegacyDirectMovementStatus}",
+                        $"MechanicWhisper={this.lastMechanicWhisperStatus}",
                         $"ForwardBrake={LegacyForwardBrakeStatus}"),
                     this.vnavmeshGuardStatus,
                     LegacyDirectMovementStatus,
+                    this.lastMechanicWhisperStatus,
                     string.Join(
                         ",",
                         $"Navi={FormatWPos(naviTarget)}",
@@ -1524,6 +1807,16 @@ internal sealed class BossModGoalZoneHook : IDisposable
             return MathF.Sqrt((dx * dx) + (dz * dz));
         }
 
+        private static float XzLengthSquared(Vector3? value)
+        {
+            if (!value.HasValue)
+            {
+                return 0f;
+            }
+
+            return (value.Value.X * value.Value.X) + (value.Value.Z * value.Value.Z);
+        }
+
         private static bool IsFinite(Vector3 value)
         {
             return float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
@@ -1583,6 +1876,13 @@ internal sealed class BossModGoalZoneHook : IDisposable
             };
         }
 
+        private static string FormatNullableNumber(float? value)
+        {
+            return value.HasValue
+                ? value.Value.ToString("0.00", CultureInfo.InvariantCulture)
+                : "<none>";
+        }
+
         private static float? ReadFloat(object? value)
         {
             return value switch
@@ -1623,6 +1923,62 @@ internal sealed class BossModGoalZoneHook : IDisposable
             return value is TimeSpan timeSpan
                 ? timeSpan.TotalMilliseconds.ToString("0.00", CultureInfo.InvariantCulture)
                 : "<none>";
+        }
+
+        private bool TryEnsureMechanicEscapeMarginWPosFields()
+        {
+            if (this.mechanicEscapeMarginWPosType != null &&
+                this.mechanicEscapeMarginWPosXField != null &&
+                this.mechanicEscapeMarginWPosZField != null)
+            {
+                return true;
+            }
+
+            var wposType = this.hints.GetType().Assembly.GetType("BossMod.WPos");
+            var xField = wposType?.GetField("X", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var zField = wposType?.GetField("Z", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (wposType == null || xField == null || zField == null)
+            {
+                this.LogDiagnosticsFailure(
+                    new MissingMemberException("BossMod.WPos"),
+                    "Could not resolve BossMod.WPos for mechanic escape margin.");
+                return false;
+            }
+
+            this.mechanicEscapeMarginWPosType = wposType;
+            this.mechanicEscapeMarginWPosXField = xField;
+            this.mechanicEscapeMarginWPosZField = zField;
+            return true;
+        }
+
+        private Delegate CreateMechanicEscapeMarginGoalDelegate(Vector2 candidate)
+        {
+            var wposType = this.mechanicEscapeMarginWPosType!;
+            var parameter = Expression.Parameter(wposType, "p");
+            var x = Expression.Convert(Expression.Field(parameter, this.mechanicEscapeMarginWPosXField!), typeof(float));
+            var z = Expression.Convert(Expression.Field(parameter, this.mechanicEscapeMarginWPosZField!), typeof(float));
+            var score = Expression.Call(
+                ScoreMechanicEscapeMarginMethod,
+                x,
+                z,
+                Expression.Constant(candidate.X),
+                Expression.Constant(candidate.Y));
+            var delegateType = typeof(Func<,>).MakeGenericType(wposType, typeof(float));
+            return Expression.Lambda(delegateType, score, parameter).Compile();
+        }
+
+        private static float ScoreMechanicEscapeMargin(float x, float z, float candidateX, float candidateZ)
+        {
+            var dx = x - candidateX;
+            var dz = z - candidateZ;
+            var distanceSquared = (dx * dx) + (dz * dz);
+            if (distanceSquared >= MechanicEscapeMarginRadius * MechanicEscapeMarginRadius)
+            {
+                return 0f;
+            }
+
+            var distance = MathF.Sqrt(distanceSquared);
+            return GoalZoneScorePolicy.StrongPreference * (1f - (distance / MechanicEscapeMarginRadius));
         }
 
         private static float? ReadFloatField(object value, Type type, string name)
@@ -1686,6 +2042,12 @@ internal sealed class BossModGoalZoneHook : IDisposable
                 PropertyInfo property => (bool)(property.GetValue(instance) ?? false),
                 _ => false
             };
+        }
+
+        private sealed class MechanicWhisperState(Vector2 candidate, DateTime now)
+        {
+            public Vector2 Candidate = candidate;
+            public DateTime StableSince = now;
         }
 
         private sealed class ReflectedMembers

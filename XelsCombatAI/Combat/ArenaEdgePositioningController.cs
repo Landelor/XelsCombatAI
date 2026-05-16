@@ -169,7 +169,7 @@ internal sealed class ArenaEdgePositioningController(Configuration config, Dalam
                 this.lastRecoveryPoint = recoveryPoint;
             }
 
-            contributions.Add(new(this.lastRecoveryGoalDelegate, BossModGoalPriority.Convenience, "Arena edge recovery"));
+            contributions.Add(new(this.lastRecoveryGoalDelegate, BossModGoalPriority.Convenience, "Arena edge recovery", recoveryPoint));
             this.lastReason = "custom arena edge recovery";
             return;
         }
@@ -192,7 +192,7 @@ internal sealed class ArenaEdgePositioningController(Configuration config, Dalam
 
         if (this.lastGoalDelegate != null)
         {
-            contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.Convenience, "Arena edge avoidance"));
+            contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.Convenience, "Arena edge avoidance", new Vector2(centerX, centerZ)));
             this.lastReason = "near arena edge";
         }
     }

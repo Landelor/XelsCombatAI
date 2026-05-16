@@ -13,7 +13,7 @@ A Dalamud plugin that automatically manages your BossMod Reborn movement and pos
 While you are in combat, the plugin automatically:
 
 - **Moves you to the correct positional** (rear/flank) based on your autorotation
-- **Maintains target uptime** using internal melee/ranged action-range behavior
+- **Maintains target uptime** using internal melee/ranged action-range behavior, including stable mechanic-exit nudges when a safe exit can still hit the target
 - **Manages your Ley Lines** — returns to them when safe, uses Between the Lines and Retrace if available
 - **Can move Red Mage for its enchanted melee combo** — an optional job-specific setting uses RDM mana state and RSR target context to move in for safe enchanted melee range, then prefers a safe Displacement out after the finisher
 - **Stays clear of forbidden zones** with a configurable buffer distance
@@ -22,6 +22,7 @@ While you are in combat, the plugin automatically:
 - **Picks better AoE and trash targets** when target choice affects how many enemies you hit
 - **Moves closer to trash packs** when you are too far away to hit them well
 - **Follows tank-led trash pulls** when you fall behind the moving pack, with party-route fallback when the tank path is unavailable
+- **Keeps healers in comfortable party-healing range** by pre-positioning toward safe spots that preserve more AoE heal coverage
 - **Avoids awkward boss-center positions** and small enemy hitboxes when choosing movement goals
 - **Prefers helpful defensive ground effects** such as Asylum, Sacred Soil, Earthly Star, and Collective Unconscious
 - **Prefers Paladin Passage of Arms protection** by letting BossMod prefer the protected cone behind a party Paladin while the buff is active
@@ -66,7 +67,7 @@ Open the settings window with `/xcai config` or through the Dalamud plugin list.
 
 ### Movement tab
 
-**Movement** — Control automatic movement, social facing during downtime, manual movement pause, movement timing, attack range, danger-zone spacing, party positioning, defensive ground effects, Passage of Arms, aggro safety, unknown-boss vnavmesh reachability guarding, and weak edge-avoidance preferences.
+**Movement** — Control automatic movement, social facing during downtime, manual movement pause, movement timing, attack range, danger-zone spacing, healer party coverage, defensive ground effects, Passage of Arms, aggro safety, unknown-boss vnavmesh reachability guarding, and weak edge-avoidance preferences.
 
 **Follow party facing during downtime** turns roughly toward nearby party members when the target is gone or BossMod reports downtime, without changing facing during manual input, casting, animation lock, or BossMod movement pressure.
 

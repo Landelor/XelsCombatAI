@@ -321,6 +321,7 @@ internal static class XcaiLogReader
             ReadString(element, "MovementOverride", "<none>"),
             ReadString(element, "HintSummary", "<none>"),
             ReadString(element, "PlannerSteer", "not logged"),
+            ReadString(element, "MechanicWhisper", "not logged"),
             ReadVec3OrXyAsXz(hints, "PathfindMapCenter"),
             ReadNullableFloat(bounds, "Radius"),
             ReadNullableFloat(bounds, "HalfWidth"),
@@ -543,7 +544,7 @@ internal static class XcaiLogReader
 
     private static BossModSnapshot EmptyBossMod()
     {
-        return new BossModSnapshot("<none>", "<none>", "not logged", null, null, null, null, null, null, "<none>", SafetyRasterSnapshot.Unavailable("not logged"));
+        return new BossModSnapshot("<none>", "<none>", "not logged", "not logged", null, null, null, null, null, null, "<none>", SafetyRasterSnapshot.Unavailable("not logged"));
     }
 
     private static JsonElement Required(JsonElement element, string name)

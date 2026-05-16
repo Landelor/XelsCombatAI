@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 
 namespace XelsCombatAI.Integrations;
 
@@ -17,10 +18,18 @@ internal enum BossModGoalScoreMode
     Raw
 }
 
+internal enum MechanicWhisperConfidence
+{
+    Routine,
+    Confident
+}
+
 internal sealed record BossModGoalContribution(
     Delegate Goal,
     BossModGoalPriority Priority,
     string Label,
+    Vector2? Candidate = null,
+    MechanicWhisperConfidence Confidence = MechanicWhisperConfidence.Routine,
     BossModGoalScoreMode ScoreMode = BossModGoalScoreMode.Advisory);
 
 internal interface IBossModGoalZoneContributor

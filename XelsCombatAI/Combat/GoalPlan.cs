@@ -69,7 +69,7 @@ internal sealed class GoalPlan(
         };
     }
 
-    public CandidateScore FindBestCandidate(Vector2 playerPosition, Func<Vector2, bool>? candidateAllowed = null)
+    public CandidateScore FindBestCandidate(Vector2 playerPosition, Func<Vector2, bool>? candidateAllowed = null, Vector2? retainedPosition = null)
     {
         var best = this.ScoreCandidate(playerPosition);
         var bestPosition = playerPosition;
@@ -92,6 +92,16 @@ internal sealed class GoalPlan(
                 best = score;
                 bestPosition = candidate;
                 bestPreference = preference;
+            }
+        }
+
+        if (retainedPosition.HasValue &&
+            (candidateAllowed == null || candidateAllowed(retainedPosition.Value)))
+        {
+            var retained = this.ScoreCandidate(retainedPosition.Value);
+            if (retained.Hits > 0 && retained.Hits == best.Hits)
+            {
+                return retained;
             }
         }
 
