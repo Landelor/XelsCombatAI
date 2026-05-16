@@ -99,6 +99,8 @@ public sealed class Plugin : IDalamudPlugin
             mobilityDecisionEvaluator,
             dashStyleController,
             facingController,
+            rotationSolverActions,
+            () => aoePackPositioningController.RsrHenchedActive,
             () => aoePackPositioningController.Status.TrashPull);
         var escapeGapCloserController = new EscapeGapCloserController(
             this.config,

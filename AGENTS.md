@@ -99,8 +99,8 @@ Notes:
 
 - The project targets `net10.0-windows8.0` through `Dalamud.NET.Sdk/15.0.0`.
 - On Linux, set `DALAMUD_HOME` to a directory containing Dalamud dev assemblies before building.
-- Local non-CI builds reference ECommons at `../../AutoDuty/ECommons/ECommons/ECommons.csproj`.
-- CI builds reference ECommons at `../ECommons/ECommons.csproj` after checkout by the release workflow.
+- Builds reference ECommons at `external/ECommons/ECommons/ECommons.csproj`.
+- GitHub Actions and `external/fetch-sources.sh` should keep that repo-local external checkout populated.
 - There is currently no test project. Prefer `dotnet build` as the minimum validation after code changes.
 - Run `dotnet restore` when dependency, SDK, target framework, or project-file changes could affect restore output.
 - Run `scripts/package-release.sh` only for release/package changes or when packaging behavior may have changed.

@@ -25,7 +25,10 @@ var tests = new (string Name, Action Body)[]
     ("configuration logging defaults/reset", ConfigurationLoggingDefaultsAndReset),
     ("configuration tank lead defaults/reset", ConfigurationTankLeadDefaultsAndReset),
     ("friendly anchor dash requires meaningful gain", FriendlyAnchorDashRequiresMeaningfulGain),
+    ("gap closer follows RSR auto target", GapCloserFollowsRsrAutoTarget),
+    ("hostile relay dash requires target momentum", HostileRelayDashRequiresTargetMomentum),
     ("healer coverage restores single missing member", HealerCoverageRestoresSingleMissingMember),
+    ("healer coverage uses stable natural centers", HealerCoverageUsesStableNaturalCenters),
     ("healer coverage catches up for party-saving AoE heals", HealerCoverageCatchesUpForPartySavingAoeHeals),
     ("healer coverage catches up from critical party isolation", HealerCoverageCatchesUpFromCriticalPartyIsolation),
     ("healer coverage combines with forbidden zones", HealerCoverageCombinesWithForbiddenZones),
@@ -345,23 +348,115 @@ static void FriendlyAnchorDashRequiresMeaningfulGain()
             out _),
         "meaningful uptime anchor is allowed");
 
-    AssertTrue(
+    AssertFalse(
         GapCloserController.ShouldUseFriendlyAnchorDash(
             moveDistance: 3f,
             safetyGain: 1f,
             uptimeGain: 0f,
             pathGain: 0f,
             out _),
-        "safety anchor can still be short");
+        "short ally safety anchor should not spend a dash");
 
-    AssertTrue(
+    AssertFalse(
         GapCloserController.ShouldUseFriendlyAnchorDash(
             moveDistance: 3f,
             safetyGain: 0f,
             uptimeGain: 0f,
             pathGain: 1f,
             out _),
-        "path recovery anchor can still be short");
+        "short ally path recovery anchor should not spend a dash");
+
+    AssertTrue(
+        GapCloserController.ShouldUseFriendlyAnchorDash(
+            moveDistance: 6.5f,
+            safetyGain: 1f,
+            uptimeGain: 0f,
+            pathGain: 0f,
+            out _),
+        "meaningful-distance safety anchor is allowed");
+
+    AssertTrue(
+        GapCloserController.ShouldUseFriendlyAnchorDash(
+            moveDistance: 6.5f,
+            safetyGain: 0f,
+            uptimeGain: 0f,
+            pathGain: 1f,
+            out _),
+        "meaningful-distance path recovery anchor is allowed");
+}
+
+static void GapCloserFollowsRsrAutoTarget()
+{
+    AssertTrue(
+        GapCloserController.ShouldUseRsrActionTarget(
+            rsrHenchedActive: false,
+            actionAvailable: true,
+            actionIsFriendly: false,
+            actionPrimaryTargetId: 0x1234,
+            currentTargetMatchesAction: false),
+        "RSR Auto enemy target mismatch should realign the gap closer target");
+
+    AssertFalse(
+        GapCloserController.ShouldUseRsrActionTarget(
+            rsrHenchedActive: true,
+            actionAvailable: true,
+            actionIsFriendly: false,
+            actionPrimaryTargetId: 0x1234,
+            currentTargetMatchesAction: false),
+        "Henched target control remains authoritative");
+
+    AssertFalse(
+        GapCloserController.ShouldUseRsrActionTarget(
+            rsrHenchedActive: false,
+            actionAvailable: true,
+            actionIsFriendly: true,
+            actionPrimaryTargetId: 0x1234,
+            currentTargetMatchesAction: false),
+        "friendly RSR actions do not retarget offensive gap closers");
+
+    AssertFalse(
+        GapCloserController.ShouldUseRsrActionTarget(
+            rsrHenchedActive: false,
+            actionAvailable: true,
+            actionIsFriendly: false,
+            actionPrimaryTargetId: 0x1234,
+            currentTargetMatchesAction: true),
+        "matching selected target does not need RSR realignment");
+}
+
+static void HostileRelayDashRequiresTargetMomentum()
+{
+    AssertTrue(
+        GapCloserController.ShouldUseHostileRelayDash(
+            playerPosition: Vector3.Zero,
+            playerRadius: 0f,
+            landingPosition: new Vector3(15f, 0f, 0f),
+            intendedTargetPosition: new Vector3(30f, 0f, 0f),
+            intendedTargetRadius: 0f,
+            out _),
+        "relay landing between player and intended target should be allowed");
+
+    AssertFalse(
+        GapCloserController.ShouldUseHostileRelayDash(
+            playerPosition: Vector3.Zero,
+            playerRadius: 0f,
+            landingPosition: new Vector3(0f, 0f, 15f),
+            intendedTargetPosition: new Vector3(30f, 0f, 0f),
+            intendedTargetRadius: 0f,
+            out var wrongDirectionReason),
+        "relay landing sideways should not be allowed");
+    AssertContains("gain", wrongDirectionReason, "sideways relay rejection reason");
+
+    AssertFalse(
+        GapCloserController.ShouldUseHostileRelayDash(
+            playerPosition: Vector3.Zero,
+            playerRadius: 0f,
+            landingPosition: new Vector3(2f, 0f, 0f),
+            intendedTargetPosition: new Vector3(30f, 0f, 0f),
+            intendedTargetRadius: 0f,
+            out var lowGainReason),
+        "relay landing needs meaningful progress toward the intended target");
+    AssertContains("low target gain", lowGainReason, "low-gain relay rejection reason");
 }
 
 static void HealerCoverageRestoresSingleMissingMember()
@@ -391,6 +486,37 @@ static void HealerCoverageRestoresSingleMissingMember()
         "full coverage restore should stay distance bounded");
 }
 
+static void HealerCoverageUsesStableNaturalCenters()
+{
+    var player = Vector2.Zero;
+    var members = new[]
+    {
+        new Vector2(-100f, 0f),
+        new Vector2(30f, 0f),
+        new Vector2(34f, 0f),
+        new Vector2(36f, 0f)
+    };
+
+    var center = HealerAoePositioningController.SelectBestCenter(player, members, tankPosition: null);
+    AssertTrue(
+        Vector2.Distance(center, new Vector2(100f / 3f, 0f)) < 0.01f,
+        "coverage center should prefer the covered group centroid over standing on a party member");
+
+    var previous = center;
+    var shiftedMembers = new[]
+    {
+        new Vector2(-100f, 0f),
+        new Vector2(31f, 0f),
+        new Vector2(35f, 0f),
+        new Vector2(37f, 0f)
+    };
+
+    var retained = HealerAoePositioningController.SelectBestCenter(player, shiftedMembers, tankPosition: null, previous);
+    AssertTrue(
+        Vector2.Distance(retained, previous) < 0.01f,
+        "equivalent coverage should retain the previous center instead of jumping to another party member");
+}
+
 static void HealerCoverageCatchesUpForPartySavingAoeHeals()
 {
     var action = new RsrAoeActionSnapshot(
@@ -414,14 +540,23 @@ static void HealerCoverageCatchesUpForPartySavingAoeHeals()
         HealerAoePositioningController.IsPartyAoeHealAction(action),
         "friendly self-centered AoE heal should be recognized");
 
-    AssertTrue(
+    AssertFalse(
         HealerAoePositioningController.ShouldCatchUpForPartyAoeHeal(
             currentCoveredCount: 4,
             bestCoveredCount: 7,
             totalMembers: 7,
             distanceToCenter: 38f,
             partyAoeHealPending: true),
-        "party-saving AoE heals should allow safe cross-arena catch-up");
+        "routine party AoE heal catch-up should not chase cross-arena");
+
+    AssertTrue(
+        HealerAoePositioningController.ShouldCatchUpForPartyAoeHeal(
+            currentCoveredCount: 4,
+            bestCoveredCount: 7,
+            totalMembers: 7,
+            distanceToCenter: 24f,
+            partyAoeHealPending: true),
+        "party-saving AoE heals can take a bounded catch-up move");
 
     AssertFalse(
         HealerAoePositioningController.ShouldCatchUpForPartyAoeHeal(
@@ -519,6 +654,31 @@ static void PackMovementCombinesWithForbiddenZones()
 
 static void MultiTargetLargeTrashRemainsTrashContext()
 {
+    AssertTrue(
+        AoePackPositioningController.IsPackLikeTrashContext(
+            bossModEncounterActive: false,
+            targetHasBossModule: true,
+            effectivePackTargetCount: 2),
+        "two visible enemies remain trash even when the current target has a BMR module");
+
+    AssertFalse(
+        AoePackPositioningController.ShouldUseBossModuleContext(
+            bossModEncounterActive: false,
+            targetHasBossModule: true,
+            packLikeTrashContext: true,
+            hitboxBossLikeContext: true,
+            previousBossLikeCombatActive: true),
+        "multi-target BMR-tagged trash clears sticky boss context");
+
+    AssertTrue(
+        AoePackPositioningController.ShouldUseBossModuleContext(
+            bossModEncounterActive: false,
+            targetHasBossModule: true,
+            packLikeTrashContext: false,
+            hitboxBossLikeContext: false,
+            previousBossLikeCombatActive: false),
+        "single target with a BMR module remains boss-like");
+
     AssertTrue(
         AoePackPositioningController.IsPackLikeTrashContext(
             bossModEncounterActive: false,

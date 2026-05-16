@@ -92,13 +92,8 @@ if [[ "$RUN_TOOLS" -eq 1 && "$RUN_TOOL_TESTS" -eq 1 ]]; then
 fi
 
 if [[ "$NEEDS_PLUGIN_PROJECT" -eq 1 ]]; then
-  LOCAL_ECOMMONS="$ROOT/../AutoDuty/ECommons/ECommons/ECommons.csproj"
-  CI_ECOMMONS="$ROOT/ECommons/ECommons.csproj"
-  if [[ "${CI:-}" == "true" ]]; then
-    [[ -f "$CI_ECOMMONS" ]] || fail "CI=true but ECommons was not found at '$CI_ECOMMONS'."
-  else
-    [[ -f "$LOCAL_ECOMMONS" ]] || fail "ECommons was not found at '$LOCAL_ECOMMONS'. Clone AutoDuty next to this repo or set CI=true with ECommons at '$CI_ECOMMONS'."
-  fi
+  ECOMMONS_PROJECT="$ROOT/external/ECommons/ECommons/ECommons.csproj"
+  [[ -f "$ECOMMONS_PROJECT" ]] || fail "ECommons was not found at '$ECOMMONS_PROJECT'. Run external/fetch-sources.sh to clone or refresh external references."
 fi
 
 if [[ "$RUN_TOOLS" -eq 1 ]]; then

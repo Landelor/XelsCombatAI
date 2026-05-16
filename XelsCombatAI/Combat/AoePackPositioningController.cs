@@ -121,7 +121,7 @@ internal sealed class AoePackPositioningController(
     private const float CandidateMovementThreshold = 2f;
     private const float SuggestionMovementThreshold = 2f;
     private const float CentroidMovementThreshold = 3f;
-    private const float FluidPackFollowMovementThreshold = 1f;
+    private const float FluidPackFollowMovementThreshold = 2f;
     private const float FluidPackFollowMinimumSpeed = 1.25f;
     private const float FluidPackFollowSlack = 1.5f;
     private const float DominantPackClusterRadius = 10f;
@@ -859,8 +859,8 @@ internal sealed class AoePackPositioningController(
         bool targetHasBossModule,
         int effectivePackTargetCount)
     {
+        _ = targetHasBossModule;
         return !bossModEncounterActive &&
-               !targetHasBossModule &&
                effectivePackTargetCount >= 2;
     }
 
@@ -871,7 +871,7 @@ internal sealed class AoePackPositioningController(
         bool hitboxBossLikeContext,
         bool previousBossLikeCombatActive)
     {
-        if (bossModEncounterActive || targetHasBossModule)
+        if (bossModEncounterActive)
         {
             return true;
         }
@@ -879,6 +879,11 @@ internal sealed class AoePackPositioningController(
         if (packLikeTrashContext)
         {
             return false;
+        }
+
+        if (targetHasBossModule)
+        {
+            return true;
         }
 
         return hitboxBossLikeContext || previousBossLikeCombatActive;

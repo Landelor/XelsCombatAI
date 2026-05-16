@@ -44,7 +44,8 @@ internal sealed class HealerAoePositioningController(
     private const float MaxConvenienceMoveDistance = 6f;
     private const float MaxTankCoverageRestoreDistance = 4.5f;
     private const float MaxSingleMemberFullCoverageMoveDistance = 6f;
-    private const float MaxPartySaveCatchUpMoveDistance = 60f;
+    private const float MaxCriticalCoverageCatchUpMoveDistance = 60f;
+    private const float MaxPartyAoeHealCatchUpMoveDistance = 30f;
     private const float MinimumPartyAoeHealEffectRange = 8f;
     private const int MinimumCoverageGain = 2;
     private const float PreferredScore = GoalZoneScorePolicy.NormalPreference;
@@ -204,8 +205,10 @@ internal sealed class HealerAoePositioningController(
         var boundedTankRestore = restoresTankCoverage &&
                                  plan.DistanceToCenter <= MaxTankCoverageRestoreDistance;
         var shouldMove = strongCoverageGain || restoresFullCoverage || criticalCoverageCatchUp || partyAoeHealCatchUp || boundedTankRestore;
-        var maxMoveDistance = criticalCoverageCatchUp || partyAoeHealCatchUp
-            ? MaxPartySaveCatchUpMoveDistance
+        var maxMoveDistance = criticalCoverageCatchUp
+            ? MaxCriticalCoverageCatchUpMoveDistance
+            : partyAoeHealCatchUp
+            ? MaxPartyAoeHealCatchUpMoveDistance
             : MaxConvenienceMoveDistance;
         var priority = criticalCoverageCatchUp || partyAoeHealCatchUp
             ? BossModGoalPriority.DefensiveMechanic
@@ -287,7 +290,7 @@ internal sealed class HealerAoePositioningController(
         var currentCovered = CountCovered(playerPos, allPositions);
         var currentCoversTank = tankPosition.HasValue &&
                                 Vector2.DistanceSquared(playerPos, tankPosition.Value) <= CoverageRadiusSquared;
-        var bestCenter = SelectBestCenter(playerPos, allPositions, tankPosition);
+        var bestCenter = SelectBestCenter(playerPos, allPositions, tankPosition, this.lastPlan?.OptimalCenter);
         var bestCovered = GetCoveredMembers(bestCenter, allPositions);
         var bestCoversTank = tankPosition.HasValue &&
                              Vector2.DistanceSquared(bestCenter, tankPosition.Value) <= CoverageRadiusSquared;
@@ -322,7 +325,7 @@ internal sealed class HealerAoePositioningController(
         return average / members.Count;
     }
 
-    private static Vector2 SelectBestCenter(Vector2 playerPosition, IReadOnlyList<Vector2> members, Vector2? tankPosition)
+    internal static Vector2 SelectBestCenter(Vector2 playerPosition, IReadOnlyList<Vector2> members, Vector2? tankPosition, Vector2? previousCenter = null)
     {
         var best = playerPosition;
         var bestCovered = CountCovered(best, members);
@@ -347,7 +350,62 @@ internal sealed class HealerAoePositioningController(
             }
         }
 
+        var playerIsAlreadyBest = Vector2.DistanceSquared(best, playerPosition) <= 0.25f;
+        if (!playerIsAlreadyBest && TrySelectNaturalCoverageCenter(best, members, tankPosition, out var naturalCenter))
+        {
+            best = naturalCenter;
+        }
+
+        if (!playerIsAlreadyBest &&
+            previousCenter.HasValue &&
+            ShouldRetainPreviousCenter(previousCenter.Value, best, members, tankPosition))
+        {
+            best = previousCenter.Value;
+        }
+
         return best;
+    }
+
+    private static bool TrySelectNaturalCoverageCenter(
+        Vector2 selectedCenter,
+        IReadOnlyList<Vector2> members,
+        Vector2? tankPosition,
+        out Vector2 naturalCenter)
+    {
+        naturalCenter = selectedCenter;
+        var selectedCovered = GetCoveredMembers(selectedCenter, members);
+        if (selectedCovered.Count <= 1)
+        {
+            return false;
+        }
+
+        var candidate = AveragePosition(selectedCovered);
+        if (CountCovered(candidate, members) < selectedCovered.Count)
+        {
+            return false;
+        }
+
+        if (CoversTank(selectedCenter, tankPosition) && !CoversTank(candidate, tankPosition))
+        {
+            return false;
+        }
+
+        naturalCenter = candidate;
+        return true;
+    }
+
+    private static bool ShouldRetainPreviousCenter(
+        Vector2 previousCenter,
+        Vector2 selectedCenter,
+        IReadOnlyList<Vector2> members,
+        Vector2? tankPosition)
+    {
+        if (CountCovered(previousCenter, members) < CountCovered(selectedCenter, members))
+        {
+            return false;
+        }
+
+        return !CoversTank(selectedCenter, tankPosition) || CoversTank(previousCenter, tankPosition);
     }
 
     private static IEnumerable<Vector2> EnumerateCoverageCenters(Vector2 playerPosition, IReadOnlyList<Vector2> members)
@@ -375,6 +433,12 @@ internal sealed class HealerAoePositioningController(
         }
 
         return covered;
+    }
+
+    private static bool CoversTank(Vector2 candidate, Vector2? tankPosition)
+    {
+        return tankPosition.HasValue &&
+               Vector2.DistanceSquared(candidate, tankPosition.Value) <= CoverageRadiusSquared;
     }
 
     private static IReadOnlyList<Vector2> GetCoveredMembers(Vector2 candidate, IReadOnlyList<Vector2> members)
@@ -467,7 +531,7 @@ internal sealed class HealerAoePositioningController(
                currentCoveredCount <= criticalCoveredThreshold &&
                bestCoveredCount >= partyClusterThreshold &&
                bestCoveredCount > currentCoveredCount &&
-               distanceToCenter <= MaxPartySaveCatchUpMoveDistance;
+               distanceToCenter <= MaxCriticalCoverageCatchUpMoveDistance;
     }
 
     internal static bool ShouldCatchUpForPartyAoeHeal(
@@ -482,7 +546,7 @@ internal sealed class HealerAoePositioningController(
                totalMembers - currentCoveredCount >= 2 &&
                bestCoveredCount >= Math.Max(1, totalMembers - 1) &&
                bestCoveredCount > currentCoveredCount &&
-               distanceToCenter <= MaxPartySaveCatchUpMoveDistance;
+               distanceToCenter <= MaxPartyAoeHealCatchUpMoveDistance;
     }
 
     internal static bool IsPartyAoeHealAction(RsrAoeActionSnapshot action)
@@ -601,6 +665,7 @@ internal sealed class HealerAoePositioningController(
         }
 
         public float DistanceToCenter => this.distanceToCenter;
+        public Vector2 OptimalCenter => this.optimalCenter;
         public int BestCoveredCount => this.coveredMembers.Count;
         public int CurrentCoveredCount => this.currentCoveredCount;
         public int TotalMembers => this.allMembers.Count;
