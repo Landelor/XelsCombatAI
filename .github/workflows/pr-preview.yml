@@ -2,7 +2,7 @@ name: PR Preview
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [closed]
 
 permissions:
   contents: write
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   preview:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.merged == true
     uses: XelsPlugins/XelsDalamud.Workflows/.github/workflows/plugin-pr-preview.yml@main
     with:
       plugin_project_path: XelsCombatAI/XelsCombatAI.csproj
@@ -19,4 +19,3 @@ jobs:
       internal_name: XelsCombatAI
     secrets:
       feed_token: ${{ secrets.XELS_DALAMUD_FEED_TOKEN }}
-
