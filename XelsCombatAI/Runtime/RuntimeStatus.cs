@@ -66,7 +66,6 @@ internal sealed record RuntimeStatus(
     PassageOfArmsPositioningStatus PassageOfArmsPositioning,
     HealerAoePositioningStatus HealerCoveragePositioning,
     SurvivabilityZonePositioningStatus SurvivabilityZonePositioning,
-    AggroSafetyStatus AggroSafety,
     RedMageMeleeComboStatus RedMageMeleeCombo,
     string ManualMovementInput,
     bool AutomatedMovementSuppressed,

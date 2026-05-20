@@ -15,40 +15,6 @@ using XelsCombatAI.Integrations;
 
 namespace XelsCombatAI.Combat;
 
-internal sealed record AoePackPositioningStatus(
-    string HookState,
-    string LastReason,
-    string RsrStatus,
-    string RsrReflectionDiagnostics,
-    uint ActionId,
-    string ActionName,
-    string Shape,
-    int CurrentHits,
-    int BestHits,
-    bool Injected,
-    bool RsrHenchedActive,
-    StateCommandType RsrSnapshotMode,
-    string RsrLastRestoreStatus,
-    int PriorityTargetCount,
-    Vector3? Candidate,
-    Vector3? PrimaryTarget,
-    bool CandidateInjected,
-    TrashPullDiagnostics TrashPull);
-
-internal sealed record AoePackOverlaySnapshot(
-    uint ActionId,
-    string ActionName,
-    string Shape,
-    Vector3 Candidate,
-    Vector3 PrimaryTarget,
-    float Radius,
-    float HalfWidth,
-    int CurrentHits,
-    int BestHits,
-    IReadOnlyList<AoePackOverlayTarget> Targets);
-
-internal sealed record AoePackOverlayTarget(Vector3 Position, float Radius, bool Hit, bool InsideAvoidedHitbox = false, string? AvoidanceLabel = null);
-
 internal sealed class AoePackPositioningController(
     Configuration config,
     DalamudServices services,
@@ -75,6 +41,7 @@ internal sealed class AoePackPositioningController(
     private MemberInfo? actorInstanceIdField;
     private FieldInfo? wposXField;
     private FieldInfo? wposZField;
+    private ConstructorInfo? wposConstructor;
     private ConstructorInfo? wdirConstructor;
     private MethodInfo? boundsContainsMethod;
     private Type? resolvedHintsType;
@@ -112,6 +79,12 @@ internal sealed class AoePackPositioningController(
     private int lastSuggestionBestHits;
     private Vector2 lastSuggestionCandidate;
     private DateTime lastSuggestionHeldUntil = DateTime.MinValue;
+    private AoeGcdMoveDecision? aoeGcdMoveDecision;
+    private long aoeGcdWindowId;
+    private long evaluatedAoeGcdWindowId = -1;
+    private long safetyReplannedAoeGcdWindowId = -1;
+    private float lastObservedGcdElapsed = -1f;
+    private DateTime fallbackAoeGcdWindowStartedAt = DateTime.MinValue;
     private Vector2 lastInjectedCentroid;
     private Delegate? lastCentroidGoalDelegate;
     private Vector2 lastPackCentroid;
@@ -122,8 +95,10 @@ internal sealed class AoePackPositioningController(
     private static readonly TimeSpan CandidateDebounce = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan SuggestionHold = TimeSpan.FromMilliseconds(900);
     private static readonly TimeSpan TargetSwitchCooldown = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan FallbackGcdWindow = TimeSpan.FromMilliseconds(2500);
     private const float CandidateMovementThreshold = 2f;
     private const float SuggestionMovementThreshold = 2f;
+    private const float GcdElapsedResetTolerance = 0.2f;
     private const float CentroidMovementThreshold = 3f;
     private const float FluidPackFollowMovementThreshold = 2f;
     private const float FluidPackFollowMinimumSpeed = 1.25f;
@@ -136,9 +111,6 @@ internal sealed class AoePackPositioningController(
     private const float MaxPackCentroidStep = 15f;
     private const float MaxObservedPackSpeed = 8f;
     private const float BossLikeHitboxRadius = 4f;
-    private const float MarginalAoeGainMaxMoveDistance = 4.5f;
-    private const float ModerateAoeGainMaxMoveDistance = 7f;
-    private const float StrongAoeGainMaxMoveDistance = 10f;
     private const float LongRangePackAoeThreshold = 8f;
     private const float ProactivePackAoeMaxBodyRange = 8f;
     private const float LongRangeCasterPackFollowDistanceFactor = 0.75f;
@@ -211,6 +183,7 @@ internal sealed class AoePackPositioningController(
         this.actorInstanceIdField = null;
         this.wposXField = null;
         this.wposZField = null;
+        this.wposConstructor = null;
         this.wdirConstructor = null;
         this.boundsContainsMethod = null;
         this.resolvedHintsType = null;
@@ -244,6 +217,12 @@ internal sealed class AoePackPositioningController(
         this.lastSuggestionBestHits = 0;
         this.lastSuggestionCandidate = default;
         this.lastSuggestionHeldUntil = DateTime.MinValue;
+        this.aoeGcdMoveDecision = null;
+        this.aoeGcdWindowId = 0;
+        this.evaluatedAoeGcdWindowId = -1;
+        this.safetyReplannedAoeGcdWindowId = -1;
+        this.lastObservedGcdElapsed = -1f;
+        this.fallbackAoeGcdWindowStartedAt = DateTime.MinValue;
         this.lastInjectedCentroid = default;
         this.lastCentroidGoalDelegate = null;
         this.lastPackCentroid = default;
@@ -260,7 +239,7 @@ internal sealed class AoePackPositioningController(
         this.lastInjected = false;
         this.lastOverlay = null;
         var packCenterMovementEnabled = this.IsPackCenterMovementEnabled();
-        if (!config.Enabled || (!config.ManageAoePackPositioning && !config.KeepTrashTargetSelected && !packCenterMovementEnabled))
+        if (!config.Enabled || (!config.ManageAoePackPositioning && !config.KeepTrashTargetSelected))
         {
             this.lastReason = "disabled";
             this.trashPullState.Reset("disabled");
@@ -285,7 +264,7 @@ internal sealed class AoePackPositioningController(
 
         var priorityTargets = this.ReadPriorityTargets(hints);
         var potentialTargets = priorityTargets.Count < 2 ? this.ReadPotentialTargets(hints) : [];
-        if (config.ManageTargetUptime && services.TargetManager.Target == null)
+        if (config.KeepTrashTargetSelected && services.TargetManager.Target == null)
         {
             this.TrySelectInitialCombatTarget(priorityTargets.Count > 0 ? priorityTargets : potentialTargets);
         }
@@ -314,6 +293,7 @@ internal sealed class AoePackPositioningController(
         var bossModuleContext = this.bossLikeCombatActive;
         var targets = bossModuleContext ? priorityTargets : effectivePackTargets;
         var pathfindBounds = this.CreatePathfindBoundsSnapshot(hints);
+        var dangerZones = this.CreateDangerZoneSnapshot(hints);
         this.lastPriorityTargetCount = targets.Count;
         var inAoeSituation = targets.Count >= 2 && !bossModuleContext;
         var forcedSafetyActive = this.BossModForcedMovementActive(hints);
@@ -361,11 +341,6 @@ internal sealed class AoePackPositioningController(
             this.lastCurrentHits = 0;
             this.lastBestHits = 0;
             this.lastReason = mechanicSafetyActive ? "BossMod mechanic safety active" : "BMR movement active";
-            return;
-        }
-
-        if (this.TryInjectTankLeadMovement(pathfindBounds, trashDiagnostics, targets, contributions))
-        {
             return;
         }
 
@@ -529,6 +504,8 @@ internal sealed class AoePackPositioningController(
         var radius = Math.Max(1f, action.EffectRange);
         var castRange = Math.Min(Math.Max(action.Range, radius), 30f);
         var playerPos = new Vector2(player.Position.X, player.Position.Z);
+        var now = DateTime.UtcNow;
+        var gcdWindowId = this.UpdateAoeGcdWindow(action, now);
 
         // For directional shapes try every in-combat target as primary to find the best orientation.
         // For circles the primary target only matters for target resolution, not direction.
@@ -567,7 +544,7 @@ internal sealed class AoePackPositioningController(
                 : (Vector2?)null;
             var candidate = plan.FindBestCandidate(
                 playerPos,
-                candidate => CandidateInsidePathfindBounds(pathfindBounds, candidate),
+                candidate => CandidateAllowed(pathfindBounds, dangerZones, candidate),
                 retainedCandidate);
             var primaryIsCurrentTarget = primary.InstanceId == currentTargetId;
 
@@ -608,6 +585,17 @@ internal sealed class AoePackPositioningController(
         this.lastBestHits = bestScore.Hits;
         this.lastBestPrimaryId = bestPrimaryId;
 
+        if (this.TryUseAoeGcdMoveDecision(gcdWindowId, action, player, playerPos, pathfindBounds, dangerZones, targets, contributions))
+        {
+            return;
+        }
+
+        if (this.evaluatedAoeGcdWindowId == gcdWindowId)
+        {
+            this.lastReason = "AoE move already chosen this GCD";
+            return;
+        }
+
         if (targetPickingEnabled &&
             bestStationaryPlan != null &&
             bestStationaryHits >= 2 &&
@@ -638,11 +626,11 @@ internal sealed class AoePackPositioningController(
             this.lastReason = "no meaningful AoE improvement";
             this.pendingCandidateSince = DateTime.MinValue;
             this.ClearAoeCandidateGoal();
-            if ((config.ManageTargetUptime || config.PickBetterAoeTarget || config.KeepTrashTargetSelected) && this.rsrHenchedActive)
+            if ((packCenterMovementEnabled || config.PickBetterAoeTarget || config.KeepTrashTargetSelected) && this.rsrHenchedActive)
             {
                 if (config.PickBetterAoeTarget || config.KeepTrashTargetSelected)
                     this.UpdateTarget(bestPrimaryId, targets);
-                if (config.ManageTargetUptime)
+                if (packCenterMovementEnabled)
                     this.InjectCentroidHold(hints, pathfindBounds, targets, action, inAoeSituation, contributions);
             }
             else if (!config.KeepTrashTargetSelected && !config.PickBetterAoeTarget)
@@ -680,11 +668,11 @@ internal sealed class AoePackPositioningController(
         if (goalZones == null)
         {
             this.lastReason = "BMR goal zone list unavailable";
-            if ((config.ManageTargetUptime || config.PickBetterAoeTarget || config.KeepTrashTargetSelected) && this.rsrHenchedActive)
+            if ((packCenterMovementEnabled || config.PickBetterAoeTarget || config.KeepTrashTargetSelected) && this.rsrHenchedActive)
             {
                 if (config.PickBetterAoeTarget || config.KeepTrashTargetSelected)
                     this.UpdateTarget(bestPrimaryId, targets);
-                if (config.ManageTargetUptime)
+                if (packCenterMovementEnabled)
                     this.InjectCentroidHold(hints, pathfindBounds, targets, action, inAoeSituation, contributions);
             }
             else if (!config.KeepTrashTargetSelected && !config.PickBetterAoeTarget)
@@ -692,74 +680,35 @@ internal sealed class AoePackPositioningController(
             return;
         }
 
-        var now = DateTime.UtcNow;
-        var pendingCandidateMoved = this.pendingCandidateSince != DateTime.MinValue &&
-                                    Vector2.Distance(bestScore.Position, this.pendingCandidate) > CandidateMovementThreshold;
-        if (this.pendingCandidateSince == DateTime.MinValue ||
-            action.AdjustedActionId != this.pendingCandidateActionId ||
-            bestPrimaryId != this.pendingCandidatePrimaryId ||
-            bestScore.Hits != this.pendingCandidateHits ||
-            pendingCandidateMoved)
+        if (ShouldSkipAoeRepositionForGcdTiming(candidateMoveDistance, action.GcdRemaining, action.GcdTotal, out var timingSkipReason))
         {
-            this.pendingCandidate = bestScore.Position;
-            this.pendingCandidateActionId = action.AdjustedActionId;
-            this.pendingCandidatePrimaryId = bestPrimaryId;
-            this.pendingCandidateHits = bestScore.Hits;
-            this.pendingCandidateSince = now;
-        }
-
-        var candidateAge = now - this.pendingCandidateSince;
-        var candidateStable = candidateAge >= CandidateDebounce;
-        var actionOrPrimaryChanged = action.AdjustedActionId != this.lastInjectedActionId ||
-                                     bestPrimaryId != this.lastInjectedPrimaryId;
-        var candidateChanged = Vector2.Distance(this.pendingCandidate, this.lastInjectedCandidate) > CandidateMovementThreshold
-                               || this.pendingCandidateHits != this.lastInjectedHits ||
-                               actionOrPrimaryChanged;
-        var candidateNeedsDelegate = this.lastInjectedGoalDelegate == null || candidateChanged;
-        if (candidateNeedsDelegate && !candidateStable && actionOrPrimaryChanged)
-        {
-            this.ExpireAoeSuggestion(now);
-            this.lastReason = string.Create(
-                CultureInfo.InvariantCulture,
-                $"candidate stabilising {Math.Max(0d, candidateAge.TotalSeconds):0.00}/{CandidateDebounce.TotalSeconds:0.00}s");
+            this.pendingCandidateSince = DateTime.MinValue;
+            this.ClearAoeCandidateGoal();
+            this.evaluatedAoeGcdWindowId = gcdWindowId;
+            this.lastReason = timingSkipReason;
             return;
         }
 
-        if (candidateStable && candidateNeedsDelegate)
-        {
-            this.lastInjectedGoalDelegate = bestPlan.CreateGoalDelegate(this.resolvedWPosType!, this.wposXField!, this.wposZField!, this.lastCurrentHits);
-            this.lastInjectedCandidate = this.pendingCandidate;
-            this.lastInjectedHits = this.pendingCandidateHits;
-            this.lastInjectedActionId = action.AdjustedActionId;
-            this.lastInjectedPrimaryId = bestPrimaryId;
-            this.lastOverlay = bestPlan.CreateOverlay(action, this.pendingCandidate, this.lastCurrentHits, this.lastBestHits, player.Position.Y);
-        }
-
-        if (candidateStable)
-        {
-            var committedCandidate = this.lastInjectedGoalDelegate != null
-                ? this.lastInjectedCandidate
-                : this.pendingCandidate;
-            this.UpdateAoeSuggestion(bestPlan, action, committedCandidate, this.lastCurrentHits, this.lastBestHits, player.Position.Y, now);
-        }
-        else
-        {
-            this.ExpireAoeSuggestion(now);
-        }
-
-        if (this.lastInjectedGoalDelegate == null)
-        {
-            this.lastReason = string.Create(
-                CultureInfo.InvariantCulture,
-                $"candidate stabilising {Math.Max(0d, candidateAge.TotalSeconds):0.00}/{CandidateDebounce.TotalSeconds:0.00}s");
-            return;
-        }
-
-        var contributionCandidate = this.lastInjectedCandidate;
-        contributions.Add(new(this.lastInjectedGoalDelegate, BossModGoalPriority.ImmediateAction, "AoE pack", contributionCandidate, MechanicWhisperConfidence.Confident));
-        this.lastInjected = true;
-        this.lastOverlay ??= bestPlan.CreateOverlay(action, contributionCandidate, this.lastCurrentHits, this.lastBestHits, player.Position.Y);
-        this.lastReason = candidateStable && candidateChanged ? "goal injected" : "goal stable";
+        this.lastInjectedGoalDelegate = bestPlan.CreateGoalDelegate(this.resolvedWPosType!, this.wposXField!, this.wposZField!, this.lastCurrentHits);
+        this.lastInjectedCandidate = bestScore.Position;
+        this.lastInjectedHits = bestScore.Hits;
+        this.lastInjectedActionId = action.AdjustedActionId;
+        this.lastInjectedPrimaryId = bestPrimaryId;
+        this.lastOverlay = bestPlan.CreateOverlay(action, bestScore.Position, this.lastCurrentHits, this.lastBestHits, player.Position.Y);
+        this.aoeGcdMoveDecision = new(
+            gcdWindowId,
+            action.AdjustedActionId,
+            bestPrimaryId,
+            bestScore.Position,
+            this.lastCurrentHits,
+            this.lastBestHits,
+            this.lastInjectedGoalDelegate,
+            this.lastOverlay,
+            now);
+        this.evaluatedAoeGcdWindowId = gcdWindowId;
+        this.UpdateAoeSuggestion(bestPlan, action, bestScore.Position, this.lastCurrentHits, this.lastBestHits, player.Position.Y, now);
+        this.InjectAoeGcdMoveDecision(this.aoeGcdMoveDecision, contributions);
+        this.lastReason = "goal chosen for this GCD";
 
         // Reactive RSR targeting: Henched only after a goal is injected (improvement found).
         if (config.PickBetterAoeTarget || config.KeepTrashTargetSelected)
@@ -793,6 +742,120 @@ internal sealed class AoePackPositioningController(
             System.Linq.Expressions.Expression.Constant(0f));
         var delegateType = typeof(Func<,>).MakeGenericType(wposType, typeof(float));
         return System.Linq.Expressions.Expression.Lambda(delegateType, score, parameter).Compile();
+    }
+
+    private long UpdateAoeGcdWindow(RsrAoeActionSnapshot action, DateTime now)
+    {
+        var newWindow = this.aoeGcdWindowId == 0;
+        if (AoeRepositionPolicy.HasReliableGcdTiming(action.GcdRemaining, action.GcdElapsed, action.GcdTotal))
+        {
+            if (this.lastObservedGcdElapsed >= 0f &&
+                action.GcdElapsed + GcdElapsedResetTolerance < this.lastObservedGcdElapsed)
+            {
+                newWindow = true;
+            }
+
+            this.lastObservedGcdElapsed = action.GcdElapsed;
+            this.fallbackAoeGcdWindowStartedAt = now.Subtract(TimeSpan.FromSeconds(Math.Max(0f, action.GcdElapsed)));
+        }
+        else
+        {
+            if (this.fallbackAoeGcdWindowStartedAt == DateTime.MinValue ||
+                now - this.fallbackAoeGcdWindowStartedAt >= FallbackGcdWindow)
+            {
+                newWindow = true;
+                this.fallbackAoeGcdWindowStartedAt = now;
+            }
+
+            this.lastObservedGcdElapsed = -1f;
+        }
+
+        if (newWindow)
+        {
+            this.aoeGcdWindowId++;
+            this.aoeGcdMoveDecision = null;
+            this.evaluatedAoeGcdWindowId = -1;
+            this.safetyReplannedAoeGcdWindowId = -1;
+        }
+
+        return this.aoeGcdWindowId;
+    }
+
+    private bool TryUseAoeGcdMoveDecision(
+        long gcdWindowId,
+        RsrAoeActionSnapshot action,
+        IBattleChara player,
+        Vector2 playerPos,
+        BossModPathfindBoundsSnapshot? pathfindBounds,
+        BossModDangerZoneSnapshot? dangerZones,
+        IReadOnlyCollection<TargetSnapshot> targets,
+        ICollection<BossModGoalContribution> contributions)
+    {
+        var decision = this.aoeGcdMoveDecision;
+        if (decision == null || decision.GcdWindowId != gcdWindowId)
+        {
+            return false;
+        }
+
+        if (decision.ActionId != action.AdjustedActionId)
+        {
+            this.aoeGcdMoveDecision = null;
+            this.evaluatedAoeGcdWindowId = gcdWindowId;
+            this.ClearAoeCandidateGoal();
+            this.lastReason = "AoE action changed after move decision";
+            return true;
+        }
+
+        if (!CandidateAllowed(pathfindBounds, dangerZones, decision.Candidate))
+        {
+            this.aoeGcdMoveDecision = null;
+            this.ClearAoeCandidateGoal();
+            if (this.safetyReplannedAoeGcdWindowId == gcdWindowId)
+            {
+                this.evaluatedAoeGcdWindowId = gcdWindowId;
+                this.lastReason = "AoE move candidate blocked by BMR danger";
+                return true;
+            }
+
+            this.safetyReplannedAoeGcdWindowId = gcdWindowId;
+            this.evaluatedAoeGcdWindowId = -1;
+            return false;
+        }
+
+        if (this.lastCurrentHits >= decision.BestHits ||
+            Vector2.Distance(playerPos, decision.Candidate) <= 0.75f)
+        {
+            this.aoeGcdMoveDecision = null;
+            this.evaluatedAoeGcdWindowId = gcdWindowId;
+            this.ClearAoeCandidateGoal();
+            this.lastReason = "AoE position reached for this GCD";
+            return true;
+        }
+
+        this.lastBestPrimaryId = decision.PrimaryId;
+        this.lastBestHits = Math.Max(this.lastBestHits, decision.BestHits);
+        this.lastInjectedGoalDelegate = decision.Goal;
+        this.lastInjectedCandidate = decision.Candidate;
+        this.lastInjectedHits = decision.BestHits;
+        this.lastInjectedActionId = decision.ActionId;
+        this.lastInjectedPrimaryId = decision.PrimaryId;
+        this.lastOverlay = decision.Overlay;
+        this.InjectAoeGcdMoveDecision(decision, contributions);
+        this.lastReason = "holding AoE move for this GCD";
+
+        if (config.PickBetterAoeTarget || config.KeepTrashTargetSelected)
+        {
+            this.ApplyRsrTargeting(decision.PrimaryId, targets);
+        }
+
+        return true;
+    }
+
+    private void InjectAoeGcdMoveDecision(AoeGcdMoveDecision decision, ICollection<BossModGoalContribution> contributions)
+    {
+        contributions.Add(new(decision.Goal, BossModGoalPriority.ImmediateAction, "AoE pack", decision.Candidate, MechanicWhisperConfidence.Confident));
+        this.lastInjected = true;
+        this.lastOverlay = decision.Overlay;
     }
 
     private bool BossModForbiddenSafetyActive(object hints)
@@ -1156,7 +1219,7 @@ internal sealed class AoePackPositioningController(
         }
     }
 
-    private bool IsPackCenterMovementEnabled() => config.ManageTargetUptime;
+    private bool IsPackCenterMovementEnabled() => config.ManageAoePackPositioning;
 
     private static bool ShouldSkipBodyReposition(RsrAoeActionSnapshot action)
     {
@@ -1214,6 +1277,7 @@ internal sealed class AoePackPositioningController(
     {
         this.lastSuggestion = null;
         this.lastInjectedGoalDelegate = null;
+        this.aoeGcdMoveDecision = null;
         this.pendingCandidate = default;
         this.pendingCandidateHits = 0;
         this.pendingCandidateActionId = 0;
@@ -1395,6 +1459,7 @@ internal sealed class AoePackPositioningController(
         }
 
         var radius = Math.Max(1f, jobRangeProvider.PackAoeRange);
+        var dangerZones = this.CreateDangerZoneSnapshot(hints);
         var targetArray = targets.ToArray();
         var plan = new GoalPlan(
             RsrAoeShape.Circle,
@@ -1412,7 +1477,7 @@ internal sealed class AoePackPositioningController(
             : (Vector2?)null;
         var candidate = plan.FindBestCandidate(
             playerPos,
-            candidate => CandidateInsidePathfindBounds(pathfindBounds, candidate),
+            candidate => CandidateAllowed(pathfindBounds, dangerZones, candidate),
             retainedCandidate);
         this.lastCurrentHits = currentHits;
         this.lastBestHits = candidate.Hits;
@@ -1545,6 +1610,7 @@ internal sealed class AoePackPositioningController(
         var primary = targets[0];
         var centroid = AverageTargets(targets);
         var engagementRange = aoeRange ?? (inAoeSituation ? jobRangeProvider.PackAoeRange : jobRangeProvider.EngagementRange);
+        var dangerZones = this.CreateDangerZoneSnapshot(hints);
         var useLongRangeCasterPullFollow = this.ShouldUseLongRangeCasterPullFollow(inAoeSituation, playerPos, centroid, engagementRange);
         if (useLongRangeCasterPullFollow)
         {
@@ -1565,7 +1631,7 @@ internal sealed class AoePackPositioningController(
 
         var requiredInRangeCount = RequiredPackEngagementTargets(inAoeSituation, engagementRange, targets.Count);
         if (!useLongRangeCasterPullFollow &&
-            this.TryInjectFluidPackFollow(pathfindBounds, targets, player, playerPos, centroid, packMotion, engagementRange, inAoeSituation, contributions))
+            this.TryInjectFluidPackFollow(pathfindBounds, dangerZones, targets, player, playerPos, centroid, packMotion, engagementRange, inAoeSituation, contributions))
         {
             return true;
         }
@@ -1580,7 +1646,7 @@ internal sealed class AoePackPositioningController(
         }
 
         if (useLongRangeCasterPullFollow &&
-            this.TryInjectFluidPackFollow(pathfindBounds, targets, player, playerPos, centroid, packMotion, engagementRange, inAoeSituation, contributions))
+            this.TryInjectFluidPackFollow(pathfindBounds, dangerZones, targets, player, playerPos, centroid, packMotion, engagementRange, inAoeSituation, contributions))
         {
             return true;
         }
@@ -1600,7 +1666,7 @@ internal sealed class AoePackPositioningController(
             : (Vector2?)null;
         var candidate = plan.FindBestCandidate(
             playerPos,
-            candidate => CandidateInsidePathfindBounds(pathfindBounds, candidate),
+            candidate => CandidateAllowed(pathfindBounds, dangerZones, candidate),
             retainedCandidate);
         if (candidate.Hits <= 0)
         {
@@ -1641,6 +1707,7 @@ internal sealed class AoePackPositioningController(
 
     private bool TryInjectFluidPackFollow(
         BossModPathfindBoundsSnapshot? pathfindBounds,
+        BossModDangerZoneSnapshot? dangerZones,
         List<TargetSnapshot> targets,
         IBattleChara player,
         Vector2 playerPos,
@@ -1684,18 +1751,18 @@ internal sealed class AoePackPositioningController(
             var projectedCandidate = projectedCentroid - direction * desiredTrailingDistance;
             var projectedHits = CountTargetsInRange(projectedCandidate, targets, engagementRange);
             var currentHits = CountTargetsInRange(candidate, targets, engagementRange);
-            if (projectedHits >= currentHits && CandidateInsidePathfindBounds(pathfindBounds, projectedCandidate))
+            if (projectedHits >= currentHits && CandidateAllowed(pathfindBounds, dangerZones, projectedCandidate))
             {
                 candidate = projectedCandidate;
             }
         }
 
-        if (!CandidateInsidePathfindBounds(pathfindBounds, candidate))
+        if (!CandidateAllowed(pathfindBounds, dangerZones, candidate))
         {
             candidate = centroid;
-            if (!CandidateInsidePathfindBounds(pathfindBounds, candidate))
+            if (!CandidateAllowed(pathfindBounds, dangerZones, candidate))
             {
-                this.lastReason = "moving pack follow destination outside BMR bounds";
+                this.lastReason = "moving pack follow destination outside BMR safe space";
                 return false;
             }
         }
@@ -1823,77 +1890,13 @@ internal sealed class AoePackPositioningController(
     }
 
     internal static bool ShouldSkipMarginalAoeReposition(int currentHits, int bestHits, int targetCount, float moveDistance, out string reason)
-    {
-        reason = string.Empty;
-        var gain = bestHits - currentHits;
-        if (gain <= 0 || targetCount <= 1)
-        {
-            return false;
-        }
+        => AoeRepositionPolicy.ShouldSkipMarginalAoeReposition(currentHits, bestHits, targetCount, moveDistance, out reason);
 
-        var goodEnoughHits = GoodEnoughTrashAoeHits(targetCount);
-        if (currentHits < goodEnoughHits)
-        {
-            return false;
-        }
-
-        var maxMoveDistance = gain switch
-        {
-            <= 1 => MarginalAoeGainMaxMoveDistance,
-            2 => ModerateAoeGainMaxMoveDistance,
-            _ => StrongAoeGainMaxMoveDistance
-        };
-        if (moveDistance <= maxMoveDistance)
-        {
-            return false;
-        }
-
-        reason = string.Create(
-            CultureInfo.InvariantCulture,
-            $"already good AoE coverage ({currentHits}/{targetCount}); skipped {moveDistance:0.0}y move for +{gain} hit");
-        return true;
-    }
+    internal static bool ShouldSkipAoeRepositionForGcdTiming(float moveDistance, float gcdRemaining, float gcdTotal, out string reason)
+        => AoeRepositionPolicy.ShouldSkipAoeRepositionForGcdTiming(moveDistance, gcdRemaining, gcdTotal, out reason);
 
     internal static bool ShouldSkipProactiveAoeReposition(int currentHits, int bestHits, int targetCount, out string reason)
-    {
-        reason = string.Empty;
-        var gain = bestHits - currentHits;
-        if (gain <= 0 || targetCount <= 1)
-        {
-            return false;
-        }
-
-        var goodEnoughHits = GoodEnoughTrashAoeHits(targetCount);
-        if (currentHits < goodEnoughHits || gain > 1)
-        {
-            return false;
-        }
-
-        reason = string.Create(
-            CultureInfo.InvariantCulture,
-            $"already good AoE prep coverage ({currentHits}/{targetCount}); skipped +{gain} hit");
-        return true;
-    }
-
-    private static int GoodEnoughTrashAoeHits(int targetCount)
-    {
-        if (targetCount <= 1)
-        {
-            return targetCount;
-        }
-
-        if (targetCount <= 3)
-        {
-            return targetCount;
-        }
-
-        if (targetCount <= 5)
-        {
-            return targetCount - 1;
-        }
-
-        return Math.Min(targetCount, Math.Max(4, (int)MathF.Ceiling(targetCount * 0.75f)));
-    }
+        => AoeRepositionPolicy.ShouldSkipProactiveAoeReposition(currentHits, bestHits, targetCount, out reason);
 
     private BossModPathfindBoundsSnapshot? CreatePathfindBoundsSnapshot(object hints)
     {
@@ -1920,9 +1923,35 @@ internal sealed class AoePackPositioningController(
             : null;
     }
 
+    private BossModDangerZoneSnapshot? CreateDangerZoneSnapshot(object hints)
+    {
+        if (this.forbiddenZonesField == null ||
+            this.temporaryObstaclesField == null ||
+            this.wposConstructor == null)
+        {
+            return null;
+        }
+
+        return BossModDangerZoneSnapshot.TryCreate(
+            hints,
+            this.forbiddenZonesField,
+            this.temporaryObstaclesField,
+            this.wposConstructor,
+            out var snapshot) &&
+            snapshot?.HasDangerZones == true
+            ? snapshot
+            : null;
+    }
+
     private static bool CandidateInsidePathfindBounds(BossModPathfindBoundsSnapshot? bounds, Vector2 candidate)
     {
         return bounds?.Contains(candidate) ?? true;
+    }
+
+    private static bool CandidateAllowed(BossModPathfindBoundsSnapshot? bounds, BossModDangerZoneSnapshot? dangerZones, Vector2 candidate)
+    {
+        return CandidateInsidePathfindBounds(bounds, candidate) &&
+               dangerZones?.Contains(candidate) != true;
     }
 
     private AoePackOverlayTarget[] CreateOverlayTargets(IEnumerable<TargetSnapshot> targets, float y, Vector2 candidate, bool hit)
@@ -1992,6 +2021,7 @@ internal sealed class AoePackPositioningController(
             this.actorInstanceIdField != null &&
             this.wposXField != null &&
             this.wposZField != null &&
+            this.wposConstructor != null &&
             this.wdirConstructor != null &&
             this.boundsContainsMethod != null)
         {
@@ -2019,6 +2049,7 @@ internal sealed class AoePackPositioningController(
         var instanceField = (MemberInfo?)actorType?.GetField("InstanceID", InstanceFlags) ?? actorType?.GetProperty("InstanceID", InstanceFlags);
         var xField = wposType?.GetField("X", InstanceFlags);
         var zField = wposType?.GetField("Z", InstanceFlags);
+        var wposConstructor = wposType?.GetConstructor([typeof(float), typeof(float)]);
         var wdirConstructor = wdirType?.GetConstructor([typeof(float), typeof(float)]);
         var boundsContainsMethod = wdirType == null
             ? null
@@ -2057,6 +2088,7 @@ internal sealed class AoePackPositioningController(
             instanceField == null ||
             xField == null ||
             zField == null ||
+            wposConstructor == null ||
             wdirConstructor == null ||
             boundsContainsMethod == null)
         {
@@ -2080,6 +2112,7 @@ internal sealed class AoePackPositioningController(
                 (instanceField == null, "Enemy.Actor.InstanceID"),
                 (xField == null, "BossMod.WPos.X"),
                 (zField == null, "BossMod.WPos.Z"),
+                (wposConstructor == null, "BossMod.WPos(float,float)"),
                 (wdirConstructor == null, "BossMod.WDir(float,float)"),
                 (boundsContainsMethod == null, "ArenaBounds.Contains"))}";
             return false;
@@ -2103,6 +2136,7 @@ internal sealed class AoePackPositioningController(
         this.actorInstanceIdField = (MemberInfo)instanceField;
         this.wposXField = xField;
         this.wposZField = zField;
+        this.wposConstructor = wposConstructor;
         this.wdirConstructor = wdirConstructor;
         this.boundsContainsMethod = boundsContainsMethod;
         return true;
@@ -2323,81 +2357,12 @@ internal sealed class AoePackPositioningController(
             automatedMovementSuppressed(),
             bmrSafetyPressure,
             player.Position,
-            jobRangeProvider.EngagementRange,
             jobRangeProvider.PackAoeRange,
             tank == null ? null : new TrashPullActorPosition(tank.GameObjectId, tank.Position),
             partyMembers,
             dominantTargets,
             allTargets);
         return this.trashPullState.Update(observation);
-    }
-
-    private bool TryInjectTankLeadMovement(
-        BossModPathfindBoundsSnapshot? pathfindBounds,
-        TrashPullDiagnostics diagnostics,
-        IReadOnlyList<TargetSnapshot> targets,
-        ICollection<BossModGoalContribution> contributions)
-    {
-        if (!config.LeadTrashPullsWithTank ||
-            !config.ManageMovement ||
-            !config.ManageTargetUptime ||
-            !diagnostics.LeadCandidateActive ||
-            diagnostics.LeadDestination == null)
-        {
-            return false;
-        }
-
-        var player = services.ObjectTable.LocalPlayer;
-        if (player == null)
-        {
-            this.lastReason = "local player unavailable";
-            return false;
-        }
-
-        var destination = diagnostics.LeadDestination.Value;
-        var destination2 = new Vector2(destination.X, destination.Z);
-        if (!CandidateInsidePathfindBounds(pathfindBounds, destination2))
-        {
-            this.lastReason = "tank lead outside BMR bounds";
-            return false;
-        }
-
-        var player2 = new Vector2(player.Position.X, player.Position.Z);
-        if (Vector2.Distance(player2, destination2) <= 1.25f)
-        {
-            this.lastReason = "tank lead already reached";
-            return false;
-        }
-
-        if (this.lastCentroidGoalDelegate == null ||
-            Vector2.Distance(destination2, this.lastInjectedCentroid) > FluidPackFollowMovementThreshold)
-        {
-            this.lastCentroidGoalDelegate = this.CreateCentroidGoalDelegate(destination2, acceptRadius: 2.5f);
-            this.lastInjectedCentroid = destination2;
-        }
-
-        contributions.Add(new(this.lastCentroidGoalDelegate, BossModGoalPriority.Uptime, "Tank pull lead", destination2, MechanicWhisperConfidence.Confident));
-        this.lastAction = null;
-        this.lastCurrentHits = 0;
-        this.lastBestHits = Math.Max(0, diagnostics.DominantTargetCount);
-        this.ClearAoeCandidateGoal();
-        this.lastInjected = true;
-        this.lastReason = string.Create(
-            CultureInfo.InvariantCulture,
-            $"following tank lead; behind={diagnostics.BehindDistance?.ToString("0.0", CultureInfo.InvariantCulture) ?? "n/a"}y; {diagnostics.LeadRejectionReason}");
-        var centroid = diagnostics.PackCentroid ?? destination;
-        this.lastOverlay = new AoePackOverlaySnapshot(
-            0,
-            "Tank pull lead",
-            RsrAoeShape.Circle.ToString(),
-            new Vector3(destination.X, player.Position.Y, destination.Z),
-            new Vector3(centroid.X, player.Position.Y, centroid.Z),
-            jobRangeProvider.PackAoeRange,
-            0f,
-            0,
-            this.lastBestHits,
-            this.CreateOverlayTargets(targets, player.Position.Y, destination2, hit: false));
-        return true;
     }
 
     private static float AverageDistanceSquared(IReadOnlyCollection<TargetSnapshot> targets, Vector2 anchor)
@@ -2535,5 +2500,14 @@ internal sealed class AoePackPositioningController(
         return targets.Count > 0 ? targets[0] : null;
     }
 
-
+    private sealed record AoeGcdMoveDecision(
+        long GcdWindowId,
+        uint ActionId,
+        ulong PrimaryId,
+        Vector2 Candidate,
+        int BaselineHits,
+        int BestHits,
+        Delegate Goal,
+        AoePackOverlaySnapshot Overlay,
+        DateTime CreatedAt);
 }

@@ -15,13 +15,33 @@ public sealed class Configuration : IPluginConfiguration
     public const float MinimumGapCloserDistanceMin = 0f;
     public const float MinimumGapCloserDistanceMax = 20f;
 
-    public int Version { get; set; } = 17;
+    internal static readonly GapCloserJobToggle[] GapCloserJobToggles =
+    [
+        new("PLD", config => config.GapCloserPLD, (config, value) => config.GapCloserPLD = value),
+        new("WAR", config => config.GapCloserWAR, (config, value) => config.GapCloserWAR = value),
+        new("DRK", config => config.GapCloserDRK, (config, value) => config.GapCloserDRK = value),
+        new("GNB", config => config.GapCloserGNB, (config, value) => config.GapCloserGNB = value),
+        new("MNK", config => config.GapCloserMNK, (config, value) => config.GapCloserMNK = value),
+        new("DRG", config => config.GapCloserDRG, (config, value) => config.GapCloserDRG = value),
+        new("NIN", config => config.GapCloserNIN, (config, value) => config.GapCloserNIN = value),
+        new("SAM", config => config.GapCloserSAM, (config, value) => config.GapCloserSAM = value),
+        new("BRD", config => config.GapCloserBRD, (config, value) => config.GapCloserBRD = value),
+        new("DNC", config => config.GapCloserDNC, (config, value) => config.GapCloserDNC = value),
+        new("RPR", config => config.GapCloserRPR, (config, value) => config.GapCloserRPR = value),
+        new("VPR", config => config.GapCloserVPR, (config, value) => config.GapCloserVPR = value),
+        new("WHM", config => config.GapCloserWHM, (config, value) => config.GapCloserWHM = value),
+        new("BLM", config => config.GapCloserBLM, (config, value) => config.GapCloserBLM = value),
+        new("RDM", config => config.GapCloserRDM, (config, value) => config.GapCloserRDM = value),
+        new("SGE", config => config.GapCloserSGE, (config, value) => config.GapCloserSGE = value),
+        new("PCT", config => config.GapCloserPCT, (config, value) => config.GapCloserPCT = value)
+    ];
+
+    public int Version { get; set; } = 18;
 
     public bool Enabled { get; set; } = false;
     public bool ManageMovement { get; set; } = true;
     public bool RespectManualMovement { get; set; } = true;
     public bool ManageSocialTurning { get; set; } = true;
-    public bool ManageTargetUptime { get; set; } = true;
     public bool ManageForbiddenZoneDistance { get; set; } = true;
     public bool ManagePositionals { get; set; } = true;
     public bool ManageTrueNorth { get; set; } = false;
@@ -53,14 +73,11 @@ public sealed class Configuration : IPluginConfiguration
     public float PreferredForbiddenZoneDistance { get; set; } = DefaultPreferredForbiddenZoneDistance;
     public float MinimumGapCloserDistance { get; set; } = DefaultMinimumGapCloserDistance;
     public bool ManageAoePackPositioning { get; set; } = true;
-    public bool LeadTrashPullsWithTank { get; set; } = true;
     public bool ManageHealerCoverageZone { get; set; } = true;
     public bool ManageDefensiveGroundZonePositioning { get; set; } = true;
     public bool ManagePassageOfArmsPositioning { get; set; } = true;
     public bool PickBetterAoeTarget { get; set; } = false;
     public bool KeepTrashTargetSelected { get; set; } = true;
-    public bool ManageAggroSafetyMovement { get; set; } = true;
-    public bool GuardUnknownBossNavigationWithVnavmesh { get; set; } = true;
     public bool AvoidStandingInsideEnemies { get; set; } = true;
     public bool AvoidArenaEdge { get; set; } = true;
     public bool ShowDecisionOverlay { get; set; } = false;
@@ -123,7 +140,7 @@ public sealed class Configuration : IPluginConfiguration
     [JsonProperty("MoveCloserToTrashPacks")]
     private bool MoveCloserToTrashPacksCompatibility
     {
-        set => this.ManageTargetUptime |= value;
+        set { }
     }
 
     [JsonProperty("AoePackPositioningAoeCombatControl")]
@@ -136,7 +153,6 @@ public sealed class Configuration : IPluginConfiguration
 
             this.PickBetterAoeTarget = true;
             this.KeepTrashTargetSelected = true;
-            this.ManageTargetUptime = true;
         }
     }
 
@@ -153,7 +169,7 @@ public sealed class Configuration : IPluginConfiguration
     [JsonProperty("ManageRange")]
     private bool ManageRangeCompatibility
     {
-        set => this.ManageTargetUptime = value;
+        set { }
     }
 
     [JsonProperty("HealerPartyCoverage")]
@@ -289,7 +305,6 @@ public sealed class Configuration : IPluginConfiguration
             this.ManagePassageOfArmsPositioning = true;
             this.PickBetterAoeTarget = false;
             this.KeepTrashTargetSelected = true;
-            this.ManageAggroSafetyMovement = true;
             this.AvoidStandingInsideEnemies = true;
             this.AvoidArenaEdge = true;
             this.ShowDecisionOverlay = false;
@@ -300,7 +315,6 @@ public sealed class Configuration : IPluginConfiguration
 
         if (this.Version < 14)
         {
-            this.GuardUnknownBossNavigationWithVnavmesh = true;
             this.Version = 14;
         }
 
@@ -317,11 +331,15 @@ public sealed class Configuration : IPluginConfiguration
         if (this.Version < 17)
         {
             this.FightReviewLoggingEnabled = false;
-            this.LeadTrashPullsWithTank = true;
             this.ManageSocialTurning = true;
             this.UseRedMageMeleeComboMovement = false;
             this.MigrateUnifiedGapCloserSettings();
             this.Version = 17;
+        }
+
+        if (this.Version < 18)
+        {
+            this.Version = 18;
         }
     }
 
@@ -336,11 +354,7 @@ public sealed class Configuration : IPluginConfiguration
     {
         this.CombatStyle = CombatStyle.Normal;
         this.ManageSocialTurning = true;
-        this.ManageTargetUptime = true;
         this.ManageForbiddenZoneDistance = true;
-        this.ManageAggroSafetyMovement = true;
-        this.LeadTrashPullsWithTank = true;
-        this.GuardUnknownBossNavigationWithVnavmesh = true;
         this.PreferredForbiddenZoneDistance = DefaultPreferredForbiddenZoneDistance;
         this.MinimumGapCloserDistance = DefaultMinimumGapCloserDistance;
         this.UseRedMageMeleeComboMovement = false;
@@ -352,7 +366,6 @@ public sealed class Configuration : IPluginConfiguration
         this.ManageMovement = true;
         this.RespectManualMovement = true;
         this.ManageSocialTurning = true;
-        this.ManageTargetUptime = true;
         this.ManageForbiddenZoneDistance = true;
         this.ManagePositionals = true;
         this.ManageTrueNorth = false;
@@ -362,40 +375,37 @@ public sealed class Configuration : IPluginConfiguration
         this.ReturnToLeylines = true;
         this.UseRedMageMeleeComboMovement = false;
         this.UseGapCloser = false;
-        this.GapCloserPLD = true;
-        this.GapCloserWAR = true;
-        this.GapCloserDRK = true;
-        this.GapCloserGNB = true;
-        this.GapCloserMNK = true;
-        this.GapCloserDRG = true;
-        this.GapCloserNIN = true;
-        this.GapCloserSAM = true;
-        this.GapCloserBRD = true;
-        this.GapCloserDNC = true;
-        this.GapCloserRPR = true;
-        this.GapCloserVPR = true;
-        this.GapCloserWHM = true;
-        this.GapCloserBLM = true;
-        this.GapCloserRDM = true;
-        this.GapCloserSGE = true;
-        this.GapCloserPCT = true;
+        this.SetAllGapCloserJobs(true);
         this.EchoStatusToChat = true;
         this.CombatStyle = CombatStyle.Normal;
         this.ManageAoePackPositioning = true;
-        this.LeadTrashPullsWithTank = true;
         this.ManageHealerCoverageZone = true;
         this.ManageDefensiveGroundZonePositioning = true;
         this.ManagePassageOfArmsPositioning = true;
         this.PickBetterAoeTarget = false;
         this.KeepTrashTargetSelected = true;
-        this.ManageAggroSafetyMovement = true;
-        this.GuardUnknownBossNavigationWithVnavmesh = true;
         this.AvoidStandingInsideEnemies = true;
         this.AvoidArenaEdge = true;
         this.ShowDecisionOverlay = false;
         this.ShowDecisionOverlayHud = false;
         this.FightReviewLoggingEnabled = false;
         this.ResetBehaviorSettings();
+    }
+
+    internal void SetAllGapCloserJobs(bool enabled)
+    {
+        foreach (var toggle in GapCloserJobToggles)
+        {
+            toggle.Set(this, enabled);
+        }
+    }
+
+    private void SetTankGapCloserJobs(bool enabled)
+    {
+        this.GapCloserPLD = enabled;
+        this.GapCloserWAR = enabled;
+        this.GapCloserDRK = enabled;
+        this.GapCloserGNB = enabled;
     }
 
     private void MigrateUnifiedGapCloserSettings()
@@ -405,10 +415,7 @@ public sealed class Configuration : IPluginConfiguration
 
         if (oldEscapeEnabled && !oldReengageEnabled)
         {
-            this.GapCloserPLD = false;
-            this.GapCloserWAR = false;
-            this.GapCloserDRK = false;
-            this.GapCloserGNB = false;
+            this.SetTankGapCloserJobs(false);
             this.ApplyEscapeGapCloserJobs(replace: true);
         }
         else if (oldEscapeEnabled)
@@ -511,4 +518,10 @@ public sealed class Configuration : IPluginConfiguration
     {
         pluginInterface.SavePluginConfig(this);
     }
+
 }
+
+internal sealed record GapCloserJobToggle(
+    string Label,
+    Func<Configuration, bool> Get,
+    Action<Configuration, bool> Set);

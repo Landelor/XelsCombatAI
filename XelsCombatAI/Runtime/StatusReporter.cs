@@ -10,7 +10,7 @@ internal static class StatusReporter
 {
     public static string Build(RuntimeStatus status)
     {
-        return $"Enabled={status.Enabled}, InCombat={status.InCombat}, Dead={status.IsDead}, Dependencies={(status.DependencyWarning ?? "OK")}, TrueNorthManagement={(status.TrueNorthWarning ?? status.RsrTrueNorthDisabled?.ToString() ?? "NotManaged")}, Preset={BossModIpc.DefaultPresetName}, LastPositional={status.LastPositional}, TrueNorthCharges={status.TrueNorthCharges}, TrueNorthActive={status.TrueNorthActive}, TargetUptime={status.LastTargetUptimeRange:0.0}, Movement={status.LastMovement}, MovementRange={status.LastMovementRangeStrategy}, SafetyBuffer={status.LastForbiddenZoneCushion}, MovementSuppressed={status.AutomatedMovementSuppressed}, Facing={FormatFacingSummary(status.Facing)}, Mobility={status.MobilityDecision.State}/{status.MobilityDecision.IntentLabel}, TrashPull={status.AoePackPositioning.TrashPull.Phase}/{status.AoePackPositioning.TrashPull.LeadRejectionReason}, AoEPack={status.AoePackPositioning.LastReason}, HealerCoverage={status.HealerCoveragePositioning.LastReason}, Passage={status.PassageOfArmsPositioning.LastReason}, SurvZone={status.SurvivabilityZonePositioning.LastReason}, AggroSafety={status.AggroSafety.LastReason}, RedMageMelee={status.RedMageMeleeCombo.Mode}/{status.RedMageMeleeCombo.LastReason}, Initialized={status.InitializedPreset}";
+        return $"Enabled={status.Enabled}, InCombat={status.InCombat}, Dead={status.IsDead}, Dependencies={(status.DependencyWarning ?? "OK")}, TrueNorthManagement={(status.TrueNorthWarning ?? status.RsrTrueNorthDisabled?.ToString() ?? "NotManaged")}, Preset={BossModIpc.DefaultPresetName}, LastPositional={status.LastPositional}, TrueNorthCharges={status.TrueNorthCharges}, TrueNorthActive={status.TrueNorthActive}, BmrRange={status.LastTargetUptimeRange:0.0}, Movement={status.LastMovement}, MovementRange={status.LastMovementRangeStrategy}, SafetyBuffer={status.LastForbiddenZoneCushion}, MovementSuppressed={status.AutomatedMovementSuppressed}, Facing={FormatFacingSummary(status.Facing)}, Mobility={status.MobilityDecision.State}/{status.MobilityDecision.IntentLabel}, TrashPull={status.AoePackPositioning.TrashPull.Phase}/{status.AoePackPositioning.TrashPull.Reason}, AoEPack={status.AoePackPositioning.LastReason}, HealerCoverage={status.HealerCoveragePositioning.LastReason}, Passage={status.PassageOfArmsPositioning.LastReason}, SurvZone={status.SurvivabilityZonePositioning.LastReason}, RedMageMelee={status.RedMageMeleeCombo.Mode}/{status.RedMageMeleeCombo.LastReason}, Initialized={status.InitializedPreset}";
     }
 
     public static string BuildDebug(Configuration config, RuntimeStatus status)
@@ -129,7 +129,6 @@ internal static class StatusReporter
         Append(builder, "BossModNavigationDestination", status.BossModMovement.NavigationDestination);
         Append(builder, "BossModNavigationNextWaypoint", status.BossModMovement.NavigationNextWaypoint);
         Append(builder, "BossModNavigationStats", status.BossModMovement.NavigationStats);
-        Append(builder, "BossModVnavmeshGuard", status.BossModMovement.VnavmeshGuard);
         Append(builder, "BossModPlannerSteer", status.BossModMovement.PlannerSteer);
         Append(builder, "BossModControllerTarget", status.BossModMovement.ControllerTarget);
         Append(builder, "BossModMovementOverride", status.BossModMovement.MovementOverride);
@@ -141,7 +140,6 @@ internal static class StatusReporter
         Append(builder, "PassageGoalMembers", status.PassageOfArmsPositioning.LastReason);
         Append(builder, "HealerCoverageGoalMembers", status.HealerCoveragePositioning.LastReason);
         Append(builder, "SurvivabilityZoneGoalMembers", status.SurvivabilityZonePositioning.LastReason);
-        Append(builder, "AggroSafetyGoalMembers", status.AggroSafety.LastReason);
         Append(builder, "ArenaEdge", status.ArenaEdgeReason);
         builder.AppendLine();
 
@@ -171,16 +169,11 @@ internal static class StatusReporter
         Append(builder, "TankPosition", status.AoePackPositioning.TrashPull.TankPosition);
         Append(builder, "TankSpeed", status.AoePackPositioning.TrashPull.TankSpeed);
         Append(builder, "ProjectedTankPosition", status.AoePackPositioning.TrashPull.ProjectedTankPosition);
-        Append(builder, "LeadDestination", status.AoePackPositioning.TrashPull.LeadDestination);
-        Append(builder, "LeadCandidateActive", status.AoePackPositioning.TrashPull.LeadCandidateActive);
-        Append(builder, "LeadClampApplied", status.AoePackPositioning.TrashPull.LeadClampApplied);
-        Append(builder, "BehindDistance", status.AoePackPositioning.TrashPull.BehindDistance);
         Append(builder, "PackCentroid", status.AoePackPositioning.TrashPull.PackCentroid);
         Append(builder, "PackSpeed", status.AoePackPositioning.TrashPull.PackSpeed);
         Append(builder, "PartyMedianSpeed", status.AoePackPositioning.TrashPull.PartyMedianSpeed);
         Append(builder, "DominantTargetCount", status.AoePackPositioning.TrashPull.DominantTargetCount);
         Append(builder, "StragglerTargetCount", status.AoePackPositioning.TrashPull.StragglerTargetCount);
-        Append(builder, "LeadRejectionReason", status.AoePackPositioning.TrashPull.LeadRejectionReason);
         builder.AppendLine();
 
         AppendSection(builder, "Passage of Arms Positioning");
@@ -209,17 +202,6 @@ internal static class StatusReporter
         Append(builder, "CasterName", status.SurvivabilityZonePositioning.CasterName);
         Append(builder, "DistanceToCenter", status.SurvivabilityZonePositioning.DistanceToCenter);
         Append(builder, "Diagnostics", status.SurvivabilityZonePositioning.Diagnostics);
-        builder.AppendLine();
-
-        AppendSection(builder, "Aggro Safety");
-        Append(builder, "HookState", status.AggroSafety.HookState);
-        Append(builder, "LastReason", status.AggroSafety.LastReason);
-        Append(builder, "Injected", status.AggroSafety.Injected);
-        Append(builder, "ActiveMobId", status.AggroSafety.ActiveMobId);
-        Append(builder, "SelectedTankId", status.AggroSafety.SelectedTankId);
-        Append(builder, "SelectedTankPosition", status.AggroSafety.SelectedTankPosition);
-        Append(builder, "AggroSeconds", status.AggroSafety.AggroSeconds);
-        Append(builder, "PriorityDevalued", status.AggroSafety.PriorityDevalued);
         builder.AppendLine();
 
         AppendSection(builder, "Configuration");
@@ -285,7 +267,6 @@ internal static class StatusReporter
         AddReflectionIssue(issues, "PassageGoal", status.PassageOfArmsPositioning.LastReason);
         AddReflectionIssue(issues, "HealerCoverageGoal", status.HealerCoveragePositioning.LastReason);
         AddReflectionIssue(issues, "SurvivabilityZoneGoal", status.SurvivabilityZonePositioning.LastReason);
-        AddReflectionIssue(issues, "AggroSafetyGoal", status.AggroSafety.LastReason);
         AddReflectionIssue(issues, "ArenaEdgeGoal", status.ArenaEdgeReason);
         return issues.Count == 0 ? "OK" : string.Join(" | ", issues);
     }

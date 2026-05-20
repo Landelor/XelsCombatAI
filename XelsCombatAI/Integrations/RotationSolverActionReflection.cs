@@ -31,7 +31,10 @@ internal sealed record RsrAoeActionSnapshot(
     int AffectedTargetCount,
     bool IsFriendly,
     bool IsTargetArea,
-    bool IsTargetCenteredCircle);
+    bool IsTargetCenteredCircle,
+    float GcdRemaining = -1f,
+    float GcdElapsed = -1f,
+    float GcdTotal = -1f);
 
 internal enum RsrRedMageMeleeTrack
 {
@@ -62,6 +65,9 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
     private Type? dataCenterType;
     private PropertyInfo? nextGcdActionProperty;
     private PropertyInfo? currentRotationProperty;
+    private PropertyInfo? defaultGcdRemainProperty;
+    private PropertyInfo? defaultGcdElapsedProperty;
+    private PropertyInfo? defaultGcdTotalProperty;
     private DateTime nextResolveAttempt = DateTime.MinValue;
     private DateTime nextLoadedCheck = DateTime.MinValue;
     private DateTime nextRedMageContractProbe = DateTime.MinValue;
@@ -77,6 +83,9 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
         $"NextGCDActionProperty={this.nextGcdActionProperty != null}",
         $"DataCenterType={this.dataCenterType != null}",
         $"CurrentRotationProperty={this.currentRotationProperty != null}",
+        $"DefaultGCDRemainProperty={this.defaultGcdRemainProperty != null}",
+        $"DefaultGCDElapsedProperty={this.defaultGcdElapsedProperty != null}",
+        $"DefaultGCDTotalProperty={this.defaultGcdTotalProperty != null}",
         $"NextResolveUtc={this.nextResolveAttempt:O}");
     public string RedMageMeleeDiagnostics => this.GetRedMageMeleeDiagnostics();
 
@@ -86,6 +95,9 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
         this.dataCenterType = null;
         this.nextGcdActionProperty = null;
         this.currentRotationProperty = null;
+        this.defaultGcdRemainProperty = null;
+        this.defaultGcdElapsedProperty = null;
+        this.defaultGcdTotalProperty = null;
         this.nextResolveAttempt = DateTime.MinValue;
         this.nextLoadedCheck = DateTime.MinValue;
         this.nextRedMageContractProbe = DateTime.MinValue;
@@ -169,6 +181,9 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
             var actionId = Convert.ToUInt32(GetPropertyValue(action, actionType, "ID") ?? 0u);
             var adjustedId = Convert.ToUInt32(GetPropertyValue(action, actionType, "AdjustedID") ?? actionId);
             var name = GetPropertyValue(actionRow, actionRow.GetType(), "Name")?.ToString() ?? adjustedId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var gcdRemaining = ReadStaticFloat(this.defaultGcdRemainProperty, -1f);
+            var gcdElapsed = ReadStaticFloat(this.defaultGcdElapsedProperty, -1f);
+            var gcdTotal = ReadStaticFloat(this.defaultGcdTotalProperty, -1f);
 
             // CastType=1 (Targeted) in the Lumina sheet describes targeting UI, not AoE geometry.
             // Some actions (e.g. Chain Saw) have CastType=1 but fire a multi-hit line AoE.
@@ -235,7 +250,10 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
                 affectedCount,
                 isFriendly,
                 isTargetArea,
-                isTargetCenteredCircle);
+                isTargetCenteredCircle,
+                gcdRemaining,
+                gcdElapsed,
+                gcdTotal);
             reason = "available";
             return true;
         }
@@ -587,6 +605,9 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
             this.dataCenterType = dataCenter;
             this.nextGcdActionProperty = property;
             this.currentRotationProperty = currentRotation;
+            this.defaultGcdRemainProperty = dataCenter.GetProperty("DefaultGCDRemain", BindingFlags.Static | BindingFlags.Public);
+            this.defaultGcdElapsedProperty = dataCenter.GetProperty("DefaultGCDElapsed", BindingFlags.Static | BindingFlags.Public);
+            this.defaultGcdTotalProperty = dataCenter.GetProperty("DefaultGCDTotal", BindingFlags.Static | BindingFlags.Public);
             this.nextLoadedCheck = now.Add(LoadedCheckInterval);
             this.status = "available";
             return true;
@@ -668,8 +689,28 @@ internal sealed class RotationSolverActionReflection(IDalamudPluginInterface plu
         this.dataCenterType = null;
         this.nextGcdActionProperty = null;
         this.currentRotationProperty = null;
+        this.defaultGcdRemainProperty = null;
+        this.defaultGcdElapsedProperty = null;
+        this.defaultGcdTotalProperty = null;
         this.status = newStatus;
         this.nextRedMageContractProbe = DateTime.MinValue;
+    }
+
+    private static float ReadStaticFloat(PropertyInfo? property, float fallback)
+    {
+        if (property == null)
+        {
+            return fallback;
+        }
+
+        try
+        {
+            return ReadFloat(property.GetValue(null), fallback);
+        }
+        catch
+        {
+            return fallback;
+        }
     }
 
     private static object? GetPropertyValue(object value, Type type, string name)

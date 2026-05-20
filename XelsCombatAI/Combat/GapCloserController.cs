@@ -22,16 +22,7 @@ internal sealed class GapCloserController(
     Func<bool> rsrHenchedActive,
     Func<TrashPullDiagnostics> trashPullDiagnostics)
 {
-    private const float BossLikeHitboxRadius = 4f;
     private const float DirectionalDashBetterLandingThreshold = 0.75f;
-    private const float ConservativeTrashGapCloserRangeReserve = 2.5f;
-    private const float ConservativeTrashMinimumConfidence = 0.55f;
-    private const int ConservativeTrashMinimumTargets = 3;
-    private const float TrashGapCloserAwayFromAnchorTolerance = 2f;
-    private const float FriendlyAnchorMinimumMoveDistance = 6f;
-    private const float FriendlyAnchorMinimumUptimeGain = 4f;
-    private const float HostileRelayMinimumTargetGain = 4f;
-    private const float HostileRelayMinimumDirectionDot = 0.45f;
     private readonly record struct DirectionalDashFacingCandidate(float Rotation, Vector3 Destination);
 
     private DateTime nextGapCloserAttempt = DateTime.MinValue;
@@ -111,13 +102,6 @@ internal sealed class GapCloserController(
         if (target is not IBattleNpc battleNpc || battleNpc.BattleNpcKind != BattleNpcSubKind.Combatant)
         {
             this.lastGapCloserSafety = "target is not attackable";
-            return false;
-        }
-
-        if (config.GuardUnknownBossNavigationWithVnavmesh && this.IsUnknownBossLikeTarget(target))
-        {
-            this.lastGapCloserSafety = "unknown boss module; gap closer disabled";
-            this.lastSafeLandingPosition = null;
             return false;
         }
 
@@ -418,12 +402,6 @@ internal sealed class GapCloserController(
             return false;
         }
 
-        if (config.GuardUnknownBossNavigationWithVnavmesh && this.IsUnknownBossLikeTarget(currentTarget))
-        {
-            this.lastGapCloserSafety = "unknown boss module; paired return disabled";
-            return false;
-        }
-
         var distanceToHitbox = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, currentTarget.Position, currentTarget.HitboxRadius);
         if (distanceToHitbox <= CombatConstants.MeleeActionRange || distanceToHitbox > CombatConstants.GapCloserMaxRange)
         {
@@ -523,7 +501,7 @@ internal sealed class GapCloserController(
                 distanceToHitboxRequired > 0f ? 0f : config.MinimumGapCloserDistance,
                 requireSafetyProgress: distanceToHitboxRequired <= 0f,
                 requireUptimeProgress: distanceToHitboxRequired > 0f,
-                requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                requireVnavReachable: true,
                 out var regressSafetyDecision))
         {
             lastSafety = $"Regress: {regressSafetyDecision.RiskReason}";
@@ -726,28 +704,7 @@ internal sealed class GapCloserController(
         float uptimeGain,
         float pathGain,
         out string reason)
-    {
-        reason = string.Empty;
-        if (moveDistance < FriendlyAnchorMinimumMoveDistance)
-        {
-            reason = $"ally anchor too close: {moveDistance:0.0}y";
-            return false;
-        }
-
-        if (safetyGain > 0.1f ||
-            pathGain > 0.1f)
-        {
-            return true;
-        }
-
-        if (uptimeGain < FriendlyAnchorMinimumUptimeGain)
-        {
-            reason = $"ally anchor low uptime gain: {uptimeGain:0.0}y";
-            return false;
-        }
-
-        return true;
-    }
+        => GapCloserDecisionPolicy.ShouldUseFriendlyAnchorDash(moveDistance, safetyGain, uptimeGain, pathGain, out reason);
 
     private unsafe bool TryUseTargetGapCloser(uint actionId, string actionName, float distanceToHitbox, IGameObject target, Vector3? safeMovementDestination, DashStyleReengageOpportunity styleOpportunity, IBattleNpc? restoreTargetAfterUse = null)
     {
@@ -1251,9 +1208,8 @@ internal sealed class GapCloserController(
             return false;
         }
 
-        var maxRange = ResolveConservativeTrashGapCloserRange(classJobId);
-        var useThreshold = MathF.Max(0f, maxRange - ConservativeTrashGapCloserRangeReserve);
-        var anchor = ResolveTrashPullGapCloserAnchor(trash, target);
+        var useThreshold = GapCloserDecisionPolicy.ResolveConservativeTrashGapCloserUseThreshold(classJobId);
+        var anchor = GapCloserDecisionPolicy.ResolveTrashPullGapCloserAnchor(trash, target);
         var anchorDistance = Geometry.Distance2D(player.Position, anchor);
         var triggerDistance = MathF.Max(distanceToHitbox, anchorDistance);
         if (triggerDistance >= useThreshold)
@@ -1288,7 +1244,7 @@ internal sealed class GapCloserController(
             return false;
         }
 
-        var anchor = ResolveTrashPullGapCloserAnchor(trash, target);
+        var anchor = GapCloserDecisionPolicy.ResolveTrashPullGapCloserAnchor(trash, target);
         if (!ShouldAllowTrashPullGapCloserTarget(
                 player.Position,
                 target.Position,
@@ -1302,23 +1258,12 @@ internal sealed class GapCloserController(
     }
 
     internal static bool ShouldAllowTrashPullGapCloserTarget(Vector3 playerPosition, Vector3 targetPosition, Vector3 anchorPosition, out string reason)
-    {
-        var playerAnchorDistance = Geometry.Distance2D(playerPosition, anchorPosition);
-        var targetAnchorDistance = Geometry.Distance2D(targetPosition, anchorPosition);
-        if (targetAnchorDistance > playerAnchorDistance + TrashGapCloserAwayFromAnchorTolerance)
-        {
-            reason = $"trash pull dash would move away from tank pack: target={targetAnchorDistance:0.#}y anchor, player={playerAnchorDistance:0.#}y";
-            return false;
-        }
-
-        reason = string.Empty;
-        return true;
-    }
+        => GapCloserDecisionPolicy.ShouldAllowTrashPullGapCloserTarget(playerPosition, targetPosition, anchorPosition, out reason);
 
     private bool ShouldTryHostileRelay(uint classJobId, float intendedDistanceToHitbox)
     {
-        return CanUseHostileRelayGapCloser(classJobId) &&
-               intendedDistanceToHitbox > ResolveHostileRelayGapCloserRange(classJobId);
+        return GapCloserDecisionPolicy.CanUseHostileRelayGapCloser(classJobId) &&
+               intendedDistanceToHitbox > GapCloserDecisionPolicy.ResolveHostileRelayGapCloserRange(classJobId);
     }
 
     private bool TryFindHostileRelayGapCloserTarget(
@@ -1329,7 +1274,7 @@ internal sealed class GapCloserController(
         out IBattleNpc relayTarget)
     {
         relayTarget = null!;
-        var maxRange = ResolveHostileRelayGapCloserRange(classJobId);
+        var maxRange = GapCloserDecisionPolicy.ResolveHostileRelayGapCloserRange(classJobId);
         var bestScore = float.NegativeInfinity;
 
         foreach (var candidate in services.ObjectTable.OfType<IBattleNpc>())
@@ -1337,11 +1282,6 @@ internal sealed class GapCloserController(
             if (candidate.GameObjectId == intendedTarget.GameObjectId ||
                 !IsUsableGapCloserTarget(candidate) ||
                 !candidate.StatusFlags.HasFlag(StatusFlags.InCombat))
-            {
-                continue;
-            }
-
-            if (config.GuardUnknownBossNavigationWithVnavmesh && this.IsUnknownBossLikeTarget(candidate))
             {
                 continue;
             }
@@ -1357,7 +1297,7 @@ internal sealed class GapCloserController(
                 continue;
             }
 
-            if (!TryEvaluateHostileRelayDash(
+            if (!GapCloserDecisionPolicy.TryEvaluateHostileRelayDash(
                     player.Position,
                     player.HitboxRadius,
                     landing,
@@ -1389,123 +1329,16 @@ internal sealed class GapCloserController(
         Vector3 intendedTargetPosition,
         float intendedTargetRadius,
         out string reason)
-    {
-        return TryEvaluateHostileRelayDash(
+        => GapCloserDecisionPolicy.ShouldUseHostileRelayDash(
             playerPosition,
             playerRadius,
             landingPosition,
             intendedTargetPosition,
             intendedTargetRadius,
-            out _,
-            out _,
             out reason);
-    }
-
-    private static bool TryEvaluateHostileRelayDash(
-        Vector3 playerPosition,
-        float playerRadius,
-        Vector3 landingPosition,
-        Vector3 intendedTargetPosition,
-        float intendedTargetRadius,
-        out float gain,
-        out float directionDot,
-        out string reason)
-    {
-        var currentDistance = Geometry.DistanceToHitbox(playerPosition, playerRadius, intendedTargetPosition, intendedTargetRadius);
-        var landingDistance = Geometry.DistanceToHitbox(landingPosition, playerRadius, intendedTargetPosition, intendedTargetRadius);
-        gain = currentDistance - landingDistance;
-        if (gain < HostileRelayMinimumTargetGain)
-        {
-            directionDot = 0f;
-            reason = $"relay low target gain: {gain:0.0}y";
-            return false;
-        }
-
-        if (!TryDirectionDot(playerPosition, landingPosition, intendedTargetPosition, out directionDot))
-        {
-            reason = "relay direction unknown";
-            return false;
-        }
-
-        if (directionDot < HostileRelayMinimumDirectionDot)
-        {
-            reason = $"relay wrong direction: {directionDot:0.00}";
-            return false;
-        }
-
-        reason = $"relay gains {gain:0.0}y; direction {directionDot:0.00}";
-        return true;
-    }
-
-    private static bool TryDirectionDot(Vector3 from, Vector3 to, Vector3 toward, out float dot)
-    {
-        var movement = to - from;
-        var target = toward - from;
-        movement.Y = 0f;
-        target.Y = 0f;
-        if (movement.LengthSquared() <= 0.0001f || target.LengthSquared() <= 0.0001f)
-        {
-            dot = 0f;
-            return false;
-        }
-
-        dot = Vector3.Dot(Vector3.Normalize(movement), Vector3.Normalize(target));
-        return true;
-    }
-
-    private static bool CanUseHostileRelayGapCloser(uint classJobId)
-    {
-        return classJobId is
-            1 or 19 or
-            3 or 21 or
-            32 or
-            37 or
-            2 or 20 or
-            4 or 22 or
-            34 or
-            41 or
-            35 or
-            40;
-    }
-
-    private static float ResolveHostileRelayGapCloserRange(uint classJobId)
-    {
-        return classJobId == 40
-            ? 25f
-            : CombatConstants.GapCloserMaxRange;
-    }
 
     private static bool IsConservativeTrashPullContext(TrashPullDiagnostics trash)
-    {
-        return (trash.Phase is TrashPullPhase.Gathering or TrashPullPhase.Stabilizing or TrashPullPhase.Burning) &&
-               trash.Confidence >= ConservativeTrashMinimumConfidence &&
-               trash.DominantTargetCount >= ConservativeTrashMinimumTargets;
-    }
-
-    private static Vector3 ResolveTrashPullGapCloserAnchor(TrashPullDiagnostics trash, IGameObject target)
-    {
-        if (trash.LeadCandidateActive && trash.LeadDestination.HasValue)
-        {
-            return trash.LeadDestination.Value;
-        }
-
-        if (trash.Phase == TrashPullPhase.Gathering && trash.ProjectedTankPosition.HasValue)
-        {
-            return trash.ProjectedTankPosition.Value;
-        }
-
-        return trash.PackCentroid ?? target.Position;
-    }
-
-    private static float ResolveConservativeTrashGapCloserRange(uint classJobId)
-    {
-        return classJobId switch
-        {
-            25 or 40 => 25f,
-            24 or 38 or 39 or 42 => CombatConstants.FixedForwardGapCloserRange,
-            _ => CombatConstants.GapCloserMaxRange
-        };
-    }
+        => GapCloserDecisionPolicy.IsConservativeTrashPullContext(trash);
 
     private static bool IsNinjaMudraWindow(IBattleChara player)
     {
@@ -1601,37 +1434,6 @@ internal sealed class GapCloserController(
             42 when config.GapCloserPCT => ActionUse.PictomancerSmudgeActionId,
             _ => null
         };
-    }
-
-    internal bool IsUnknownBossLikeTarget(IGameObject target)
-    {
-        return target is IBattleNpc battleNpc &&
-               battleNpc.BattleNpcKind == BattleNpcSubKind.Combatant &&
-               target.HitboxRadius >= BossLikeHitboxRadius &&
-               !bossMod.HasModuleByDataId(battleNpc.BaseId);
-    }
-
-    internal bool HasNearbyUnknownBossLikeThreat(Vector3 playerPosition)
-    {
-        foreach (var obj in services.ObjectTable.OfType<IBattleNpc>())
-        {
-            if (obj.BattleNpcKind != BattleNpcSubKind.Combatant)
-            {
-                continue;
-            }
-
-            if (obj.HitboxRadius < BossLikeHitboxRadius || bossMod.HasModuleByDataId(obj.BaseId))
-            {
-                continue;
-            }
-
-            if (Vector3.Distance(playerPosition, obj.Position) <= 60f)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private IEnumerable<Vector3> EnumerateShukuchiCandidates(Vector3 playerPosition, Vector3 targetPosition, float targetHitboxRadius)

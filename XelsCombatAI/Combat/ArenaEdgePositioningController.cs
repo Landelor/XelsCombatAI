@@ -134,6 +134,13 @@ internal sealed class ArenaEdgePositioningController(Configuration config, Dalam
 
         this.RecordObservedBounds(bounds, centerX, centerZ, radius);
 
+        if (this.BossModMechanicSafetyActive(hints))
+        {
+            this.suppressComfortUntil = now.Add(PostMechanicEdgeCooldown);
+            this.lastReason = "mechanic safety active";
+            return;
+        }
+
         if (nearEdge)
         {
             this.goalLingerUntil = now.Add(GoalLinger);

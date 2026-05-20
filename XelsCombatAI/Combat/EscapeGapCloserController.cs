@@ -127,13 +127,6 @@ internal sealed class EscapeGapCloserController(
             return false;
         }
 
-        if (config.GuardUnknownBossNavigationWithVnavmesh && gapCloserController.HasNearbyUnknownBossLikeThreat(player.Position))
-        {
-            this.lastEscapeGapCloserSafety = "unknown boss module; escape dash disabled";
-            this.lastSafeEscapeDestination = null;
-            return false;
-        }
-
         return classJobId switch
         {
             2 or 20 when config.GapCloserMNK => this.TryUseFriendlyEscapeGapCloser(ActionUse.MonkThunderclapActionId, "Thunderclap", CombatConstants.GapCloserMaxRange, safeMovementDestination) || this.TryUseGreedyTargetEscapeGapCloser(ActionUse.MonkThunderclapActionId, "Thunderclap", safeMovementDestination),
@@ -183,7 +176,7 @@ internal sealed class EscapeGapCloserController(
                     config.MinimumGapCloserDistance,
                     requireSafetyProgress: true,
                     requireUptimeProgress: false,
-                    requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                    requireVnavReachable: true,
                     out var decision))
                 {
                     this.lastEscapeGapCloserSafety = decision.RiskReason;
@@ -237,7 +230,7 @@ internal sealed class EscapeGapCloserController(
                 config.MinimumGapCloserDistance,
                 requireSafetyProgress: true,
                 requireUptimeProgress: false,
-                requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                requireVnavReachable: true,
                 out var decision))
             {
                 this.lastEscapeGapCloserSafety = decision.RiskReason;
@@ -294,7 +287,7 @@ internal sealed class EscapeGapCloserController(
                     config.MinimumGapCloserDistance,
                     requireSafetyProgress: true,
                     requireUptimeProgress: false,
-                    requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                    requireVnavReachable: true,
                     out var decision))
                 {
                     this.lastEscapeGapCloserSafety = decision.RiskReason;
@@ -347,7 +340,7 @@ internal sealed class EscapeGapCloserController(
                 config.MinimumGapCloserDistance,
                 requireSafetyProgress: true,
                 requireUptimeProgress: false,
-                requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                requireVnavReachable: true,
                 out var decision))
             {
                 this.lastEscapeGapCloserSafety = decision.RiskReason;
@@ -396,7 +389,7 @@ internal sealed class EscapeGapCloserController(
             config.MinimumGapCloserDistance,
             requireSafetyProgress: true,
             requireUptimeProgress: false,
-            requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+            requireVnavReachable: true,
             out var decision))
         {
             if (this.TryRequestFixedEscapeDashFacing(player, actionId, actionName, CombatConstants.FixedForwardGapCloserRange, safeMovementDestination, backward: false))
@@ -446,7 +439,7 @@ internal sealed class EscapeGapCloserController(
             config.MinimumGapCloserDistance,
             requireSafetyProgress: true,
             requireUptimeProgress: false,
-            requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+            requireVnavReachable: true,
             out var decision))
         {
             if (this.TryRequestFixedEscapeDashFacing(player, actionId, actionName, backstepDistance, safeMovementDestination, backward: true))
@@ -506,7 +499,7 @@ internal sealed class EscapeGapCloserController(
                     config.MinimumGapCloserDistance,
                     requireSafetyProgress: true,
                     requireUptimeProgress: false,
-                    requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                    requireVnavReachable: true,
                     out var decision))
                 {
                     this.lastEscapeGapCloserSafety = decision.RiskReason;
@@ -564,7 +557,7 @@ internal sealed class EscapeGapCloserController(
                 config.MinimumGapCloserDistance,
                 requireSafetyProgress: true,
                 requireUptimeProgress: false,
-                requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+                requireVnavReachable: true,
                 out var decision))
             {
                 this.lastEscapeGapCloserSafety = decision.RiskReason;
@@ -620,7 +613,7 @@ internal sealed class EscapeGapCloserController(
             config.MinimumGapCloserDistance,
             requireSafetyProgress: true,
             requireUptimeProgress: false,
-            requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+            requireVnavReachable: true,
             out var decision))
         {
             this.lastEscapeGapCloserSafety = decision.RiskReason;
@@ -686,7 +679,7 @@ internal sealed class EscapeGapCloserController(
             config.MinimumGapCloserDistance,
             requireSafetyProgress: true,
             requireUptimeProgress: false,
-            requireVnavReachable: config.GuardUnknownBossNavigationWithVnavmesh,
+            requireVnavReachable: true,
             out var safeDecision))
         {
             return this.TryUseTargetEscapeAction(actionId, actionName, target, destination, safeDecision);

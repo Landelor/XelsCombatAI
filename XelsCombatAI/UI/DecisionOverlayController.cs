@@ -340,24 +340,6 @@ internal sealed class DecisionOverlayController(
         var target = services.TargetManager.Target as IBattleChara;
         if (target != null)
         {
-            if (!config.Enabled || !config.ManageMovement || !config.ManageTargetUptime)
-            {
-                var targetUptimeReason = this.DisabledReason(
-                    (config.Enabled, "Enabled"),
-                    (config.ManageMovement, "Automate movement"),
-                    (config.ManageTargetUptime, "Close in to attack range"));
-                var targetUptimeRadius = target.HitboxRadius + Configuration.InternalMeleeUptimeRange;
-                yield return new(
-                    DecisionOverlaySource.TargetUptime,
-                    DecisionOverlayState.Suppressed,
-                    "Target uptime disabled",
-                    targetUptimeReason,
-                    15,
-                    [new(DecisionOverlayShapeKind.Circle, DecisionOverlayState.Suppressed, target.Position, targetUptimeRadius, 0f, 0f, 0f, "attack range")],
-                    [],
-                    [new(DecisionOverlayState.Suppressed, target.Position, target.HitboxRadius, "Target")]);
-            }
-
             if (!config.Enabled || !config.ManageMovement || !config.ManageForbiddenZoneDistance)
             {
                 var forbiddenReason = this.DisabledReason(
@@ -529,18 +511,15 @@ internal sealed class DecisionOverlayController(
             this.DrawConfigRow("Automate movement", config.ManageMovement, config.Enabled && config.ManageMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement")));
             this.DrawConfigRow("Pause when I move", config.RespectManualMovement, config.Enabled && config.ManageMovement && config.RespectManualMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.RespectManualMovement, "Pause when I move")));
             this.DrawConfigRow("Movement timing", config.CombatStyle, config.Enabled && config.ManageMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement")));
-            this.DrawConfigRow("Close in to attack range", config.ManageTargetUptime, config.Enabled && config.ManageMovement && config.ManageTargetUptime, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageTargetUptime, "Close in to attack range")));
             this.DrawConfigRow("Avoid danger zones", config.ManageForbiddenZoneDistance, config.Enabled && config.ManageMovement && config.ManageForbiddenZoneDistance, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageForbiddenZoneDistance, "Avoid danger zones")));
             this.DrawConfigRow("Extra danger-zone space", config.PreferredForbiddenZoneDistance, config.Enabled && config.ManageMovement && config.ManageForbiddenZoneDistance, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageForbiddenZoneDistance, "Avoid danger zones")));
             this.DrawConfigRow("Stand in defensive ground effects", config.ManageDefensiveGroundZonePositioning, config.Enabled && config.ManageMovement && config.ManageDefensiveGroundZonePositioning, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageDefensiveGroundZonePositioning, "Stand in defensive ground effects")));
             this.DrawConfigRow("Stand behind Passage of Arms", config.ManagePassageOfArmsPositioning, config.Enabled && config.ManageMovement && config.ManagePassageOfArmsPositioning, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManagePassageOfArmsPositioning, "Stand behind Passage of Arms")));
-            this.DrawConfigRow("Block unreachable unknown-boss movement", config.GuardUnknownBossNavigationWithVnavmesh, config.Enabled && config.ManageMovement && config.GuardUnknownBossNavigationWithVnavmesh, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.GuardUnknownBossNavigationWithVnavmesh, "Block unreachable unknown-boss movement")));
             this.DrawConfigRow("Avoid standing inside bosses", config.AvoidStandingInsideEnemies, config.Enabled && config.ManageMovement && config.AvoidStandingInsideEnemies, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.AvoidStandingInsideEnemies, "Avoid standing inside bosses")));
             this.DrawConfigRow("Avoid arena edge", config.AvoidArenaEdge, config.Enabled && config.ManageMovement && config.AvoidArenaEdge, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.AvoidArenaEdge, "Avoid arena edge")));
 
             this.DrawConfigSection("AoE & Trash");
             this.DrawConfigRow("Move for better AoE hits", config.ManageAoePackPositioning, config.Enabled && config.ManageMovement && config.ManageAoePackPositioning, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageAoePackPositioning, "Move for better AoE hits")));
-            this.DrawConfigRow("Lead trash pulls with tank", config.LeadTrashPullsWithTank, config.Enabled && config.ManageMovement && config.ManageTargetUptime && config.LeadTrashPullsWithTank, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageTargetUptime, "Close in to attack range"), (config.LeadTrashPullsWithTank, "Lead trash pulls with tank")));
             this.DrawConfigRow("Pick better AoE target", config.PickBetterAoeTarget, config.Enabled && config.PickBetterAoeTarget, this.DisabledReason((config.Enabled, "Enabled"), (config.PickBetterAoeTarget, "Pick better AoE target")));
             this.DrawConfigRow("Keep a trash target selected", config.KeepTrashTargetSelected, config.Enabled && config.KeepTrashTargetSelected, this.DisabledReason((config.Enabled, "Enabled"), (config.KeepTrashTargetSelected, "Keep a trash target selected")));
             this.DrawConfigRow("Healer coverage zone", config.ManageHealerCoverageZone, config.Enabled && config.ManageMovement && config.ManageHealerCoverageZone, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageHealerCoverageZone, "Healer coverage zone")));
@@ -905,11 +884,6 @@ internal sealed class DecisionOverlayController(
             reason.Contains(" unavailable", StringComparison.OrdinalIgnoreCase))
         {
             return "dash action unavailable";
-        }
-
-        if (reason.Contains("unknown boss module", StringComparison.OrdinalIgnoreCase))
-        {
-            return "unknown boss navigation guard disabled dashing";
         }
 
         if (reason.Contains("dangerous", StringComparison.OrdinalIgnoreCase) ||

@@ -11,6 +11,13 @@ CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
 CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture;
 BossMod.Service.LogHandlerDebug = message => Console.Error.WriteLine("BMR: " + message);
 
+var skipGameData = args.Any(arg => arg.Equals("--skip-game-data", StringComparison.OrdinalIgnoreCase));
+var gameDataTests = new HashSet<string>(StringComparer.Ordinal)
+{
+    "BMR parser integration",
+    "datamining trial duty boss context detector"
+};
+
 var tests = new (string Name, Action Body)[]
 {
     ("schema v3 parsing", SchemaV3Parsing),
@@ -23,7 +30,6 @@ var tests = new (string Name, Action Body)[]
     ("header metadata falls back to frames", HeaderMetadataFallsBackToFrames),
     ("schema v2 rejection", SchemaV2Rejected),
     ("configuration logging defaults/reset", ConfigurationLoggingDefaultsAndReset),
-    ("configuration tank lead defaults/reset", ConfigurationTankLeadDefaultsAndReset),
     ("friendly anchor dash requires meaningful gain", FriendlyAnchorDashRequiresMeaningfulGain),
     ("gap closer follows RSR auto target", GapCloserFollowsRsrAutoTarget),
     ("hostile relay dash requires target momentum", HostileRelayDashRequiresTargetMomentum),
@@ -38,8 +44,8 @@ var tests = new (string Name, Action Body)[]
     ("healer coverage combines with forbidden zones", HealerCoverageCombinesWithForbiddenZones),
     ("pack movement combines with BossMod forbidden zones", PackMovementCombinesWithBossModForbiddenZones),
     ("mechanic whisper guard keeps aligned, shorter, or confident goals", MechanicWhisperGuardKeepsAlignedShorterOrConfidentGoals),
+    ("mechanic safety isolates top goal contributions", MechanicSafetyIsolatesTopGoalContributions),
     ("mechanic escape margin follows BMR movement", MechanicEscapeMarginFollowsBmrMovement),
-    ("target uptime contributes during mechanic exits", TargetUptimeContributesDuringMechanicExits),
     ("trash AoE short one-hit gain is worth moving", TrashAoeShortOneHitGainIsWorthMoving),
     ("trash AoE prep skips good-enough one-hit churn", TrashAoePrepSkipsGoodEnoughOneHitChurn),
     ("trash AoE retains equal-hit candidate", TrashAoeRetainsEqualHitCandidate),
@@ -47,9 +53,6 @@ var tests = new (string Name, Action Body)[]
     ("multi-target large trash remains trash context", MultiTargetLargeTrashRemainsTrashContext),
     ("trash pull tracker phase transitions", TrashPullTrackerPhaseTransitions),
     ("trash pull tracker remote settled pack remains catch-up", TrashPullTrackerRemoteSettledPackRemainsCatchUp),
-    ("trash pull tracker tank lead only when behind", TrashPullTrackerTankLeadOnlyWhenBehind),
-    ("trash pull tracker never leads beyond tank", TrashPullTrackerNeverLeadsBeyondTank),
-    ("trash pull tracker disrupted suppresses lead", TrashPullTrackerDisruptedSuppressesLead),
     ("BMR parser integration", BmrParserIntegration),
     ("explicit multi-encounter match scores nearest encounter", ExplicitMultiEncounterMatchScoresNearestEncounter),
     ("low-confidence auto-match rejection", LowConfidenceAutoMatchRejected),
@@ -107,6 +110,8 @@ var tests = new (string Name, Action Body)[]
     ("trash defensive zone requires objective failure", TrashDefensiveZoneRequiresObjectiveFailure),
     ("defensive zone overcommit detector", DefensiveZoneOvercommitDetector),
     ("manual correction detector", ManualCorrectionDetector),
+    ("manual correction golden fixture", ManualCorrectionGoldenFixture),
+    ("manual correction feedback lowers advisory goals", ManualCorrectionFeedbackLowersAdvisoryGoals),
 };
 
 var failures = 0;
@@ -114,6 +119,12 @@ foreach (var test in tests)
 {
     try
     {
+        if (skipGameData && gameDataTests.Contains(test.Name))
+        {
+            Console.WriteLine($"SKIP {test.Name}: game data tests disabled");
+            continue;
+        }
+
         test.Body();
         Console.WriteLine($"PASS {test.Name}");
     }
@@ -306,27 +317,6 @@ static void ConfigurationLoggingDefaultsAndReset()
     AssertEqual(currentVersion, config.Version, "migrated version");
     AssertFalse(config.FightReviewLoggingEnabled, "migration disables logging");
     AssertTrue(config.ManageSocialTurning, "migration enables social turning");
-}
-
-static void ConfigurationTankLeadDefaultsAndReset()
-{
-    var config = new Configuration();
-    var currentVersion = config.Version;
-    AssertTrue(config.LeadTrashPullsWithTank, "default tank lead enabled");
-
-    config.LeadTrashPullsWithTank = false;
-    config.ResetBehaviorSettings();
-    AssertTrue(config.LeadTrashPullsWithTank, "behavior reset enables tank lead");
-
-    config.LeadTrashPullsWithTank = false;
-    config.ResetAll();
-    AssertTrue(config.LeadTrashPullsWithTank, "full reset enables tank lead");
-
-    config.Version = 16;
-    config.LeadTrashPullsWithTank = false;
-    config.Migrate();
-    AssertEqual(currentVersion, config.Version, "tank lead migrated version");
-    AssertTrue(config.LeadTrashPullsWithTank, "migration enables tank lead");
 }
 
 static void FriendlyAnchorDashRequiresMeaningfulGain()
@@ -919,6 +909,40 @@ static void MechanicWhisperGuardKeepsAlignedShorterOrConfidentGoals()
         "confident stable side whispers should redirect BMR");
 }
 
+static void MechanicSafetyIsolatesTopGoalContributions()
+{
+    static float Goal(object _) => 0f;
+
+    var contributions = new[]
+    {
+        new BossModGoalContribution((Func<object, float>)Goal, BossModGoalPriority.Convenience, "Boss center avoidance"),
+        new BossModGoalContribution((Func<object, float>)Goal, BossModGoalPriority.Uptime, "Target uptime"),
+        new BossModGoalContribution((Func<object, float>)Goal, BossModGoalPriority.Uptime, "Pack engagement"),
+    };
+
+    var selected = BossModGoalZoneHook.SelectMechanicSafetyGoalContributions(contributions);
+    AssertEqual(2, selected.Length, "mechanic safety selected count");
+    AssertTrue(selected.All(c => c.Priority == BossModGoalPriority.Uptime), "mechanic safety selected top priority only");
+
+    AssertTrue(
+        BossModGoalZoneHook.ShouldIsolateMechanicSafetyGoals(
+            forbiddenZones: 1,
+            temporaryObstacles: 0,
+            forbiddenDirections: 0,
+            imminentSpecialMode: "<none>",
+            forcedMovementActive: false),
+        "forbidden zones isolate advisory goals");
+
+    AssertFalse(
+        BossModGoalZoneHook.ShouldIsolateMechanicSafetyGoals(
+            forbiddenZones: 0,
+            temporaryObstacles: 0,
+            forbiddenDirections: 0,
+            imminentSpecialMode: "<none>",
+            forcedMovementActive: false),
+        "normal movement can combine advisory goals");
+}
+
 static void MechanicEscapeMarginFollowsBmrMovement()
 {
     AssertTrue(
@@ -971,44 +995,6 @@ static void MechanicEscapeMarginFollowsBmrMovement()
             moveImminent: true,
             out _),
         "mechanic margin requires active forbidden zones");
-}
-
-static void TargetUptimeContributesDuringMechanicExits()
-{
-    AssertTrue(
-        TargetUptimePositioningController.ShouldContributeDuringMechanic(
-            forbiddenZonesActive: true,
-            forcedMovementActive: false,
-            bmrMoveRequested: true,
-            bmrMoveImminent: false),
-        "target uptime should whisper during active BMR mechanic exits");
-
-    AssertFalse(
-        TargetUptimePositioningController.ShouldContributeDuringMechanic(
-            forbiddenZonesActive: true,
-            forcedMovementActive: true,
-            bmrMoveRequested: true,
-            bmrMoveImminent: true),
-        "forced movement remains authoritative");
-
-    AssertTrue(
-        TargetUptimePositioningController.ShouldContributeDuringMechanic(
-            forbiddenZonesActive: false,
-            forcedMovementActive: false,
-            bmrMoveRequested: true,
-            bmrMoveImminent: true),
-        "target uptime should bias BMR movement even without active forbidden zones");
-
-    var candidate = TargetUptimePositioningController.ResolveCandidate(
-        playerPosition: new Vector2(20f, 0f),
-        targetPosition: Vector2.Zero,
-        targetRotation: 0f,
-        targetRadius: 4f,
-        engagementRange: 25f);
-    AssertTrue(
-        MathF.Abs(candidate.X - 28.5f) < 0.01f &&
-        MathF.Abs(candidate.Y) < 0.01f,
-        "target uptime candidate should stay on the player's side inside job range");
 }
 
 static void TrashAoeShortOneHitGainIsWorthMoving()
@@ -1191,37 +1177,6 @@ static void TrashPullTrackerRemoteSettledPackRemainsCatchUp()
     var status = tracker.Update(TrashObservation(start.AddSeconds(2.5), player: new Vector3(0, 0, 0), tank: new Vector3(60, 0, 0), pack: 62));
 
     AssertTrue(status.Phase == TrashPullPhase.Gathering, "remote settled pack stays in catch-up/gathering");
-    AssertTrue(status.LeadCandidateActive, "remote settled pack emits tank lead");
-}
-
-static void TrashPullTrackerTankLeadOnlyWhenBehind()
-{
-    var tracker = WarmGatheringTracker(player: new Vector3(0, 0, 0), tank: new Vector3(10, 0, 0), pack: 8);
-    AssertTrue(tracker.Current.LeadCandidateActive, "far behind lead active");
-
-    tracker = WarmGatheringTracker(player: new Vector3(7.5f, 0, 0), tank: new Vector3(10, 0, 0), pack: 8);
-    AssertFalse(tracker.Current.LeadCandidateActive, "close behind lead inactive");
-}
-
-static void TrashPullTrackerNeverLeadsBeyondTank()
-{
-    var tracker = WarmGatheringTracker(player: new Vector3(0, 0, 0), tank: new Vector3(12, 0, 0), pack: 11);
-    var status = tracker.Current;
-    AssertTrue(status.LeadCandidateActive, "lead active");
-    AssertTrue(status.LeadDestination != null, "lead destination");
-    var leadAhead = status.LeadDestination!.Value.X - status.TankPosition!.Value.X;
-    AssertTrue(leadAhead <= -2f + 0.01f, "lead remains behind tank");
-}
-
-static void TrashPullTrackerDisruptedSuppressesLead()
-{
-    var tracker = WarmGatheringTracker(player: new Vector3(0, 0, 0), tank: new Vector3(10, 0, 0), pack: 8, bmrSafety: true);
-    AssertTrue(tracker.Current.Phase == TrashPullPhase.Disrupted, "BMR disrupted phase");
-    AssertFalse(tracker.Current.LeadCandidateActive, "BMR suppresses lead");
-
-    tracker = WarmGatheringTracker(player: new Vector3(0, 0, 0), tank: new Vector3(10, 0, 0), pack: 8, manual: true);
-    AssertTrue(tracker.Current.Phase == TrashPullPhase.Disrupted, "manual disrupted phase");
-    AssertFalse(tracker.Current.LeadCandidateActive, "manual suppresses lead");
 }
 
 static void BmrParserIntegration()
@@ -2096,6 +2051,29 @@ static void ManualCorrectionDetector()
     AssertContains("arena boundary", incident.Evidence, "manual correction evidence");
 }
 
+static void ManualCorrectionGoldenFixture()
+{
+    var log = XcaiLogReader.Read(FixturePath("manual-correction.jsonl"));
+    var incident = IncidentDetector.Detect(log).Single(i => i.Category == "manual-correction");
+    AssertContains("last active planner source was Arena edge", incident.Evidence, "manual correction fixture source");
+}
+
+static void ManualCorrectionFeedbackLowersAdvisoryGoals()
+{
+    var feedback = new ManualCorrectionFeedback();
+    var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    var movement = BossModMovementDiagnostics.Empty with { NavigationDestinationPosition = new Vector2(1, 0) };
+    feedback.RecordManualMovement(new Vector3(0, 0, 0), "Arena edge", movement, now);
+
+    Func<Vector2, float> score = _ => 1f;
+    var advisory = new BossModGoalContribution(score, BossModGoalPriority.Convenience, "Arena edge", AdvisoryWeight: 1f);
+    var raw = new BossModGoalContribution(score, BossModGoalPriority.DefensiveMechanic, "Mechanic exit margin", ScoreMode: BossModGoalScoreMode.Raw, AdvisoryWeight: 1f);
+    var adjusted = feedback.Apply([advisory, raw], new Vector3(0, 0, 0), now);
+
+    AssertTrue(adjusted[0].AdvisoryWeight is > 0f and < 1f, "manual feedback lowers advisory weight");
+    AssertEqual(1f, adjusted[1].AdvisoryWeight, "manual feedback preserves raw mechanic weight");
+}
+
 static XcaiLog Log(params XcaiFrame[] frames)
 {
     return LogWithCombatStyle("Standard", frames);
@@ -2458,16 +2436,6 @@ static ActorSnapshot EnemyActor(string relation, ulong gameObjectId, uint baseId
         0);
 }
 
-static TrashPullStateTracker WarmGatheringTracker(Vector3 player, Vector3 tank, float pack, bool bmrSafety = false, bool manual = false)
-{
-    var tracker = new TrashPullStateTracker();
-    var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-    tracker.Update(TrashObservation(start, player, tank - new Vector3(4, 0, 0), pack - 2, bmrSafety, manual));
-    tracker.Update(TrashObservation(start.AddMilliseconds(300), player, tank - new Vector3(2, 0, 0), pack - 1, bmrSafety, manual));
-    tracker.Update(TrashObservation(start.AddMilliseconds(900), player, tank, pack, bmrSafety, manual));
-    return tracker;
-}
-
 static TrashPullObservation TrashObservation(DateTime now, Vector3 player, Vector3 tank, float pack, bool bmrSafety = false, bool manual = false)
 {
     var targets = new[]
@@ -2484,7 +2452,6 @@ static TrashPullObservation TrashObservation(DateTime now, Vector3 player, Vecto
         ManualSuppressed: manual,
         BmrSafetyPressure: bmrSafety,
         PlayerPosition: player,
-        EngagementRange: 3,
         PackAoeRange: 5,
         Tank: new TrashPullActorPosition(10, tank),
         PartyMembers: [new TrashPullActorPosition(10, tank), new TrashPullActorPosition(11, tank - new Vector3(1, 0, 0))],

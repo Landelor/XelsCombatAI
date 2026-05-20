@@ -25,7 +25,6 @@ internal sealed record TrashPullObservation(
     bool ManualSuppressed,
     bool BmrSafetyPressure,
     Vector3 PlayerPosition,
-    float EngagementRange,
     float PackAoeRange,
     TrashPullActorPosition? Tank,
     IReadOnlyList<TrashPullActorPosition> PartyMembers,
@@ -41,10 +40,6 @@ internal sealed record TrashPullDiagnostics(
     Vector3? TankVelocity,
     float TankSpeed,
     Vector3? ProjectedTankPosition,
-    Vector3? LeadDestination,
-    bool LeadCandidateActive,
-    bool LeadClampApplied,
-    float? BehindDistance,
     Vector3? PackCentroid,
     Vector3? PackVelocity,
     float PackSpeed,
@@ -53,8 +48,7 @@ internal sealed record TrashPullDiagnostics(
     int DominantTargetCount,
     int StragglerTargetCount,
     IReadOnlyList<ulong> DominantTargetIds,
-    IReadOnlyList<ulong> StragglerTargetIds,
-    string LeadRejectionReason)
+    IReadOnlyList<ulong> StragglerTargetIds)
 {
     public static TrashPullDiagnostics Empty { get; } = new(
         TrashPullPhase.None,
@@ -66,10 +60,6 @@ internal sealed record TrashPullDiagnostics(
         0f,
         null,
         null,
-        false,
-        false,
-        null,
-        null,
         null,
         0f,
         null,
@@ -77,8 +67,7 @@ internal sealed record TrashPullDiagnostics(
         0,
         0,
         [],
-        [],
-        "<none>");
+        []);
 }
 
 internal sealed class TrashPullStateTracker
@@ -92,10 +81,6 @@ internal sealed class TrashPullStateTracker
     private const float PackFluidSpeed = 0.75f;
     private const float PackSettledSpeed = 0.8f;
     private const float PartyFluidSpeed = 1.5f;
-    private const float LeadActivateBehindDistance = 7f;
-    private const float LeadDeactivateBehindDistance = 4f;
-    private const float LeadMinimumBehindTank = 2f;
-    private const float LeadFarPackExtraDistance = 5f;
     private const float CatchUpPackDistance = 16f;
     private const float CatchUpTankDistance = 12f;
     private const float MaxObservedSpeed = 12f;
@@ -112,7 +97,6 @@ internal sealed class TrashPullStateTracker
     private Vector3? lastPackCentroid;
     private DateTime lastPackAtUtc = DateTime.MinValue;
     private readonly Dictionary<ulong, (Vector3 Position, DateTime AtUtc)> lastPartyPositions = [];
-    private bool leadActive;
 
     public TrashPullDiagnostics Current { get; private set; } = TrashPullDiagnostics.Empty;
 
@@ -130,7 +114,6 @@ internal sealed class TrashPullStateTracker
         this.lastPackCentroid = null;
         this.lastPackAtUtc = DateTime.MinValue;
         this.lastPartyPositions.Clear();
-        this.leadActive = false;
         this.Current = TrashPullDiagnostics.Empty with { Reason = reason };
     }
 
@@ -187,7 +170,7 @@ internal sealed class TrashPullStateTracker
             out var confidence);
         this.SetPhase(nextPhase, now);
 
-        var lead = this.BuildLeadDiagnostics(
+        var diagnostics = this.BuildDiagnostics(
             observation,
             tankPosition,
             tankVelocity,
@@ -202,11 +185,11 @@ internal sealed class TrashPullStateTracker
             confidence,
             phaseReason);
 
-        this.Current = lead;
+        this.Current = diagnostics;
         return this.Current;
     }
 
-    private TrashPullDiagnostics BuildLeadDiagnostics(
+    private TrashPullDiagnostics BuildDiagnostics(
         TrashPullObservation observation,
         Vector3? tankPosition,
         Vector3? tankVelocity,
@@ -221,93 +204,7 @@ internal sealed class TrashPullStateTracker
         float confidence,
         string phaseReason)
     {
-        var projectedTank = (Vector3?)null;
-        var leadDestination = (Vector3?)null;
-        var behindDistance = (float?)null;
-        var clampApplied = false;
-        var leadCandidateActive = false;
-        var rejectionReason = "<none>";
-
-        if (this.phase != TrashPullPhase.Gathering)
-        {
-            this.leadActive = false;
-            rejectionReason = $"phase {this.phase}";
-        }
-        else if (confidence < 0.65f)
-        {
-            this.leadActive = false;
-            rejectionReason = string.Create(CultureInfo.InvariantCulture, $"confidence {confidence:0.00}");
-        }
-        else if (!tankPosition.HasValue)
-        {
-            this.leadActive = false;
-            rejectionReason = "tank unavailable";
-        }
-        else if (!packCentroid.HasValue)
-        {
-            this.leadActive = false;
-            rejectionReason = "pack unavailable";
-        }
-        else
-        {
-            var tank2 = ToVector2(tankPosition.Value);
-            var player2 = ToVector2(observation.PlayerPosition);
-            var pack2 = ToVector2(packCentroid.Value);
-            var forward = ResolveForward(tankVelocity, packVelocity, tank2, player2, pack2);
-            if (forward.LengthSquared() <= 0.01f)
-            {
-                this.leadActive = false;
-                rejectionReason = "tank direction unavailable";
-            }
-            else
-            {
-                behindDistance = Vector2.Dot(tank2 - player2, forward);
-                var trailingDistance = DesiredTrailingDistance(observation.EngagementRange, observation.PackAoeRange);
-                var distanceToPack = Vector2.Distance(player2, pack2);
-                var farBehindPack = distanceToPack > trailingDistance + LeadFarPackExtraDistance &&
-                                    behindDistance.Value >= LeadMinimumBehindTank;
-                var shouldLead = this.leadActive
-                    ? behindDistance.Value > LeadDeactivateBehindDistance
-                    : behindDistance.Value >= LeadActivateBehindDistance || farBehindPack;
-
-                if (!shouldLead)
-                {
-                    this.leadActive = false;
-                    rejectionReason = behindDistance.Value < 0f
-                        ? string.Create(CultureInfo.InvariantCulture, $"ahead of tank by {-behindDistance.Value:0.0}y")
-                        : string.Create(CultureInfo.InvariantCulture, $"close enough behind tank ({behindDistance.Value:0.0}y)");
-                }
-                else
-                {
-                    var projectSeconds = Math.Clamp(0.5f + (tankSpeed / 12f * 0.5f), 0.5f, 1f);
-                    var projected2 = tank2 + forward * tankSpeed * projectSeconds;
-                    projectedTank = ToVector3(projected2, tankPosition.Value.Y);
-                    var trailingPoint = projected2 - forward * trailingDistance;
-                    var packTrailingPoint = pack2 - forward * MathF.Min(trailingDistance, 4f);
-                    var candidate = Vector2.Lerp(trailingPoint, packTrailingPoint, 0.35f);
-                    var candidateLead = Vector2.Dot(candidate - tank2, forward);
-                    if (candidateLead > -LeadMinimumBehindTank)
-                    {
-                        candidate -= forward * (candidateLead + LeadMinimumBehindTank);
-                        clampApplied = true;
-                    }
-
-                    var finalLead = Vector2.Dot(candidate - tank2, forward);
-                    if (finalLead > -LeadMinimumBehindTank + 0.05f)
-                    {
-                        this.leadActive = false;
-                        rejectionReason = "destination would overtake tank";
-                    }
-                    else
-                    {
-                        this.leadActive = true;
-                        leadCandidateActive = true;
-                        leadDestination = ToVector3(candidate, tankPosition.Value.Y);
-                        rejectionReason = clampApplied ? "clamped behind tank" : "<none>";
-                    }
-                }
-            }
-        }
+        var projectedTank = this.ProjectTankPosition(observation, tankPosition, tankVelocity, tankSpeed, packCentroid, packVelocity);
 
         return new TrashPullDiagnostics(
             this.phase,
@@ -318,10 +215,6 @@ internal sealed class TrashPullStateTracker
             tankVelocity,
             tankSpeed,
             projectedTank,
-            leadDestination,
-            leadCandidateActive,
-            clampApplied,
-            behindDistance,
             packCentroid,
             packVelocity,
             ClampSpeed(Length2D(packVelocity)),
@@ -330,8 +223,7 @@ internal sealed class TrashPullStateTracker
             dominantTargetCount,
             stragglerTargetCount,
             dominantIds,
-            stragglerIds,
-            rejectionReason);
+            stragglerIds);
     }
 
     private string ResolvePhase(
@@ -504,10 +396,6 @@ internal sealed class TrashPullStateTracker
 
         this.phase = nextPhase;
         this.phaseEnteredAtUtc = now;
-        if (nextPhase != TrashPullPhase.Gathering)
-        {
-            this.leadActive = false;
-        }
     }
 
     private Vector3? ComputeVelocity(Vector3? current, DateTime now, Vector3? previous, DateTime previousAt)
@@ -593,10 +481,35 @@ internal sealed class TrashPullStateTracker
         return forward.LengthSquared() <= 0.01f ? Vector2.Zero : Vector2.Normalize(forward);
     }
 
-    private static float DesiredTrailingDistance(float engagementRange, float packAoeRange)
+    private Vector3? ProjectTankPosition(
+        TrashPullObservation observation,
+        Vector3? tankPosition,
+        Vector3? tankVelocity,
+        float tankSpeed,
+        Vector3? packCentroid,
+        Vector3? packVelocity)
     {
-        var range = MathF.Max(engagementRange, packAoeRange);
-        return Math.Clamp(range * 0.45f, 2.5f, 8f);
+        if (this.phase != TrashPullPhase.Gathering ||
+            !tankPosition.HasValue ||
+            !packCentroid.HasValue)
+        {
+            return null;
+        }
+
+        var forward = ResolveForward(
+            tankVelocity,
+            packVelocity,
+            ToVector2(tankPosition.Value),
+            ToVector2(observation.PlayerPosition),
+            ToVector2(packCentroid.Value));
+        if (forward.LengthSquared() <= 0.01f)
+        {
+            return null;
+        }
+
+        var projectSeconds = Math.Clamp(0.5f + (tankSpeed / 12f * 0.5f), 0.5f, 1f);
+        var projected = ToVector2(tankPosition.Value) + (forward * tankSpeed * projectSeconds);
+        return ToVector3(projected, tankPosition.Value.Y);
     }
 
     private static float ClampSpeed(float? speed)

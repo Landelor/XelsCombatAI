@@ -141,9 +141,6 @@ internal sealed class CombatHistory
             PassagePaladin: status.PassageOfArmsPositioning.PaladinPosition,
             PassagePreferred: status.PassageOfArmsPositioning.PreferredPosition,
             HealerCoverageCenter: status.HealerCoveragePositioning.Center,
-            AggroReason: status.AggroSafety.LastReason,
-            AggroInjected: status.AggroSafety.Injected,
-            AggroSeconds: status.AggroSafety.AggroSeconds,
             ArenaEdgeReason: status.ArenaEdgeReason,
             GoalPriority: status.AoeGoalPriority,
             GoalSources: status.AoeGoalSources,
@@ -152,7 +149,6 @@ internal sealed class CombatHistory
             BossModNavigationDestination: status.BossModMovement.NavigationDestination,
             BossModNavigationNextWaypoint: status.BossModMovement.NavigationNextWaypoint,
             BossModNavigationStats: status.BossModMovement.NavigationStats,
-            BossModVnavmeshGuard: status.BossModMovement.VnavmeshGuard,
             BossModControllerTarget: status.BossModMovement.ControllerTarget,
             BossModMovementOverride: status.BossModMovement.MovementOverride,
             BossModHintSummary: status.BossModMovement.HintSummary,
@@ -192,7 +188,7 @@ internal sealed class CombatHistory
         sb.AppendLine($"Start={this.combatStart:O}  Duration={last.T:0.0}s  Frames={this.count}");
         sb.AppendLine();
         sb.AppendLine("[Header]");
-        sb.AppendLine($"Job={this.PlayerClassJobId}  TargetUptime={config.ManageTargetUptime}  PickAoeTarget={config.PickBetterAoeTarget}  KeepTrashTarget={config.KeepTrashTargetSelected}  LeadTrashPulls={config.LeadTrashPullsWithTank}  ManagePositionals={config.ManagePositionals}  ManageTrueNorth={config.ManageTrueNorth}  SocialTurning={config.ManageSocialTurning}  RedMageMelee={config.UseRedMageMeleeComboMovement}  CombatStyle={config.CombatStyle}  RsrSnapshot={this.lastSeenRsrSnapshotMode}");
+        sb.AppendLine($"Job={this.PlayerClassJobId}  PickAoeTarget={config.PickBetterAoeTarget}  KeepTrashTarget={config.KeepTrashTargetSelected}  ManagePositionals={config.ManagePositionals}  ManageTrueNorth={config.ManageTrueNorth}  SocialTurning={config.ManageSocialTurning}  RedMageMelee={config.UseRedMageMeleeComboMovement}  CombatStyle={config.CombatStyle}  RsrSnapshot={this.lastSeenRsrSnapshotMode}");
         sb.AppendLine();
         sb.AppendLine("[Frames]");
 
@@ -226,7 +222,6 @@ internal sealed class CombatHistory
             AppendIfChanged(sb, "BMRDest", frame.BossModNavigationDestination, prev?.BossModNavigationDestination);
             AppendIfChanged(sb, "BMRNext", frame.BossModNavigationNextWaypoint, prev?.BossModNavigationNextWaypoint);
             AppendIfChanged(sb, "BMRNav", frame.BossModNavigationStats, prev?.BossModNavigationStats);
-            AppendIfChanged(sb, "BMRVnavGuard", frame.BossModVnavmeshGuard, prev?.BossModVnavmeshGuard);
             AppendIfChanged(sb, "BMRPlannerSteer", frame.BossModMovement.PlannerSteer, prev?.BossModMovement.PlannerSteer);
             AppendIfChanged(sb, "BMRController", frame.BossModControllerTarget, prev?.BossModControllerTarget);
             AppendIfChanged(sb, "BMRMove", frame.BossModMovementOverride, prev?.BossModMovementOverride);
@@ -266,9 +261,6 @@ internal sealed class CombatHistory
             AppendIfChanged(sb, "AoeCandidateInjected", frame.AoeCandidateInjected, prev?.AoeCandidateInjected);
             AppendIfChanged(sb, "TrashPhase", frame.TrashPull.Phase, prev?.TrashPull.Phase);
             AppendIfChanged(sb, "TrashReason", frame.TrashPull.Reason, prev?.TrashPull.Reason);
-            AppendIfChanged(sb, "TankLeadDest", FormatVector(frame.TrashPull.LeadDestination), prev == null ? null : FormatVector(prev.TrashPull.LeadDestination));
-            AppendIfChanged(sb, "TankLeadBehind", FormatNullableFloat(frame.TrashPull.BehindDistance), prev == null ? null : FormatNullableFloat(prev.TrashPull.BehindDistance));
-            AppendIfChanged(sb, "TankLeadReject", frame.TrashPull.LeadRejectionReason, prev?.TrashPull.LeadRejectionReason);
 
             // Survivability zone — only print when active or just cleared
             if (frame.SurvZoneInjected || prev?.SurvZoneInjected == true)
@@ -302,18 +294,6 @@ internal sealed class CombatHistory
             else
             {
                 AppendIfChanged(sb, "Passage", frame.PassageReason, prev?.PassageReason);
-            }
-
-            // Aggro safety — only print when active or just cleared
-            if (frame.AggroInjected || prev?.AggroInjected == true)
-            {
-                AppendIfChanged(sb, "Aggro", frame.AggroReason, prev?.AggroReason);
-                AppendIfChanged(sb, "AggroInjected", frame.AggroInjected, prev?.AggroInjected);
-                AppendIfChanged(sb, "AggroSecs", $"{frame.AggroSeconds:0.0}", prev == null ? null : $"{prev.AggroSeconds:0.0}");
-            }
-            else
-            {
-                AppendIfChanged(sb, "Aggro", frame.AggroReason, prev?.AggroReason);
             }
 
             AppendIfChanged(sb, "ArenaEdge", frame.ArenaEdgeReason, prev?.ArenaEdgeReason);
@@ -514,10 +494,8 @@ internal sealed class CombatHistory
         string RsrSnapshotMode);
 
     private sealed record CombatHistoryConfigSnapshot(
-        bool TargetUptime,
         bool PickAoeTarget,
         bool KeepTrashTarget,
-        bool LeadTrashPullsWithTank,
         bool ManagePositionals,
         bool ManageTrueNorth,
         bool ManageSocialTurning,
@@ -530,10 +508,8 @@ internal sealed class CombatHistory
         public static CombatHistoryConfigSnapshot From(Configuration config)
         {
             return new CombatHistoryConfigSnapshot(
-                config.ManageTargetUptime,
                 config.PickBetterAoeTarget,
                 config.KeepTrashTargetSelected,
-                config.LeadTrashPullsWithTank,
                 config.ManagePositionals,
                 config.ManageTrueNorth,
                 config.ManageSocialTurning,

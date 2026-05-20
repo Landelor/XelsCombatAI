@@ -14,6 +14,7 @@ RUN_TOOL_TESTS=1
 RUN_PLUGIN=1
 RUN_FORMAT=0
 RUN_PACKAGE=0
+TOOL_TEST_ARGS=()
 
 usage() {
   cat <<EOF
@@ -113,10 +114,10 @@ if [[ "$RUN_TOOLS" -eq 1 ]]; then
     fi
 
     if [[ -z "${FFXIV_GAME_PATH:-}" ]]; then
-      fail "FFXIV_GAME_PATH is required for FightReview.Tests. Expected default path '$DEFAULT_FFXIV_GAME_PATH', or use --skip-tool-tests."
+      TOOL_TEST_ARGS+=(--skip-game-data)
+    else
+      [[ -d "$FFXIV_GAME_PATH" ]] || fail "FFXIV_GAME_PATH does not exist: '$FFXIV_GAME_PATH'."
     fi
-
-    [[ -d "$FFXIV_GAME_PATH" ]] || fail "FFXIV_GAME_PATH does not exist: '$FFXIV_GAME_PATH'."
   fi
 fi
 
@@ -131,7 +132,7 @@ if [[ "$RUN_TOOLS" -eq 1 ]]; then
 
   if [[ "$RUN_TOOL_TESTS" -eq 1 ]]; then
     run dotnet restore "$TOOL_TEST_PROJECT" -p:EnableWindowsTargeting=true
-    run dotnet run --project "$TOOL_TEST_PROJECT" -c Release -p:EnableWindowsTargeting=true --no-restore
+    run dotnet run --project "$TOOL_TEST_PROJECT" -c Release -p:EnableWindowsTargeting=true --no-restore -- "${TOOL_TEST_ARGS[@]}"
   fi
 fi
 

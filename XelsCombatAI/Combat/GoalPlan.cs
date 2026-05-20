@@ -71,9 +71,10 @@ internal sealed class GoalPlan(
 
     public CandidateScore FindBestCandidate(Vector2 playerPosition, Func<Vector2, bool>? candidateAllowed = null, Vector2? retainedPosition = null)
     {
-        var best = this.ScoreCandidate(playerPosition);
+        var playerAllowed = candidateAllowed?.Invoke(playerPosition) ?? true;
+        var best = playerAllowed ? this.ScoreCandidate(playerPosition) : new CandidateScore(playerPosition, 0);
         var bestPosition = playerPosition;
-        var bestPreference = this.CandidatePreference(playerPosition, playerPosition);
+        var bestPreference = playerAllowed ? this.CandidatePreference(playerPosition, playerPosition) : float.NegativeInfinity;
         foreach (var candidate in this.GenerateCandidates(playerPosition))
         {
             if (candidateAllowed != null && !candidateAllowed(candidate))

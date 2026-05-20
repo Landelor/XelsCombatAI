@@ -167,8 +167,8 @@ Follow these Dalamud plugin conventions:
 
 ## Config UI Style
 
-- Keep the config window organized around the current tab layout: `Main`, `Positioning`, `Distance`, `Gap Closers`, and `Chat & Reset`.
-- Put only broad, frequently used controls in `Main`. Keep positional behavior in `Positioning`, range and forbidden-zone behavior in `Distance`, gap closer behavior in `Gap Closers`, and feedback/reset controls in `Chat & Reset`.
+- Keep the config window organized around the current tab layout: `General`, `Movement`, `AoE & Trash`, `Positionals`, `Job Specific`, `Dashes`, and `Troubleshooting`.
+- Put broad enable/reset controls in `General`. Keep movement timing, danger-zone spacing, healer/utility zones, and edge/facing preferences in `Movement`; trash and AoE target behavior in `AoE & Trash`; positional behavior in `Positionals`; job-specific behavior in `Job Specific`; gap closer behavior in `Dashes`; and feedback, overlay, debug, and run-review controls in `Troubleshooting`.
 - Use `DrawSectionHeader` for plain groups and `DrawToggleSectionHeader` for master toggles that own a group of dependent controls.
 - Use existing UI helper methods (`Checkbox`, `Combo`, `SliderFloat`, `SliderInt`, `DrawToggleSectionHeader`) instead of drawing one-off controls, so reset behavior, disabled-state tooltips, and info icons stay consistent.
 - For options whose label alone may be unclear, add a `FontAwesomeIcon.InfoCircle` info icon through the existing tooltip helper path. The icon tooltip should explain the user-visible behavior in clear, direct language.

@@ -36,9 +36,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ConfigWindow configWindow;
     private readonly IDtrBarEntry? dtrEntry;
     private readonly DalamudServices services;
+    private readonly CombatComposition combat;
     private readonly CombatRuntime runtime;
     private readonly DecisionOverlayController decisionOverlay;
-    private readonly JobRangeProvider jobRangeProvider;
 
     public Plugin()
     {
@@ -64,110 +64,17 @@ public sealed class Plugin : IDalamudPlugin
         this.config.Migrate();
         this.config.Clamp();
 
-        var bossMod = new BossModIpc(PluginInterface, Log);
-        var bossModSafety = new BossModReflectionSafety(PluginInterface, Log);
-        var vnavmesh = new VNavmeshIpc(PluginInterface);
-        var manualMovement = new ManualMovementInputDetector();
-        var rotationSolver = new RotationSolverIpc(PluginInterface, Log);
-        var rotationSolverActions = new RotationSolverActionReflection(PluginInterface, Log);
-        var dependencyChecker = new DependencyChecker(this.config, this.services, bossMod, rotationSolver);
-        this.jobRangeProvider = new JobRangeProvider(this.services);
-        this.jobRangeProvider.Initialize();
-        var targetUptimePlanner = new TargetUptimePlanner(this.services, bossMod, this.jobRangeProvider);
-        BossModPresetController? presetController = null;
-        CombatRuntime? runtime = null;
-        var positionalsController = new PositionalsController(this.config, this.services, rotationSolver, positional => presetController!.SetPositional(positional), this.UpdateDtr);
-        var mobilityDecisionEvaluator = new MobilityDecisionEvaluator(bossModSafety, vnavmesh, this.jobRangeProvider);
-        var arenaEdgePositioningController = new ArenaEdgePositioningController(this.config, this.services);
-        var dashStyleController = new DashStyleController(this.config, this.jobRangeProvider, arenaEdgePositioningController);
-        var facingController = new FacingController(this.config, this.services, bossMod, manualMovement, new LocalPlayerFacingActuator());
-        var redMageMeleeComboController = new RedMageMeleeComboController(this.config, this.services, rotationSolverActions, bossModSafety, mobilityDecisionEvaluator, facingController, () => targetUptimePlanner.CurrentTargetHasBossModule());
-        targetUptimePlanner.TargetUptimeRangeOverride = redMageMeleeComboController.GetTargetUptimeRangeOverride;
-        var targetUptimePositioningController = new TargetUptimePositioningController(this.config, this.services, this.jobRangeProvider, () => runtime?.AutomatedMovementSuppressed == true, () => targetUptimePlanner.CurrentTargetHasBossModule());
-        var aoePackPositioningController = new AoePackPositioningController(this.config, this.services, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true, rotationSolver, () => targetUptimePlanner.CurrentTargetHasBossModule(), this.jobRangeProvider);
-        var passageOfArmsPositioningController = new PassageOfArmsPositioningController(this.config, this.services, () => runtime?.AutomatedMovementSuppressed == true);
-        var healerAoePositioningController = new HealerAoePositioningController(this.config, this.services, bossMod, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true);
-        var survivabilityZonePositioningController = new SurvivabilityZonePositioningController(this.config, this.services, () => runtime?.AutomatedMovementSuppressed == true);
-        var aggroSafetyController = new AggroSafetyController(this.config, this.services, () => runtime?.AutomatedMovementSuppressed == true);
-        var bossCenterAvoidanceController = new BossCenterAvoidanceController(this.config, this.services, () => runtime?.AutomatedMovementSuppressed == true, () => targetUptimePlanner.CurrentTargetHasBossModule());
-        IBossModGoalZoneContributor[] legacyMovementContributors = [aggroSafetyController, targetUptimePositioningController, aoePackPositioningController, passageOfArmsPositioningController, healerAoePositioningController, survivabilityZonePositioningController, bossCenterAvoidanceController, arenaEdgePositioningController];
-        var aoeGoalHook = new BossModGoalZoneHook(this.config, PluginInterface, this.services, Log, vnavmesh, legacyMovementContributors);
-        var gapCloserController = new GapCloserController(
+        this.combat = CombatComposition.Create(
             this.config,
             this.services,
-            bossMod,
-            bossModSafety,
-            this.jobRangeProvider,
-            mobilityDecisionEvaluator,
-            dashStyleController,
-            facingController,
-            rotationSolverActions,
-            () => aoePackPositioningController.RsrHenchedActive,
-            () => aoePackPositioningController.Status.TrashPull);
-        var escapeGapCloserController = new EscapeGapCloserController(
-            this.config,
-            this.services,
-            bossModSafety,
-            mobilityDecisionEvaluator,
-            gapCloserController,
-            dashStyleController,
-            facingController,
-            () => aoeGoalHook.MovementDiagnostics);
-        var combatLogWriter = new CombatLogWriter(Path.Combine(ResolveConfigDirectory(), "combat-logs"), Log);
-        presetController = new BossModPresetController(
-            this.config,
-            this.services,
-            bossMod,
-            bossModSafety,
-            targetUptimePlanner,
-            positionalsController,
-            gapCloserController,
-            escapeGapCloserController,
-            redMageMeleeComboController);
-
-        runtime = new CombatRuntime(
-            this.config,
-            this.services,
-            dependencyChecker,
-            presetController,
-            positionalsController,
-            rotationSolver,
-            rotationSolverActions,
-            bossModSafety,
-            aoeGoalHook,
-            aoePackPositioningController,
-            passageOfArmsPositioningController,
-            healerAoePositioningController,
-            survivabilityZonePositioningController,
-            aggroSafetyController,
-            arenaEdgePositioningController,
-            redMageMeleeComboController,
-            combatLogWriter,
-            manualMovement,
-            mobilityDecisionEvaluator,
-            gapCloserController,
-            escapeGapCloserController,
-            dashStyleController,
-            facingController,
-            this.jobRangeProvider,
+            PluginInterface,
+            Log,
+            ResolveConfigDirectory(),
             this.SaveConfig,
             this.UpdateDtr,
             this.Print);
-        this.runtime = runtime;
-        this.decisionOverlay = new DecisionOverlayController(
-            this.config,
-            this.services,
-            aoePackPositioningController,
-            () => targetUptimePlanner.CurrentTargetHasBossModule(),
-            passageOfArmsPositioningController,
-            healerAoePositioningController,
-            survivabilityZonePositioningController,
-            bossModSafety,
-            mobilityDecisionEvaluator,
-            gapCloserController,
-            escapeGapCloserController,
-            redMageMeleeComboController,
-            rotationSolverActions);
+        this.runtime = this.combat.Runtime;
+        this.decisionOverlay = this.combat.DecisionOverlay;
 
         this.configWindow = new ConfigWindow(
             this.config,
@@ -210,7 +117,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi -= this.OpenConfig;
         PluginInterface.UiBuilder.Draw -= this.windowSystem.Draw;
         this.runtime.DisposeRuntime();
-        jobRangeProvider.Dispose();
+        this.combat.Dispose();
         CommandManager.RemoveHandler(CommandName);
         this.dtrEntry?.Remove();
         this.windowSystem.RemoveAllWindows();

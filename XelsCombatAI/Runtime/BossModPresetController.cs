@@ -85,7 +85,7 @@ internal sealed class BossModPresetController(
     {
         try
         {
-            this.SetTargetUptimeRange(targetUptimePlanner.CalculateTargetUptimeRange(config.ManageTargetUptime));
+            this.SetTargetUptimeRange(targetUptimePlanner.CalculateTargetUptimeRange());
 
             this.SetForbiddenZoneCushion(config.ManageForbiddenZoneDistance
                 ? MapForbiddenZoneCushion(config.PreferredForbiddenZoneDistance)

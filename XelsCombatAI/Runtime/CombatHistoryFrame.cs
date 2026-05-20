@@ -78,10 +78,6 @@ internal sealed record CombatHistoryFrame(
     Vector3? PassagePreferred,
     // Healer coverage
     Vector3? HealerCoverageCenter,
-    // Aggro safety
-    string AggroReason,
-    bool AggroInjected,
-    float AggroSeconds,
     string ArenaEdgeReason,
     // BossMod goal hook
     string GoalPriority,
@@ -91,7 +87,6 @@ internal sealed record CombatHistoryFrame(
     string BossModNavigationDestination,
     string BossModNavigationNextWaypoint,
     string BossModNavigationStats,
-    string BossModVnavmeshGuard,
     string BossModControllerTarget,
     string BossModMovementOverride,
     string BossModHintSummary,

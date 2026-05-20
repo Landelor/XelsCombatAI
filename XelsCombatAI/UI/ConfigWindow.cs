@@ -233,7 +233,6 @@ internal sealed class ConfigWindow : Window, IDisposable
             CombatStyle.GreedLastMoment => "Last second",
             _ => "Safe first"
         }, movementDisabledTooltip);
-        changed |= this.Checkbox("Close in to attack range", this.config.ManageTargetUptime, this.defaultConfig.ManageTargetUptime, v => this.config.ManageTargetUptime = v, "Moves close enough to hit your target or trash pack.\nUses your job's range.", movementDisabledTooltip);
         changed |= this.DrawToggleSectionHeader("Avoid danger zones", this.config.ManageForbiddenZoneDistance, this.defaultConfig.ManageForbiddenZoneDistance, v => this.config.ManageForbiddenZoneDistance = v, "Keeps a little more space from AoE edges when a safe option exists.", disabledTooltip: movementDisabledTooltip);
         var forbiddenZoneDisabledTooltip = !this.config.ManageForbiddenZoneDistance ? "Requires Avoid danger zones." : movementDisabledTooltip;
         if (!this.config.ManageForbiddenZoneDistance)
@@ -265,20 +264,6 @@ internal sealed class ConfigWindow : Window, IDisposable
             v => this.config.ManagePassageOfArmsPositioning = v,
             disabledTooltip: movementDisabledTooltip);
         changed |= this.Checkbox(
-            "Bring aggro to tank",
-            this.config.ManageAggroSafetyMovement,
-            this.defaultConfig.ManageAggroSafetyMovement,
-            v => this.config.ManageAggroSafetyMovement = v,
-            "Non-tanks: if a mob keeps targeting you, moves toward a tank and stops favoring that mob.",
-            movementDisabledTooltip);
-        changed |= this.Checkbox(
-            "Block unreachable unknown-boss movement",
-            this.config.GuardUnknownBossNavigationWithVnavmesh,
-            this.defaultConfig.GuardUnknownBossNavigationWithVnavmesh,
-            v => this.config.GuardUnknownBossNavigationWithVnavmesh = v,
-            "When BossMod does not know the fight, avoids auto-moving to places navigation cannot reach.\nRequires vnavmesh; otherwise this has no effect.",
-            movementDisabledTooltip);
-        changed |= this.Checkbox(
             "Avoid standing inside bosses",
             this.config.AvoidStandingInsideEnemies,
             this.defaultConfig.AvoidStandingInsideEnemies,
@@ -302,28 +287,11 @@ internal sealed class ConfigWindow : Window, IDisposable
     {
         var changed = false;
         var movementDisabledTooltip = !this.config.ManageMovement ? "Requires Automate movement on the Movement tab." : null;
-        var tankLeadDisabledTooltip = !this.config.ManageMovement
-            ? "Requires Automate movement on the Movement tab."
-            : !this.config.ManageTargetUptime
-                ? "Requires Close in to attack range on the Movement tab."
-                : null;
 
         if (!this.config.ManageMovement)
             ImGui.BeginDisabled();
         changed |= this.Checkbox("Move for better AoE hits", this.config.ManageAoePackPositioning, this.defaultConfig.ManageAoePackPositioning, v => this.config.ManageAoePackPositioning = v, "Moves to a safe spot where your AoE can hit more enemies.\nYields to active BossMod mechanic safety.", movementDisabledTooltip);
         if (!this.config.ManageMovement)
-            ImGui.EndDisabled();
-
-        if (tankLeadDisabledTooltip != null)
-            ImGui.BeginDisabled();
-        changed |= this.Checkbox(
-            "Lead trash pulls with tank",
-            this.config.LeadTrashPullsWithTank,
-            this.defaultConfig.LeadTrashPullsWithTank,
-            v => this.config.LeadTrashPullsWithTank = v,
-            "During trash pulls, follows the tank when you fall behind.\nWill not choose a point past the tank.",
-            tankLeadDisabledTooltip);
-        if (tankLeadDisabledTooltip != null)
             ImGui.EndDisabled();
 
         changed |= this.Checkbox("Pick better AoE target", this.config.PickBetterAoeTarget, this.defaultConfig.PickBetterAoeTarget, v => this.config.PickBetterAoeTarget = v);
@@ -424,23 +392,16 @@ internal sealed class ConfigWindow : Window, IDisposable
         this.DrawSectionHeader("Jobs allowed to use gap closers");
         if (ImGui.BeginTable("gapCloserJobs", 3, ImGuiTableFlags.SizingStretchSame))
         {
-            changed |= this.JobCheckbox("PLD", this.config.GapCloserPLD, this.defaultConfig.GapCloserPLD, v => this.config.GapCloserPLD = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("WAR", this.config.GapCloserWAR, this.defaultConfig.GapCloserWAR, v => this.config.GapCloserWAR = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("DRK", this.config.GapCloserDRK, this.defaultConfig.GapCloserDRK, v => this.config.GapCloserDRK = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("GNB", this.config.GapCloserGNB, this.defaultConfig.GapCloserGNB, v => this.config.GapCloserGNB = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("MNK", this.config.GapCloserMNK, this.defaultConfig.GapCloserMNK, v => this.config.GapCloserMNK = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("DRG", this.config.GapCloserDRG, this.defaultConfig.GapCloserDRG, v => this.config.GapCloserDRG = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("NIN", this.config.GapCloserNIN, this.defaultConfig.GapCloserNIN, v => this.config.GapCloserNIN = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("SAM", this.config.GapCloserSAM, this.defaultConfig.GapCloserSAM, v => this.config.GapCloserSAM = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("BRD", this.config.GapCloserBRD, this.defaultConfig.GapCloserBRD, v => this.config.GapCloserBRD = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("DNC", this.config.GapCloserDNC, this.defaultConfig.GapCloserDNC, v => this.config.GapCloserDNC = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("RPR", this.config.GapCloserRPR, this.defaultConfig.GapCloserRPR, v => this.config.GapCloserRPR = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("VPR", this.config.GapCloserVPR, this.defaultConfig.GapCloserVPR, v => this.config.GapCloserVPR = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("WHM", this.config.GapCloserWHM, this.defaultConfig.GapCloserWHM, v => this.config.GapCloserWHM = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("BLM", this.config.GapCloserBLM, this.defaultConfig.GapCloserBLM, v => this.config.GapCloserBLM = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("RDM", this.config.GapCloserRDM, this.defaultConfig.GapCloserRDM, v => this.config.GapCloserRDM = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("SGE", this.config.GapCloserSGE, this.defaultConfig.GapCloserSGE, v => this.config.GapCloserSGE = v, gapCloserDisabledTooltip);
-            changed |= this.JobCheckbox("PCT", this.config.GapCloserPCT, this.defaultConfig.GapCloserPCT, v => this.config.GapCloserPCT = v, gapCloserDisabledTooltip);
+            foreach (var toggle in Configuration.GapCloserJobToggles)
+            {
+                changed |= this.JobCheckbox(
+                    toggle.Label,
+                    toggle.Get(this.config),
+                    toggle.Get(this.defaultConfig),
+                    value => toggle.Set(this.config, value),
+                    gapCloserDisabledTooltip);
+            }
+
             ImGui.EndTable();
         }
 

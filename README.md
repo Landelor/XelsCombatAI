@@ -13,24 +13,20 @@ A Dalamud plugin that automatically manages your BossMod Reborn movement and pos
 While you are in combat, the plugin automatically:
 
 - **Moves you to the correct positional** (rear/flank) based on your autorotation
-- **Maintains target uptime** using internal melee/ranged action-range behavior, including stable mechanic-exit nudges when a safe exit can still hit the target
 - **Manages your Ley Lines** — returns to them when safe, uses Between the Lines and Retrace if available
 - **Can move Red Mage for its enchanted melee combo** — an optional job-specific setting uses RDM mana state and RSR target context to move in for safe enchanted melee range, then prefers a safe Displacement out after the finisher
 - **Stays clear of forbidden zones** with a configurable buffer distance
 - **Uses BossMod-checked gap closers** to re-engage after being knocked away or escape a dangerous spot (optional, off by default). Greedy movement timing can also use a tightly guarded emergency target dash when you are already in danger.
 - **Moves for better AoE hits** when your next AoE can hit more enemies from another spot, while yielding to active BossMod mechanic safety
 - **Picks better AoE and trash targets** when target choice affects how many enemies you hit
-- **Moves closer to trash packs** when you are too far away to hit them well
-- **Follows tank-led trash pulls** when you fall behind the moving pack, with party-route fallback when the tank path is unavailable
 - **Keeps healers in comfortable party-healing range** by pre-positioning toward safe spots that preserve more AoE heal coverage, without interrupting casts or competing with active BossMod mechanic positioning
 - **Avoids awkward boss-center positions** and small enemy hitboxes when choosing movement goals
 - **Prefers helpful defensive ground effects** such as Asylum, Sacred Soil, Earthly Star, and Collective Unconscious
 - **Prefers Paladin Passage of Arms protection** by letting BossMod prefer the protected cone behind a party Paladin while the buff is active
-- **Brings stray aggro to a party tank** when a non-tank is targeted by a mob for more than 3 seconds
 - **Avoids hugging the arena edge** as a weak preference when stronger movement goals do not matter
 - **Shows a decision overlay** with projected in-world markers for current movement decisions, candidates, and debug context, plus an optional movable debug HUD (off by default)
 - **Can write opt-in run-review logs** for offline analysis with BossMod Reborn replay files (off by default)
-- **Pauses automated movement** briefly when you move manually, including remapped movement or gamepad input reported by BossMod
+- **Pauses automated movement** briefly when you move manually, including remapped movement or gamepad input reported by BossMod, and briefly lowers the same advisory movement preference if your input looks like a correction
 - **Manages True North** usage and disables RSR's Auto True North to prevent conflicts (optional, requires RSR)
 
 Out of combat, the plugin stops managing movement entirely and hands control back to you. Settings are automatically re-applied after death and resurrection.
@@ -67,7 +63,7 @@ Open the settings window with `/xcai config` or through the Dalamud plugin list.
 
 ### Movement tab
 
-**Movement** — Control automatic movement, social facing during downtime, manual movement pause, movement timing, attack range, danger-zone spacing, healer party coverage, defensive ground effects, Passage of Arms, aggro safety, unknown-boss vnavmesh reachability guarding, and weak edge-avoidance preferences.
+**Movement** — Control automatic movement, social facing during downtime, manual movement pause, movement timing, danger-zone spacing, healer party coverage, defensive ground effects, Passage of Arms, and weak edge-avoidance preferences.
 
 While you are casting, advisory movement goals are suppressed so comfort, uptime, AoE, party utility, and style preferences do not interrupt casts. Magic-ranged and healer jobs may still use the final slidecast window for those small adjustments. BossMod Reborn's own mechanic movement still applies, and the plugin may still add a raw mechanic-exit margin when BossMod is already moving you out.
 
@@ -75,7 +71,7 @@ While you are casting, advisory movement goals are suppressed so comfort, uptime
 
 ### AoE & Trash tab
 
-**AoE & Trash** — Move for better AoE hits, follow tank-led trash pulls with party-route fallback when you fall behind, pick better AoE targets, keep a trash target selected, move closer to trash packs, and avoid standing inside enemies.
+**AoE & Trash** — Move for better AoE hits, pick better AoE targets, keep a trash target selected, and avoid standing inside enemies.
 
 ### Positionals tab
 

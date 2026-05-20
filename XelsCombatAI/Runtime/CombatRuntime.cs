@@ -24,11 +24,11 @@ internal sealed class CombatRuntime(
     PassageOfArmsPositioningController passageOfArmsPositioningController,
     HealerAoePositioningController healerAoePositioningController,
     SurvivabilityZonePositioningController survivabilityZonePositioningController,
-    AggroSafetyController aggroSafetyController,
     ArenaEdgePositioningController arenaEdgePositioningController,
     RedMageMeleeComboController redMageMeleeComboController,
     CombatLogWriter combatLogWriter,
     ManualMovementInputDetector manualMovement,
+    ManualCorrectionFeedback manualCorrectionFeedback,
     MobilityDecisionEvaluator mobilityDecisionEvaluator,
     GapCloserController gapCloserController,
     EscapeGapCloserController escapeGapCloserController,
@@ -208,9 +208,9 @@ internal sealed class CombatRuntime(
         passageOfArmsPositioningController.Reset();
         healerAoePositioningController.Reset();
         survivabilityZonePositioningController.Reset();
-        aggroSafetyController.Reset();
         redMageMeleeComboController.Reset();
         aoeGoalHook.Reset();
+        manualCorrectionFeedback.Reset();
         mobilityDecisionEvaluator.Reset();
         dashStyleController.Reset();
         facingController.Reset();
@@ -301,7 +301,6 @@ internal sealed class CombatRuntime(
             passageOfArmsPositioningController.Status,
             healerAoePositioningController.Status, // HealerCoveragePositioning
             survivabilityZonePositioningController.Status,
-            aggroSafetyController.Status,
             redMageMeleeComboController.Status,
             manualMovement.Status,
             this.AutomatedMovementSuppressed,
@@ -397,6 +396,11 @@ internal sealed class CombatRuntime(
         if (manualMovement.IsManualMovementRequested())
         {
             this.manualMovementSuppressUntil = now.Add(ManualMovementResumeDelay);
+            var player = services.ObjectTable.LocalPlayer;
+            if (player != null)
+            {
+                manualCorrectionFeedback.RecordManualMovement(player.Position, aoeGoalHook.LastGoalSources, aoeGoalHook.MovementDiagnostics, now);
+            }
         }
 
         return now < this.manualMovementSuppressUntil;
@@ -443,11 +447,8 @@ internal sealed class CombatRuntime(
 
     private bool ShouldUseGoalHook()
     {
-        return (config.ManageMovement && config.GuardUnknownBossNavigationWithVnavmesh) ||
-               config.ManageAoePackPositioning ||
+        return config.ManageAoePackPositioning ||
                config.KeepTrashTargetSelected ||
-               config.ManageTargetUptime ||
-               config.ManageAggroSafetyMovement ||
                config.AvoidStandingInsideEnemies ||
                config.ManageHealerCoverageZone ||
                config.ManageDefensiveGroundZonePositioning ||
