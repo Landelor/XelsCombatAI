@@ -75,10 +75,10 @@ A change is not aligned if it primarily:
 - `XelsCombatAI/Services/` - injected Dalamud service container/wrappers.
 - `XelsCombatAI/Models/` - small shared enums and simple types.
 - `XelsCombatAI/GlobalUsings.cs` - global imports for internal XCAI namespaces.
-- `scripts/test-and-build.sh` - local validation helper. Its `--package` mode delegates to the reusable package script from `XelsDalamud.Workflows`.
-- `.github/workflows/validate.yml` - thin wrapper calling `XelsPlugins/XelsDalamud.Workflows` validation.
-- `.github/workflows/pr-preview.yml` - thin wrapper calling reusable PR preview release automation.
-- `.github/workflows/release.yml` - thin wrapper calling reusable manual stable release automation.
+- `scripts/test-and-build.sh` - local validation helper. Its `--package` mode delegates to the reusable package script from `XelsDalamudRepo`.
+- `.github/workflows/validate.yml` - thin wrapper calling reusable validation from `XelsPlugins/XelsDalamudRepo`.
+- `.github/workflows/publish-testing.yml` - thin wrapper calling reusable manual testing publication from `XelsPlugins/XelsDalamudRepo`.
+- `.github/workflows/release.yml` - thin wrapper calling reusable manual stable release automation from `XelsPlugins/XelsDalamudRepo`.
 - The active plugin feed lives in `XelsPlugins/XelsDalamudRepo`; do not add a local `pluginmaster.json` to this repository.
 - `third_party/` - pinned git submodules used as compile-time dependencies. See `third_party/AGENTS.md`.
 - `external/` - refreshable external reference workspace for API, IPC, and integration discovery. See `external/AGENTS.md`; its instructions override this file inside that directory.
@@ -105,7 +105,7 @@ Notes:
 - GitHub Actions should initialize submodules before validation.
 - `tools/FightReview.Tests` is a custom executable test harness, not a `dotnet test` project. The reusable validation workflow skips it; run `scripts/test-and-build.sh` when tool or review-log behavior changes.
 - Run `dotnet restore` when dependency, SDK, target framework, or project-file changes could affect restore output.
-- Run `scripts/test-and-build.sh --skip-tools --package` for release/package changes or when packaging behavior may have changed. This requires `XelsDalamud.Workflows` cloned beside this repo, or `XELS_DALAMUD_WORKFLOWS_DIR` set to that checkout.
+- Run `scripts/test-and-build.sh --skip-tools --package` for release/package changes or when packaging behavior may have changed. This requires `XelsDalamudRepo` cloned beside this repo, or `XELS_DALAMUD_REPO_DIR` set to that checkout.
 - Run `dotnet format --verify-no-changes` for broad C# edits when the local SDK supports it. If it cannot run cleanly because of environment issues, report that explicitly.
 - Before finishing code changes, run the most relevant available validation command and report any command that could not be run.
 
@@ -217,23 +217,22 @@ After larger changes, include in the final response:
 
 ## Release And Metadata
 
-All changes flow through pull requests to `main`. Never commit directly to `main` after branch protection is enabled.
+Direct commits to `main` are allowed for solo/agent work when appropriate; use pull requests when review or staging helps.
 
-Commit messages and PR titles must use Conventional Commits:
+Commit messages should use Conventional Commits when `release_type: auto` should infer a stable version bump:
 
 - `fix:` and `perf:` create a patch release.
 - `feat:` creates a minor release.
 - `!` or `BREAKING CHANGE:` creates a major release.
 - `docs:`, `style:`, `refactor:`, `test:`, `build:`, `ci:`, and `chore:` do not create a user-facing release bump unless breaking.
 
-PR previews are published by `.github/workflows/pr-preview.yml` through `XelsPlugins/XelsDalamud.Workflows`. Preview releases use mutable `pr-<PR_NUMBER>` tags and may only update central feed testing fields:
+Testing builds are published only by manually running `.github/workflows/publish-testing.yml`. Testing releases use the mutable `testing` tag and may only update central feed testing fields:
 
 - `TestingAssemblyVersion`
-- `TestingChangelog`
 - `TestingDalamudApiLevel`
 - `DownloadLinkTesting`
 
-Preview and release feed updates require the `XELS_DALAMUD_FEED_TOKEN` Actions secret to be available to this repository. The token must have contents write access to `XelsPlugins/XelsDalamudRepo`.
+Testing and release feed updates require the `XELS_DALAMUD_FEED_TOKEN` Actions secret to be available to this repository. The token must have contents write access to `XelsPlugins/XelsDalamudRepo`.
 Generated release notes belong on GitHub release and prerelease pages. The custom plugin feed should only carry version, API, and public download metadata.
 
 Stable releases are published only by manually running `.github/workflows/release.yml`. Stable releases use immutable `vX.Y.Z` tags and may update central feed stable fields:
@@ -249,7 +248,7 @@ The active custom feed is `XelsPlugins/XelsDalamudRepo`. Keep this repository li
 
 When changing plugin description, tags, icon URL, name, or Dalamud API metadata, check `XelsCombatAI/XelsCombatAI.json` and the generated feed output.
 
-The reusable release workflow uses `XelsPlugins/XelsDalamud.Workflows/scripts/package-plugin.py` and writes `artifacts/XelsCombatAI.zip`. Local packaging should use the same script through `scripts/test-and-build.sh --skip-tools --package`. Treat `artifacts/`, `bin/`, and `obj/` as generated output.
+The reusable release workflow uses `XelsPlugins/XelsDalamudRepo/scripts/package-plugin.py` and writes `artifacts/XelsCombatAI.zip`. Local packaging should use the same script through `scripts/test-and-build.sh --skip-tools --package`. Treat `artifacts/`, `bin/`, and `obj/` as generated output.
 
 ## External References And Generated Files
 

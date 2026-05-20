@@ -5,8 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_PROJECT="$ROOT/XelsCombatAI/XelsCombatAI.csproj"
 TOOL_PROJECT="$ROOT/tools/FightReview/FightReview.csproj"
 TOOL_TEST_PROJECT="$ROOT/tools/FightReview.Tests/FightReview.Tests.csproj"
-WORKFLOWS_DIR="${XELS_DALAMUD_WORKFLOWS_DIR:-$ROOT/../XelsDalamud.Workflows}"
-PACKAGE_SCRIPT="$WORKFLOWS_DIR/scripts/package-plugin.py"
+FEED_REPO_DIR="${XELS_DALAMUD_REPO_DIR:-$ROOT/../XelsDalamudRepo}"
+PACKAGE_SCRIPT="$FEED_REPO_DIR/scripts/package-plugin.py"
 PACKAGE_OUT="$ROOT/artifacts"
 
 RUN_TOOLS=1
@@ -25,7 +25,7 @@ Options:
   --skip-plugin      Build and test only FightReview tooling.
   --skip-tool-tests  Build FightReview but do not run FightReview.Tests.
   --format           Verify C# formatting.
-  --package          Build the release zip with XelsDalamud.Workflows/scripts/package-plugin.py.
+  --package          Build the release zip with XelsDalamudRepo/scripts/package-plugin.py.
   -h, --help         Show this help text.
 EOF
 }
@@ -147,7 +147,7 @@ if [[ "$RUN_FORMAT" -eq 1 ]]; then
 fi
 
 if [[ "$RUN_PACKAGE" -eq 1 ]]; then
-  [[ -f "$PACKAGE_SCRIPT" ]] || fail "Reusable package script was not found at '$PACKAGE_SCRIPT'. Clone XelsDalamud.Workflows beside this repo or set XELS_DALAMUD_WORKFLOWS_DIR."
+  [[ -f "$PACKAGE_SCRIPT" ]] || fail "Reusable package script was not found at '$PACKAGE_SCRIPT'. Clone XelsDalamudRepo beside this repo or set XELS_DALAMUD_REPO_DIR."
   rm -rf "$PACKAGE_OUT"
   run python "$PACKAGE_SCRIPT" \
     --project "$PLUGIN_PROJECT" \

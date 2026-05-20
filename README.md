@@ -39,7 +39,7 @@ Add the following URL to Dalamud's custom plugin repositories:
 https://raw.githubusercontent.com/XelsPlugins/XelsDalamudRepo/main/pluginmaster.json
 ```
 
-Stable builds are published manually. Testing builds are generated from PR previews and require Dalamud's plugin testing versions option.
+Stable and testing builds are published manually. Testing builds require Dalamud's plugin testing versions option.
 
 ## Commands
 

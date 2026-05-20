@@ -1,10 +1,15 @@
-name: Release
+name: Publish Testing
 
 on:
   workflow_dispatch:
     inputs:
+      source_ref:
+        description: Branch, tag, or SHA to publish
+        required: true
+        default: main
+        type: string
       release_type:
-        description: Release type
+        description: Version bump used for the testing build
         required: true
         default: auto
         type: choice
@@ -13,23 +18,18 @@ on:
           - patch
           - minor
           - major
-      dry_run:
-        description: Dry run without publishing
-        required: true
-        default: true
-        type: boolean
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    uses: XelsPlugins/XelsDalamudRepo/.github/workflows/plugin-release.yml@main
+  publish-testing:
+    uses: XelsPlugins/XelsDalamudRepo/.github/workflows/plugin-publish-testing.yml@main
     with:
       plugin_project_path: XelsCombatAI/XelsCombatAI.csproj
       feed_repo: XelsPlugins/XelsDalamudRepo
+      source_ref: ${{ inputs.source_ref }}
       release_type: ${{ inputs.release_type }}
-      dry_run: ${{ inputs.dry_run }}
       dotnet_version: 10.0.x
       internal_name: XelsCombatAI
     secrets:
