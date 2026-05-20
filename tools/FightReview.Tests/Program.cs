@@ -30,6 +30,8 @@ var tests = new (string Name, Action Body)[]
     ("header metadata falls back to frames", HeaderMetadataFallsBackToFrames),
     ("schema v2 rejection", SchemaV2Rejected),
     ("configuration logging defaults/reset", ConfigurationLoggingDefaultsAndReset),
+    ("target uptime range follows next GCD", TargetUptimeRangeFollowsNextGcd),
+    ("positionals suppress on AoE packs", PositionalsSuppressOnAoePacks),
     ("friendly anchor dash requires meaningful gain", FriendlyAnchorDashRequiresMeaningfulGain),
     ("gap closer follows RSR auto target", GapCloserFollowsRsrAutoTarget),
     ("hostile relay dash requires target momentum", HostileRelayDashRequiresTargetMomentum),
@@ -319,6 +321,39 @@ static void ConfigurationLoggingDefaultsAndReset()
     AssertTrue(config.ManageSocialTurning, "migration enables social turning");
 }
 
+static void TargetUptimeRangeFollowsNextGcd()
+{
+    AssertEqual(
+        Configuration.InternalMeleeUptimeRange,
+        TargetUptimePlanner.ResolveTargetUptimeRange(RangeRole.Melee, Configuration.InternalMeleeUptimeRange, 25f),
+        "melee jobs should still close to melee range even when the next action has long range");
+
+    AssertEqual(
+        25f,
+        TargetUptimePlanner.ResolveTargetUptimeRange(RangeRole.MagicRanged, 24f, 25f),
+        "ranged jobs should use the upcoming offensive GCD range");
+
+    AssertEqual(
+        3f,
+        TargetUptimePlanner.ResolveTargetUptimeRange(RangeRole.PhysicalRanged, 24f, 1f),
+        "invalid tiny action ranges clamp to minimum action range");
+}
+
+static void PositionalsSuppressOnAoePacks()
+{
+    AssertTrue(
+        PositionalsController.ShouldSuppressPositionalsForAoePack(AoePackStatus(priorityTargetCount: 2)),
+        "multiple priority targets should suppress positional chasing");
+
+    AssertTrue(
+        PositionalsController.ShouldSuppressPositionalsForAoePack(AoePackStatus(trashPull: TrashDiagnostics(dominantTargetCount: 2))),
+        "trash pack diagnostics should suppress positional chasing");
+
+    AssertFalse(
+        PositionalsController.ShouldSuppressPositionalsForAoePack(AoePackStatus(priorityTargetCount: 1)),
+        "single-target context should keep positional handling available");
+}
+
 static void FriendlyAnchorDashRequiresMeaningfulGain()
 {
     AssertFalse(
@@ -428,6 +463,34 @@ static void GapCloserFollowsRsrAutoTarget()
 
 static void HostileRelayDashRequiresTargetMomentum()
 {
+    AssertTrue(
+        GapCloserController.ShouldTryHostileRelay(
+            classJobId: 41,
+            intendedDistanceToHitbox: 8f,
+            engagementRange: Configuration.InternalMeleeUptimeRange),
+        "VPR should look for hostile relay targets as soon as the chosen target is outside melee engagement range");
+
+    AssertFalse(
+        GapCloserController.ShouldTryHostileRelay(
+            classJobId: 41,
+            intendedDistanceToHitbox: 2.5f,
+            engagementRange: Configuration.InternalMeleeUptimeRange),
+        "VPR should not relay when already in melee engagement range");
+
+    AssertTrue(
+        GapCloserController.ShouldTreatGcdReengageAsUrgent(
+            distanceToHitbox: 7f,
+            engagementRange: Configuration.InternalMeleeUptimeRange,
+            gcdRemaining: 0.5f),
+        "short reengage dashes should be allowed when walking cannot make the next GCD");
+
+    AssertFalse(
+        GapCloserController.ShouldTreatGcdReengageAsUrgent(
+            distanceToHitbox: 7f,
+            engagementRange: Configuration.InternalMeleeUptimeRange,
+            gcdRemaining: 2.5f),
+        "normal configured dash distance should remain in force when there is time to walk");
+
     AssertTrue(
         GapCloserController.ShouldUseHostileRelayDash(
             playerPosition: Vector3.Zero,
@@ -2343,6 +2406,38 @@ static TrashPullSnapshot TrashPull(
         dominantTargetIds ?? [1, 2, 3],
         stragglerTargetIds ?? [],
         leadClampApplied ? "clamped behind tank" : "<none>");
+}
+
+static AoePackPositioningStatus AoePackStatus(int priorityTargetCount = 0, TrashPullDiagnostics? trashPull = null)
+{
+    return new AoePackPositioningStatus(
+        "test",
+        "test",
+        "test",
+        "test",
+        0,
+        "<none>",
+        "<none>",
+        0,
+        0,
+        false,
+        false,
+        StateCommandType.Off,
+        "test",
+        priorityTargetCount,
+        null,
+        null,
+        false,
+        trashPull ?? TrashPullDiagnostics.Empty);
+}
+
+static TrashPullDiagnostics TrashDiagnostics(TrashPullPhase phase = TrashPullPhase.Gathering, int dominantTargetCount = 3)
+{
+    return TrashPullDiagnostics.Empty with
+    {
+        Phase = phase,
+        DominantTargetCount = dominantTargetCount
+    };
 }
 
 static XcaiFrame RouteMemoryFrame(float t, Vec3 localDestination, string source = "tank-trail")

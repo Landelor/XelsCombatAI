@@ -11,7 +11,8 @@ internal sealed class PositionalsController(
     DalamudServices services,
     RotationSolverIpc rotationSolver,
     Action<Positional> setPositional,
-    Action updateDtr)
+    Action updateDtr,
+    Func<AoePackPositioningStatus> aoePackStatus)
 {
     private bool? trueNorthStrategy;
 
@@ -27,6 +28,13 @@ internal sealed class PositionalsController(
     {
         if (!config.ManagePositionals)
         {
+            return;
+        }
+
+        if (ShouldSuppressPositionalsForAoePack(aoePackStatus()))
+        {
+            this.trueNorthStrategy = null;
+            setPositional(Positional.Any);
             return;
         }
 
@@ -254,5 +262,12 @@ internal sealed class PositionalsController(
     private unsafe uint GetTrueNorthChargesUnsafe()
     {
         return ActionManager.Instance()->GetCurrentCharges(ActionUse.TrueNorthActionId);
+    }
+
+    internal static bool ShouldSuppressPositionalsForAoePack(AoePackPositioningStatus status)
+    {
+        return status.PriorityTargetCount >= 2 ||
+               status.TrashPull.DominantTargetCount >= 2 ||
+               status.TrashPull.Phase is TrashPullPhase.Gathering or TrashPullPhase.Stabilizing or TrashPullPhase.Burning;
     }
 }

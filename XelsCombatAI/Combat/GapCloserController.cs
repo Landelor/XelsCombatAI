@@ -115,7 +115,7 @@ internal sealed class GapCloserController(
         var originalTargetObjectId = target.GameObjectId;
         var classJobId = player.ClassJob.RowId;
         IBattleNpc? relayReturnTarget = null;
-        if (this.ShouldTryHostileRelay(classJobId, distanceToHitbox) &&
+        if (ShouldTryHostileRelay(classJobId, distanceToHitbox, reengageRange) &&
             this.TryFindHostileRelayGapCloserTarget(player, intendedTarget, distanceToHitbox, classJobId, out var relayTarget))
         {
             relayReturnTarget = intendedTarget;
@@ -147,7 +147,10 @@ internal sealed class GapCloserController(
             return false;
         }
 
-        var minimumDashDistance = styleOpportunity.AllowsShortDash ? 4f : config.MinimumGapCloserDistance;
+        var gcdReengageUrgent = this.IsGcdReengageUrgent(distanceToHitbox, reengageRange);
+        var minimumDashDistance = gcdReengageUrgent
+            ? 0f
+            : styleOpportunity.AllowsShortDash ? 4f : config.MinimumGapCloserDistance;
         if (distanceToHitbox < minimumDashDistance)
         {
             this.lastGapCloserSafety = $"target under {minimumDashDistance:0}y";
@@ -1260,10 +1263,32 @@ internal sealed class GapCloserController(
     internal static bool ShouldAllowTrashPullGapCloserTarget(Vector3 playerPosition, Vector3 targetPosition, Vector3 anchorPosition, out string reason)
         => GapCloserDecisionPolicy.ShouldAllowTrashPullGapCloserTarget(playerPosition, targetPosition, anchorPosition, out reason);
 
-    private bool ShouldTryHostileRelay(uint classJobId, float intendedDistanceToHitbox)
+    internal static bool ShouldTryHostileRelay(uint classJobId, float intendedDistanceToHitbox, float engagementRange)
+        => GapCloserDecisionPolicy.CanUseHostileRelayGapCloser(classJobId) &&
+           intendedDistanceToHitbox > MathF.Max(CombatConstants.MeleeActionRange, engagementRange);
+
+    private bool IsGcdReengageUrgent(float distanceToHitbox, float engagementRange)
     {
-        return GapCloserDecisionPolicy.CanUseHostileRelayGapCloser(classJobId) &&
-               intendedDistanceToHitbox > GapCloserDecisionPolicy.ResolveHostileRelayGapCloserRange(classJobId);
+        if (!rotationSolverActions.TryGetUpcomingGcd(requirePreview: false, out var action, out _) ||
+            action.IsFriendly)
+        {
+            return false;
+        }
+
+        return ShouldTreatGcdReengageAsUrgent(distanceToHitbox, engagementRange, action.GcdRemaining);
+    }
+
+    internal static bool ShouldTreatGcdReengageAsUrgent(float distanceToHitbox, float engagementRange, float gcdRemaining)
+    {
+        if (gcdRemaining < 0f || distanceToHitbox <= engagementRange)
+        {
+            return false;
+        }
+
+        const float walkSpeedYalmsPerSecond = 6f;
+        const float gcdBufferSeconds = 0.35f;
+        var requiredWalkTime = (distanceToHitbox - engagementRange) / walkSpeedYalmsPerSecond;
+        return gcdRemaining <= requiredWalkTime + gcdBufferSeconds;
     }
 
     private bool TryFindHostileRelayGapCloserTarget(
@@ -1280,8 +1305,7 @@ internal sealed class GapCloserController(
         foreach (var candidate in services.ObjectTable.OfType<IBattleNpc>())
         {
             if (candidate.GameObjectId == intendedTarget.GameObjectId ||
-                !IsUsableGapCloserTarget(candidate) ||
-                !candidate.StatusFlags.HasFlag(StatusFlags.InCombat))
+                !IsUsableGapCloserTarget(candidate))
             {
                 continue;
             }

@@ -39,10 +39,9 @@ internal sealed class CombatComposition : IDisposable
         var dependencyChecker = new DependencyChecker(config, services, bossMod, rotationSolver);
         var jobRangeProvider = new JobRangeProvider(services);
         jobRangeProvider.Initialize();
-        var targetUptimePlanner = new TargetUptimePlanner(services, bossMod);
+        var targetUptimePlanner = new TargetUptimePlanner(services, bossMod, jobRangeProvider, rotationSolverActions);
         BossModPresetController? presetController = null;
         CombatRuntime? runtime = null;
-        var positionalsController = new PositionalsController(config, services, rotationSolver, positional => presetController!.SetPositional(positional), updateDtr);
         var mobilityDecisionEvaluator = new MobilityDecisionEvaluator(bossModSafety, vnavmesh, jobRangeProvider);
         var arenaEdgePositioningController = new ArenaEdgePositioningController(config, services);
         var dashStyleController = new DashStyleController(config, jobRangeProvider, arenaEdgePositioningController);
@@ -50,6 +49,7 @@ internal sealed class CombatComposition : IDisposable
         var redMageMeleeComboController = new RedMageMeleeComboController(config, services, rotationSolverActions, bossModSafety, mobilityDecisionEvaluator, facingController, () => targetUptimePlanner.CurrentTargetHasBossModule());
         targetUptimePlanner.TargetUptimeRangeOverride = redMageMeleeComboController.GetTargetUptimeRangeOverride;
         var aoePackPositioningController = new AoePackPositioningController(config, services, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true, rotationSolver, () => targetUptimePlanner.CurrentTargetHasBossModule(), jobRangeProvider);
+        var positionalsController = new PositionalsController(config, services, rotationSolver, positional => presetController!.SetPositional(positional), updateDtr, () => aoePackPositioningController.Status);
         var passageOfArmsPositioningController = new PassageOfArmsPositioningController(config, services, () => runtime?.AutomatedMovementSuppressed == true);
         var healerAoePositioningController = new HealerAoePositioningController(config, services, bossMod, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true);
         var survivabilityZonePositioningController = new SurvivabilityZonePositioningController(config, services, () => runtime?.AutomatedMovementSuppressed == true);

@@ -1,7 +1,15 @@
 using System;
+using Dalamud.Game.ClientState.Objects.Enums;
+using Dalamud.Game.ClientState.Objects.Types;
+using XelsCombatAI.Game;
+
 namespace XelsCombatAI.Combat;
 
-internal sealed class TargetUptimePlanner(DalamudServices services, BossModIpc bossMod)
+internal sealed class TargetUptimePlanner(
+    DalamudServices services,
+    BossModIpc bossMod,
+    JobRangeProvider jobRangeProvider,
+    RotationSolverActionReflection rotationSolverActions)
 {
     public Func<float?> TargetUptimeRangeOverride { get; set; } = () => null;
 
@@ -13,7 +21,30 @@ internal sealed class TargetUptimePlanner(DalamudServices services, BossModIpc b
             return overrideRange.Value;
         }
 
-        return Configuration.InternalDisabledUptimeRange;
+        if (!this.HasUsableHostileTarget())
+        {
+            return Configuration.InternalDisabledUptimeRange;
+        }
+
+        var rangeRole = JobRoles.GetRangeRole(services.ObjectTable.LocalPlayer);
+        if (rotationSolverActions.TryGetUpcomingGcd(requirePreview: false, out var action, out _) &&
+            !action.IsFriendly)
+        {
+            return ResolveTargetUptimeRange(rangeRole, jobRangeProvider.EngagementRange, action.Range);
+        }
+
+        return jobRangeProvider.EngagementRange;
+    }
+
+    internal static float ResolveTargetUptimeRange(RangeRole rangeRole, float jobEngagementRange, float actionRange)
+    {
+        var usableActionRange = actionRange > 0f
+            ? Math.Clamp(actionRange, CombatConstants.MeleeActionRange, Configuration.InternalDisabledUptimeRange)
+            : jobEngagementRange;
+
+        return rangeRole == RangeRole.Melee
+            ? MathF.Min(jobEngagementRange, usableActionRange)
+            : usableActionRange;
     }
 
     public bool CurrentTargetHasBossModule()
@@ -33,5 +64,15 @@ internal sealed class TargetUptimePlanner(DalamudServices services, BossModIpc b
             services.Log.Verbose(ex, "Could not query BossMod module state yet.");
             return false;
         }
+    }
+
+    private bool HasUsableHostileTarget()
+    {
+        return services.TargetManager.Target is IBattleNpc target &&
+               target.BattleNpcKind == BattleNpcSubKind.Combatant &&
+               target.GameObjectId != 0 &&
+               target.StatusFlags.HasFlag(StatusFlags.Hostile) &&
+               !target.IsDead &&
+               target.CurrentHp > 0;
     }
 }
