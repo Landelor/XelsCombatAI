@@ -215,16 +215,28 @@ After larger changes, include in the final response:
 - What must be manually tested in-game.
 - Any assumptions about Dalamud, BossMod Reborn, Avarice, RotationSolver Reborn, or game APIs.
 
+## Commit Message Standards
+
+Use Conventional Commits for all agent-authored commits. The shared validation workflow checks non-merge commit subjects on pushes to `main`, and release automation validates the commit range before publishing.
+
+- Use `fix:` or `perf:` for patch-level user-facing changes.
+- Use `feat:` for minor user-facing additions.
+- Use `type!:` or a `BREAKING CHANGE:` footer for major changes.
+- Use `docs:`, `style:`, `refactor:`, `test:`, `build:`, `ci:`, or `chore:` for changes that should not create a user-facing stable bump unless breaking.
+- Do not prefix commit subjects with `[codex]`.
+- Keep the subject concise, imperative, and clear about the user impact.
+
+Examples:
+
+- `fix: reduce boss center overcorrection`
+- `feat: add healer zone movement preference`
+- `ci: validate release commit messages`
+- `docs: clarify combat safety behavior`
+- `chore: update plugin metadata`
+
 ## Release And Metadata
 
 Direct commits to `main` are allowed for solo/agent work when appropriate; use pull requests when review or staging helps.
-
-Commit messages should use Conventional Commits when `release_type: auto` should infer a stable version bump:
-
-- `fix:` and `perf:` create a patch release.
-- `feat:` creates a minor release.
-- `!` or `BREAKING CHANGE:` creates a major release.
-- `docs:`, `style:`, `refactor:`, `test:`, `build:`, `ci:`, and `chore:` do not create a user-facing release bump unless breaking.
 
 Testing builds are published only by manually running `.github/workflows/publish-testing.yml`. Testing releases use the mutable `testing` tag and may only update central feed testing fields:
 
@@ -233,14 +245,13 @@ Testing builds are published only by manually running `.github/workflows/publish
 - `DownloadLinkTesting`
 
 Testing and release feed updates require the `XELS_DALAMUD_FEED_TOKEN` Actions secret to be available to this repository. The token must have contents write access to `XelsPlugins/XelsDalamudRepo`.
-Generated release notes belong on GitHub release and prerelease pages. The custom plugin feed should only carry version, API, and public download metadata.
+Generated release notes belong on GitHub release and prerelease pages, not in `pluginmaster.json` changelog fields. The custom plugin feed should only carry version, API, and public download metadata.
 
 Stable releases are published only by manually running `.github/workflows/release.yml`. Stable releases use immutable `vX.Y.Z` tags and may update central feed stable fields:
 
 - `AssemblyVersion`
 - `DownloadLinkInstall`
 - `DownloadLinkUpdate`
-- stable changelog/release metadata
 
 Do not manually edit versions unless explicitly instructed. Do not use timestamp versions or CI run numbers as stable public versions. Do not publish to the official Dalamud repo.
 
