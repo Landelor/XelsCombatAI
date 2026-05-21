@@ -34,6 +34,7 @@ var tests = new (string Name, Action Body)[]
     ("positionals suppress on AoE packs", PositionalsSuppressOnAoePacks),
     ("friendly anchor dash requires meaningful gain", FriendlyAnchorDashRequiresMeaningfulGain),
     ("gap closer follows RSR auto target", GapCloserFollowsRsrAutoTarget),
+    ("ranged gap closers skip boss reengage", RangedGapClosersSkipBossReengage),
     ("hostile relay dash requires target momentum", HostileRelayDashRequiresTargetMomentum),
     ("trash gap closer rejects stale pack", TrashGapCloserRejectsStalePack),
     ("BMR advisory scoring combines enabled preferences", BmrAdvisoryScoringCombinesEnabledPreferences),
@@ -459,6 +460,28 @@ static void GapCloserFollowsRsrAutoTarget()
             actionPrimaryTargetId: 0x1234,
             currentTargetMatchesAction: true),
         "matching selected target does not need RSR realignment");
+}
+
+static void RangedGapClosersSkipBossReengage()
+{
+    AssertTrue(
+        GapCloserController.ShouldBlockRangedReengageGapCloser(24),
+        "WHM Aetherial Shift should be reserved for safety movement instead of boss reengage");
+    AssertTrue(
+        GapCloserController.ShouldBlockRangedReengageGapCloser(40),
+        "SGE Icarus should be reserved for safety or party repositioning instead of boss reengage");
+    AssertTrue(
+        GapCloserController.ShouldBlockRangedReengageGapCloser(35),
+        "RDM Corps-a-corps should be reserved for explicit melee combo movement instead of generic boss reengage");
+    AssertTrue(
+        GapCloserController.ShouldBlockRangedReengageGapCloser(38),
+        "DNC En Avant should be reserved for safety movement instead of boss reengage");
+    AssertTrue(
+        GapCloserController.ShouldBlockRangedReengageGapCloser(42),
+        "PCT Smudge should be reserved for safety movement instead of boss reengage");
+    AssertFalse(
+        GapCloserController.ShouldBlockRangedReengageGapCloser(34),
+        "SAM Gyoten remains a real melee reengage tool");
 }
 
 static void HostileRelayDashRequiresTargetMomentum()

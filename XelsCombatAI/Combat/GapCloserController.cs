@@ -88,6 +88,15 @@ internal sealed class GapCloserController(
             return false;
         }
 
+        var classJobId = player.ClassJob.RowId;
+        if (ShouldBlockRangedReengageGapCloser(classJobId))
+        {
+            this.lastGapCloserSafety = "ranged gap closer reserved for safety or job-specific movement";
+            this.lastSafeLandingPosition = null;
+            mobilityEvaluator.RecordIdle(MobilityIntent.Uptime, "Gap closer", this.lastGapCloserSafety);
+            return false;
+        }
+
         if (this.TryUsePairedReturn(player, target as IBattleNpc))
         {
             return true;
@@ -113,7 +122,6 @@ internal sealed class GapCloserController(
 
         var reengageRange = MathF.Max(CombatConstants.MeleeActionRange, jobRangeProvider.EngagementRange);
         var originalTargetObjectId = target.GameObjectId;
-        var classJobId = player.ClassJob.RowId;
         IBattleNpc? relayReturnTarget = null;
         if (ShouldTryHostileRelay(classJobId, distanceToHitbox, reengageRange) &&
             this.TryFindHostileRelayGapCloserTarget(player, intendedTarget, distanceToHitbox, classJobId, out var relayTarget))
@@ -134,7 +142,7 @@ internal sealed class GapCloserController(
         }
 
         var friendlyReengageTarget = relayReturnTarget ?? target as IBattleChara;
-        var hasFriendlyReengageOption = classJobId is 2 or 20 or 25 or 40 or 41;
+        var hasFriendlyReengageOption = classJobId is 2 or 20 or 41;
         var allowStyleReengageInsideEngagementRange = this.ShouldAllowStyleReengageInsideEngagementRange(target, styleOpportunity);
         if (relayReturnTarget == null &&
             ((distanceToHitbox <= reengageRange && !allowStyleReengageInsideEngagementRange) ||
@@ -184,16 +192,9 @@ internal sealed class GapCloserController(
             4 or 22 when config.GapCloserDRG => this.TryUseTargetGapCloser(ActionUse.DragoonWingedGlideActionId, "Winged Glide", distanceToHitbox, target, safeMovementDestination, styleOpportunity, relayReturnTarget),
             29 or 30 when config.GapCloserNIN => this.TryUseNinjaShukuchi(target, safeMovementDestination, styleOpportunity),
             34 when config.GapCloserSAM => this.TryUseTargetGapCloser(ActionUse.SamuraiGyotenActionId, "Gyoten", distanceToHitbox, target, safeMovementDestination, styleOpportunity, relayReturnTarget),
-            38 when config.GapCloserDNC => this.TryUseForwardGapCloser(ActionUse.DancerEnAvantActionId, "En Avant", distanceToHitbox, reengageRange, target, safeMovementDestination, styleOpportunity),
             39 when config.GapCloserRPR => this.TryUseReaperRegress(ref this.lastGapCloserSafety, distanceToHitbox, safeMovementDestination, styleOpportunity, target as IBattleChara) || this.TryUseForwardGapCloser(ActionUse.ReaperHellsIngressActionId, "Hell's Ingress", distanceToHitbox, MathF.Max(reengageRange, CombatConstants.MeleeActionRange + 1f), target, safeMovementDestination, styleOpportunity),
             41 when config.GapCloserVPR => (distanceToHitbox <= CombatConstants.GapCloserMaxRange && this.TryUseTargetGapCloser(ActionUse.ViperSlitherActionId, "Slither", distanceToHitbox, target, safeMovementDestination, styleOpportunity, relayReturnTarget)) ||
                                           this.TryUseFriendlyReengageGapCloser(ActionUse.ViperSlitherActionId, "Slither", CombatConstants.GapCloserMaxRange, friendlyReengageTarget, safeMovementDestination, styleOpportunity),
-            24 when config.GapCloserWHM => this.TryUseForwardGapCloser(ActionUse.WhiteMageAetherialShiftActionId, "Aetherial Shift", distanceToHitbox, reengageRange, target, safeMovementDestination, styleOpportunity),
-            25 when config.GapCloserBLM => this.TryUseFriendlyReengageGapCloser(ActionUse.BlackMageAetherialManipulationActionId, "Aetherial Manipulation", 25f, friendlyReengageTarget, safeMovementDestination, styleOpportunity),
-            35 when config.GapCloserRDM => this.TryUseTargetGapCloser(ActionUse.RedMageCorpsACorpsActionId, "Corps-a-corps", distanceToHitbox, target, safeMovementDestination, styleOpportunity, relayReturnTarget),
-            40 when config.GapCloserSGE => (distanceToHitbox <= 25f && this.TryUseTargetGapCloser(ActionUse.SageIcarusActionId, "Icarus", distanceToHitbox, target, safeMovementDestination, styleOpportunity, relayReturnTarget)) ||
-                                           this.TryUseFriendlyReengageGapCloser(ActionUse.SageIcarusActionId, "Icarus", 25f, friendlyReengageTarget, safeMovementDestination, styleOpportunity),
-            42 when config.GapCloserPCT => this.TryUseForwardGapCloser(ActionUse.PictomancerSmudgeActionId, "Smudge", distanceToHitbox, reengageRange, target, safeMovementDestination, styleOpportunity),
             _ => false
         };
     }
@@ -1361,6 +1362,11 @@ internal sealed class GapCloserController(
             intendedTargetRadius,
             out reason);
 
+    internal static bool ShouldBlockRangedReengageGapCloser(uint classJobId)
+    {
+        return classJobId is 5 or 23 or 24 or 25 or 35 or 38 or 40 or 42;
+    }
+
     private static bool IsConservativeTrashPullContext(TrashPullDiagnostics trash)
         => GapCloserDecisionPolicy.IsConservativeTrashPullContext(trash);
 
@@ -1448,14 +1454,8 @@ internal sealed class GapCloserController(
             4 or 22 when config.GapCloserDRG => ActionUse.DragoonWingedGlideActionId,
             29 or 30 when config.GapCloserNIN => ActionUse.NinjaShukuchiActionId,
             34 when config.GapCloserSAM => ActionUse.SamuraiGyotenActionId,
-            38 when config.GapCloserDNC => ActionUse.DancerEnAvantActionId,
             39 when config.GapCloserRPR => ActionUse.ReaperHellsIngressActionId,
             41 when config.GapCloserVPR => ActionUse.ViperSlitherActionId,
-            24 when config.GapCloserWHM => ActionUse.WhiteMageAetherialShiftActionId,
-            25 when config.GapCloserBLM => ActionUse.BlackMageAetherialManipulationActionId,
-            35 when config.GapCloserRDM => ActionUse.RedMageCorpsACorpsActionId,
-            40 when config.GapCloserSGE => ActionUse.SageIcarusActionId,
-            42 when config.GapCloserPCT => ActionUse.PictomancerSmudgeActionId,
             _ => null
         };
     }
