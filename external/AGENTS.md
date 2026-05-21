@@ -39,6 +39,12 @@ Root repository instructions apply only for how to use this subtree as reference
 - If a checkout is missing or stale and the answer depends on current upstream behavior, run `external/fetch-sources.sh` before drawing conclusions.
 - When upstream source and installed assemblies disagree, mention the version mismatch and validate with `dotnet build` before treating the upstream source as authoritative.
 
+## XelsDevBridge Context
+
+- XelsDevBridge can provide live local game/UI observations while researching external APIs, but it does not replace upstream source or installed assembly contracts.
+- Use read-only DevBridge queries to compare current runtime state against external source evidence when that helps explain IPC payloads, addon names, object state, condition flags, or UI behavior.
+- Do not edit nested external git checkouts to add local agent instructions. Keep durable guidance in this repository's `AGENTS.md` files and treat external checkouts as refreshable read-only references.
+
 ## Refreshing References
 
 - `sources.json` is the source of truth for external reference repository URLs and tracked branches.

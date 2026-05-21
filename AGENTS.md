@@ -143,6 +143,27 @@ Do not guess Dalamud APIs. Before using a Dalamud service, method, event, or typ
 - If a checkout is missing or stale and the answer depends on current upstream behavior, run `external/fetch-sources.sh` before drawing conclusions.
 - If unsure, inspect the current API in the installed package or say that the API needs verification.
 
+## XelsDevBridge Runtime Inspection
+
+XelsDevBridge is a local-only Dalamud plugin in the sibling workspace `../XelsDevBridge`. It exposes current game, object, target, condition, and UI state to development agents over `http://127.0.0.1:47777` by default. Use it when live runtime state would reduce guessing for XCAI work, especially validating combat state assumptions, target/object visibility, condition flags, addon/UI behavior, or small in-game experiments that cannot be proven from source alone.
+
+Start every DevBridge investigation with discovery:
+
+```bash
+python /home/xeltor/.codex/skills/xels-tweaks-devbridge/scripts/devbridge.py health
+python /home/xeltor/.codex/skills/xels-tweaks-devbridge/scripts/devbridge.py capabilities
+python /home/xeltor/.codex/skills/xels-tweaks-devbridge/scripts/devbridge.py routes
+python /home/xeltor/.codex/skills/xels-tweaks-devbridge/scripts/devbridge.py actions
+```
+
+- Treat DevBridge as optional and evolving. Prefer `/v1/capabilities`, `/v1/openapi.json`, `/v1/routes`, and action metadata over hardcoded endpoint assumptions.
+- The helper reads `XELS_DEVBRIDGE_URL`, `XELS_DEVBRIDGE_TOKEN`, and `~/.config/xels-dev-bridge/connection.json` when present.
+- If the helper script is unavailable, query the bridge directly with `curl -fsS "${XELS_DEVBRIDGE_URL:-http://127.0.0.1:47777}/v1/health"` and then `/v1/capabilities`.
+- Use read-only queries first. Mutation actions such as command execution, targeting, button clicks, or callback firing require a specific low-risk purpose, the smallest useful payload, and a final-response note describing the action used.
+- Do not use DevBridge to bypass BossMod Reborn authority, automate broad gameplay, or make XCAI behavior more perfect/robotic than a human player. Runtime observations should support narrow, reviewable changes inside the product purpose.
+- If DevBridge is unavailable, continue from static code when reasonable and state the limitation. If runtime state is essential, propose the smallest missing bridge capability.
+- After editing or rebuilding XelsDevBridge, reload the running game plugin before trusting live node traversal or action metadata.
+
 Follow these Dalamud plugin conventions:
 
 - The plugin entrypoint must implement `IDalamudPlugin`.

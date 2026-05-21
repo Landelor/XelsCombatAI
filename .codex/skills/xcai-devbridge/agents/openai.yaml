@@ -1,0 +1,6 @@
+interface:
+  display_name: "XCAI DevBridge"
+  short_description: "Use live game state for XCAI changes"
+  default_prompt: "Use $xcai-devbridge to inspect live game state while working on a XelsCombatAI change."
+policy:
+  allow_implicit_invocation: true

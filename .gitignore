@@ -6,6 +6,11 @@ artifacts/
 .vs/
 .claude/
 .codex/
+!.codex/
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/xcai-devbridge/
+!.codex/skills/xcai-devbridge/**
 external/*
 !external/AGENTS.md
 !external/sources.json
