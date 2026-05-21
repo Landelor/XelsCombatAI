@@ -61,6 +61,8 @@ internal sealed record MobilityDecisionDiagnostics(
 internal sealed class MobilityDecisionEvaluator(BossModReflectionSafety bossModSafety, VNavmeshIpc vnavmesh, JobRangeProvider jobRangeProvider)
 {
     private const float MinimumMeaningfulGain = 0.1f;
+    private const float MinimumBmrSafetyDestinationGain = 3f;
+    private const float MinimumBmrSafetyDestinationGainRatio = 0.25f;
     private const float GreedyUnsafeEscapeMinimumGain = 5f;
     private const float GreedyUnsafeEscapeMinimumDirectionDot = 0.65f;
     private const float GreedyUnsafeEscapeMaxOffMeshDistance = 1.25f;
@@ -144,6 +146,13 @@ internal sealed class MobilityDecisionEvaluator(BossModReflectionSafety bossModS
 
         var uptime = EvaluateUptime(player, destination, target);
         var path = EvaluatePathGain(player.Position, destination, safeMovementDestination);
+        if (requireSafetyProgress &&
+            safeMovementDestination.HasValue &&
+            !HasMeaningfulBmrSafetyDestinationProgress(player.Position, destination, safeMovementDestination.Value, out var destinationReason))
+        {
+            return this.Reject(requestedIntent, actionName, actionId, destination, moveDistance, destinationReason, safety, uptime, path, out decision);
+        }
+
         if (requireSafetyProgress && safety.Gain <= MinimumMeaningfulGain)
         {
             return this.Reject(requestedIntent, actionName, actionId, destination, moveDistance, "landing does not improve safety", safety, uptime, path, out decision);
@@ -281,6 +290,27 @@ internal sealed class MobilityDecisionEvaluator(BossModReflectionSafety bossModS
         }
 
         return string.Join(" + ", parts);
+    }
+
+    internal static bool HasMeaningfulBmrSafetyDestinationProgress(Vector3 playerPosition, Vector3 destination, Vector3 safeMovementDestination, out string reason)
+    {
+        var currentDistance = Geometry.Distance2D(playerPosition, safeMovementDestination);
+        var landingDistance = Geometry.Distance2D(destination, safeMovementDestination);
+        var gain = currentDistance - landingDistance;
+        var requiredGain = RequiredBmrSafetyDestinationGain(currentDistance);
+        if (gain >= requiredGain)
+        {
+            reason = $"dash saves {gain:0.0}y toward BMR movement target";
+            return true;
+        }
+
+        reason = $"landing only saves {MathF.Max(0f, gain):0.0}y toward BMR movement target";
+        return false;
+    }
+
+    private static float RequiredBmrSafetyDestinationGain(float currentDistance)
+    {
+        return MathF.Min(MinimumBmrSafetyDestinationGain, MathF.Max(MinimumMeaningfulGain, currentDistance * MinimumBmrSafetyDestinationGainRatio));
     }
 
     private bool Reject(

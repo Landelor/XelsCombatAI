@@ -35,6 +35,7 @@ var tests = new (string Name, Action Body)[]
     ("friendly anchor dash requires meaningful gain", FriendlyAnchorDashRequiresMeaningfulGain),
     ("gap closer follows RSR auto target", GapCloserFollowsRsrAutoTarget),
     ("ranged gap closers skip boss reengage", RangedGapClosersSkipBossReengage),
+    ("BMR safety dash requires destination progress", BmrSafetyDashRequiresDestinationProgress),
     ("hostile relay dash requires target momentum", HostileRelayDashRequiresTargetMomentum),
     ("trash gap closer rejects stale pack", TrashGapCloserRejectsStalePack),
     ("BMR advisory scoring combines enabled preferences", BmrAdvisoryScoringCombinesEnabledPreferences),
@@ -482,6 +483,34 @@ static void RangedGapClosersSkipBossReengage()
     AssertFalse(
         GapCloserController.ShouldBlockRangedReengageGapCloser(34),
         "SAM Gyoten remains a real melee reengage tool");
+}
+
+static void BmrSafetyDashRequiresDestinationProgress()
+{
+    AssertFalse(
+        MobilityDecisionEvaluator.HasMeaningfulBmrSafetyDestinationProgress(
+            Vector3.Zero,
+            new Vector3(1f, 0f, 0f),
+            new Vector3(20f, 0f, 0f),
+            out var nearbyReason),
+        "BMR safety dash should reject tiny path savings when the destination is far away");
+    AssertContains("only saves 1.0y", nearbyReason, "nearby safety dash rejection reason");
+
+    AssertTrue(
+        MobilityDecisionEvaluator.HasMeaningfulBmrSafetyDestinationProgress(
+            Vector3.Zero,
+            new Vector3(5f, 0f, 0f),
+            new Vector3(20f, 0f, 0f),
+            out _),
+        "BMR safety dash should accept meaningful progress toward the movement destination");
+
+    AssertTrue(
+        MobilityDecisionEvaluator.HasMeaningfulBmrSafetyDestinationProgress(
+            Vector3.Zero,
+            new Vector3(1f, 0f, 0f),
+            new Vector3(4f, 0f, 0f),
+            out _),
+        "BMR safety dash should scale down the required gain when already close to the destination");
 }
 
 static void HostileRelayDashRequiresTargetMomentum()
