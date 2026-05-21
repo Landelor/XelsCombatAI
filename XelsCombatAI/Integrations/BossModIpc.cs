@@ -92,7 +92,7 @@ internal sealed class BossModIpc
 
     public bool IsIpcReady()
     {
-        return this.EnsureSubscribers() && this.HasRequiredFunctions();
+        return this.EnsureSubscribers() && this.HasRequiredPresetFunctions();
     }
 
     public bool IsAvailable()
@@ -374,7 +374,7 @@ internal sealed class BossModIpc
         }
     }
 
-    private bool HasRequiredFunctions()
+    private bool HasRequiredPresetFunctions()
     {
         try
         {
@@ -383,13 +383,8 @@ internal sealed class BossModIpc
                    this.getActivePreset?.HasFunction == true &&
                    this.setActivePreset?.HasFunction == true &&
                    this.clearActivePreset?.HasFunction == true &&
-                   this.hasModuleByDataId?.HasFunction == true &&
-                   this.disableModule?.HasFunction == true &&
                    this.addTransientStrategy?.HasFunction == true &&
-                   this.clearTransientStrategy?.HasFunction == true &&
-                   this.clearTransientPresetStrategies?.HasFunction == true &&
-                   this.nextDowntimeIn?.HasFunction == true &&
-                   this.nextDowntimeEndIn?.HasFunction == true;
+                   this.clearTransientPresetStrategies?.HasFunction == true;
         }
         catch (Exception ex)
         {

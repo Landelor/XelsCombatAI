@@ -31,6 +31,7 @@ internal sealed class BossModReflectionSafety
     private MethodInfo? isDashDangerousMethod;
     private DateTime nextResolveAttempt = DateTime.MinValue;
     private string status = "unresolved";
+    private string lastUnavailableLogStatus = string.Empty;
 
     public BossModReflectionSafety(IDalamudPluginInterface pluginInterface, IPluginLog log, BossModRuntimeGate bossModGate)
     {
@@ -842,6 +843,7 @@ internal sealed class BossModReflectionSafety
             this.wposConstructor = wposCtor;
             this.isDashDangerousMethod = isDashDangerous;
             this.status = "available";
+            this.lastUnavailableLogStatus = string.Empty;
             return true;
         }
         catch (Exception ex)
@@ -914,9 +916,11 @@ internal sealed class BossModReflectionSafety
         this.wposConstructor = null;
         this.isDashDangerousMethod = null;
         this.status = newStatus;
-        if (!string.Equals(oldStatus, newStatus, StringComparison.Ordinal))
+        if (!string.Equals(oldStatus, newStatus, StringComparison.Ordinal) &&
+            !string.Equals(this.lastUnavailableLogStatus, newStatus, StringComparison.Ordinal))
         {
             this.log.Verbose($"BossMod reflected gap closer safety unavailable: {newStatus}");
+            this.lastUnavailableLogStatus = newStatus;
         }
     }
 
