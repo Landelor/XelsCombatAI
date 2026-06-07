@@ -211,13 +211,14 @@ internal sealed class TankBehaviorController(
 
     private List<IBattleNpc> FindLostAggroTrashTargets(IBattleChara player)
     {
-        var partyIds = PartyAllyProvider
+        var nonTankPartyIds = PartyAllyProvider
             .GetVisiblePartyAllies(services, player)
             .Members
+            .Where(ally => !JobRoles.IsTankJob(ally.ClassJob.RowId))
             .Select(ally => ally.GameObjectId)
             .ToHashSet();
 
-        if (partyIds.Count == 0)
+        if (nonTankPartyIds.Count == 0)
         {
             return [];
         }
@@ -238,7 +239,7 @@ internal sealed class TankBehaviorController(
         }
 
         return hostileCombatants
-            .Where(npc => npc.TargetObjectId != player.GameObjectId && partyIds.Contains(npc.TargetObjectId))
+            .Where(npc => npc.TargetObjectId != player.GameObjectId && nonTankPartyIds.Contains(npc.TargetObjectId))
             .OrderBy(npc => Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, npc.Position, npc.HitboxRadius))
             .ToList();
     }

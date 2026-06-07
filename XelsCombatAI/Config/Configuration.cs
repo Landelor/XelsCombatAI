@@ -36,13 +36,14 @@ public sealed class Configuration : IPluginConfiguration
         new("PCT", config => config.GapCloserPCT, (config, value) => config.GapCloserPCT = value)
     ];
 
-    public int Version { get; set; } = 21;
+    public int Version { get; set; } = 22;
 
     public bool Enabled { get; set; } = false;
     public bool ManageMovement { get; set; } = true;
     public bool RespectManualMovement { get; set; } = true;
     public bool DisableAutoFaceTargetDuringManualMovement { get; set; } = false;
     public bool ManageSocialTurning { get; set; } = true;
+    public bool ManageSocialSpacing { get; set; } = true;
     public bool ManageForbiddenZoneDistance { get; set; } = true;
     public bool ManagePositionals { get; set; } = true;
     public bool ManageTrueNorth { get; set; } = false;
@@ -370,6 +371,12 @@ public sealed class Configuration : IPluginConfiguration
             this.TankDropStanceWhenCoTankHasStance = false;
             this.Version = 21;
         }
+
+        if (this.Version < 22)
+        {
+            this.ManageSocialSpacing = true;
+            this.Version = 22;
+        }
     }
 
     internal void Clamp()
@@ -383,6 +390,7 @@ public sealed class Configuration : IPluginConfiguration
     {
         this.CombatStyle = CombatStyle.Normal;
         this.ManageSocialTurning = true;
+        this.ManageSocialSpacing = true;
         this.DisableAutoFaceTargetDuringManualMovement = false;
         this.ManageForbiddenZoneDistance = true;
         this.PreferredForbiddenZoneDistance = DefaultPreferredForbiddenZoneDistance;
@@ -402,6 +410,7 @@ public sealed class Configuration : IPluginConfiguration
         this.RespectManualMovement = true;
         this.DisableAutoFaceTargetDuringManualMovement = false;
         this.ManageSocialTurning = true;
+        this.ManageSocialSpacing = true;
         this.ManageForbiddenZoneDistance = true;
         this.ManagePositionals = true;
         this.ManageTrueNorth = false;

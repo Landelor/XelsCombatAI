@@ -26,6 +26,7 @@ While you are in combat, the plugin automatically:
 - **Prefers helpful defensive ground effects** such as Asylum, Sacred Soil, Earthly Star, and Collective Unconscious
 - **Prefers Paladin Passage of Arms protection** by letting BossMod prefer the protected cone behind a party Paladin while the buff is active
 - **Avoids hugging the arena edge** as a weak preference when stronger movement goals do not matter
+- **Avoids pixel-perfect player stacks** by preferring a tiny safe offset from visible player party members, including during mechanics after BossMod reports the current position safe
 - **Shows a decision overlay** with projected in-world markers for current movement decisions, candidates, and debug context, plus an optional movable debug HUD (off by default)
 - **Can write opt-in run-review logs** for offline analysis with BossMod Reborn replay files (off by default)
 - **Pauses automated movement** briefly when you move manually, including remapped movement or gamepad input reported by BossMod, and briefly lowers the same advisory movement preference if your input looks like a correction
@@ -65,13 +66,15 @@ Open the settings window with `/xcai config` or through the Dalamud plugin list.
 
 ### Movement tab
 
-**Movement** — Control automatic movement, social facing during downtime, manual movement pause, auto-face behavior during manual movement, movement timing, danger-zone spacing, healer party coverage, defensive ground effects, Passage of Arms, and weak edge-avoidance preferences.
+**Movement** — Control automatic movement, social facing and spacing, manual movement pause, auto-face behavior during manual movement, movement timing, danger-zone spacing, healer party coverage, defensive ground effects, Passage of Arms, and weak edge-avoidance preferences.
 
 While you are casting, advisory movement goals are suppressed so comfort, uptime, AoE, party utility, and style preferences do not interrupt casts. Magic-ranged and healer jobs may still use the final slidecast window for those small adjustments. BossMod Reborn's own mechanic movement still applies, and the plugin may still add a raw mechanic-exit margin when BossMod is already moving you out.
 
 **Disable auto-face when I move** turns off the game's Auto-face target option while movement input is active, then restores your previous value after manual movement ends.
 
 **Follow party facing during downtime** turns roughly toward nearby party members when the target is gone or BossMod reports downtime, without changing facing during manual input, casting, animation lock, or BossMod movement pressure.
+
+**Avoid exact player stacks** lightly prefers a nearby safe offset when you are almost exactly overlapping a visible player party member. During mechanics, it waits until BossMod reports your current position safe and still yields to active BossMod movement.
 
 ### AoE & Trash tab
 

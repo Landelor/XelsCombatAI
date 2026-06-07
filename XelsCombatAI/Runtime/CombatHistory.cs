@@ -188,7 +188,7 @@ internal sealed class CombatHistory
         sb.AppendLine($"Start={this.combatStart:O}  Duration={last.T:0.0}s  Frames={this.count}");
         sb.AppendLine();
         sb.AppendLine("[Header]");
-        sb.AppendLine($"Job={this.PlayerClassJobId}  PickAoeTarget={config.PickBetterAoeTarget}  KeepTrashTarget={config.KeepTrashTargetSelected}  ManagePositionals={config.ManagePositionals}  ManageTrueNorth={config.ManageTrueNorth}  SocialTurning={config.ManageSocialTurning}  RedMageMelee={config.UseRedMageMeleeComboMovement}  CombatStyle={config.CombatStyle}  RsrSnapshot={this.lastSeenRsrSnapshotMode}");
+        sb.AppendLine($"Job={this.PlayerClassJobId}  PickAoeTarget={config.PickBetterAoeTarget}  KeepTrashTarget={config.KeepTrashTargetSelected}  ManagePositionals={config.ManagePositionals}  ManageTrueNorth={config.ManageTrueNorth}  SocialTurning={config.ManageSocialTurning}  SocialSpacing={config.ManageSocialSpacing}  RedMageMelee={config.UseRedMageMeleeComboMovement}  CombatStyle={config.CombatStyle}  RsrSnapshot={this.lastSeenRsrSnapshotMode}");
         sb.AppendLine();
         sb.AppendLine("[Frames]");
 
@@ -499,6 +499,7 @@ internal sealed class CombatHistory
         bool ManagePositionals,
         bool ManageTrueNorth,
         bool ManageSocialTurning,
+        bool ManageSocialSpacing,
         bool UseRedMageMeleeComboMovement,
         bool FightReviewLoggingEnabled,
         bool PluginEnabled,
@@ -513,6 +514,7 @@ internal sealed class CombatHistory
                 config.ManagePositionals,
                 config.ManageTrueNorth,
                 config.ManageSocialTurning,
+                config.ManageSocialSpacing,
                 config.UseRedMageMeleeComboMovement,
                 config.FightReviewLoggingEnabled,
                 config.Enabled,

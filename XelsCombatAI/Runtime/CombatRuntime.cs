@@ -513,6 +513,7 @@ internal sealed class CombatRuntime(
                config.ManagePassageOfArmsPositioning ||
                config.AvoidArenaEdge ||
                config.ManageSocialTurning ||
+               config.ManageSocialSpacing ||
                config.UseRedMageMeleeComboMovement ||
                config.TankIgnoreFrontConeMovement ||
                config.TankKeepFrontConeAwayFromParty;

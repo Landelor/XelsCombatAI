@@ -46,6 +46,7 @@ internal static class StatusReporter
 
         AppendSection(builder, "Facing State");
         Append(builder, "ManageSocialTurning", config.ManageSocialTurning);
+        Append(builder, "ManageSocialSpacing", config.ManageSocialSpacing);
         Append(builder, "Source", status.Facing.Source);
         Append(builder, "Reason", status.Facing.Reason);
         Append(builder, "DesiredRotation", status.Facing.DesiredRotation);

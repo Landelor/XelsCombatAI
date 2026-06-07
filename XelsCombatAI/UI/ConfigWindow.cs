@@ -225,6 +225,13 @@ internal sealed class ConfigWindow : Window, IDisposable
         if (!this.config.ManageMovement)
             ImGui.BeginDisabled();
 
+        changed |= this.Checkbox(
+            "Avoid exact player stacks",
+            this.config.ManageSocialSpacing,
+            this.defaultConfig.ManageSocialSpacing,
+            v => this.config.ManageSocialSpacing = v,
+            "When nearly overlapping a visible player party member, prefers a nearby safe offset.\nDuring mechanics, waits until BossMod says your current position is safe.",
+            movementDisabledTooltip);
         changed |= this.Checkbox("Pause when I move", this.config.RespectManualMovement, this.defaultConfig.RespectManualMovement, v => this.config.RespectManualMovement = v, disabledTooltip: movementDisabledTooltip);
         changed |= this.Checkbox(
             "Disable auto-face when I move",

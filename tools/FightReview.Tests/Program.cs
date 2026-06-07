@@ -351,6 +351,7 @@ static void ConfigurationLoggingDefaultsAndReset()
     AssertEqual(currentVersion, oldLoggingConfig.Version, "old logging config migrated version");
     AssertFalse(oldLoggingConfig.FightReviewLoggingEnabled, "migration disables logging");
     AssertTrue(oldLoggingConfig.ManageSocialTurning, "migration enables social turning");
+    AssertTrue(oldLoggingConfig.ManageSocialSpacing, "migration enables social spacing");
 }
 
 static void TargetUptimeRangeFollowsNextGcd()
