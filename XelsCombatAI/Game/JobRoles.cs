@@ -19,8 +19,10 @@ internal static class JobRoles
         => classJobId is 6 or 24 or 28 or 40;
 
     public static RangeRole GetRangeRole(IBattleChara? player)
+        => GetRangeRole(player?.ClassJob.RowId ?? 0);
+
+    public static RangeRole GetRangeRole(uint classJobId)
     {
-        var classJobId = player?.ClassJob.RowId ?? 0;
         return classJobId is
             5 or 23 or
             31 or

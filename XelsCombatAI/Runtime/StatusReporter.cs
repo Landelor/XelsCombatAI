@@ -41,6 +41,7 @@ internal static class StatusReporter
         Append(builder, "ReflectionHealth", BuildReflectionHealthSummary(status));
         Append(builder, "InitializedPreset", status.InitializedPreset);
         Append(builder, "AutomatedMovementSuppressed", status.AutomatedMovementSuppressed);
+        Append(builder, "DisableAutoFaceTargetDuringManualMovement", config.DisableAutoFaceTargetDuringManualMovement);
         builder.AppendLine();
 
         AppendSection(builder, "Facing State");

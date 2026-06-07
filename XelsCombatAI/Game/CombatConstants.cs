@@ -5,6 +5,7 @@ internal static class CombatConstants
     public const float MeleeActionRange = 3f;
     public const float HealerCoverageAttackRange = 25f;
     public const float GapCloserMaxRange = 20f;
+    public const float PhantomKickMaxRange = 15f;
     public const float GapCloserDestinationMeleeRange = 2.6f;
     public const double EscapeGapCloserDangerWindowMilliseconds = 750d;
     public const float FixedForwardGapCloserRange = 15f;

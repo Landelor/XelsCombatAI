@@ -20,7 +20,8 @@ internal sealed class DalamudServices(
     IGameGui gameGui,
     IObjectTable objectTable,
     ITargetManager targetManager,
-    IPartyList partyList)
+    IPartyList partyList,
+    IGameConfig gameConfig)
 {
     public IDalamudPluginInterface PluginInterface { get; } = pluginInterface;
     public ICommandManager CommandManager { get; } = commandManager;
@@ -36,4 +37,5 @@ internal sealed class DalamudServices(
     public IObjectTable ObjectTable { get; } = objectTable;
     public ITargetManager TargetManager { get; } = targetManager;
     public IPartyList PartyList { get; } = partyList;
+    public IGameConfig GameConfig { get; } = gameConfig;
 }

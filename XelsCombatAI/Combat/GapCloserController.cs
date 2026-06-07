@@ -89,7 +89,8 @@ internal sealed class GapCloserController(
         }
 
         var classJobId = player.ClassJob.RowId;
-        if (ShouldBlockRangedReengageGapCloser(classJobId))
+        if (ShouldBlockRangedReengageGapCloser(classJobId) &&
+            !this.ShouldAllowPhantomTargetAoeReengageGapCloser(classJobId, target))
         {
             this.lastGapCloserSafety = "ranged gap closer reserved for safety or job-specific movement";
             this.lastSafeLandingPosition = null;
@@ -121,6 +122,12 @@ internal sealed class GapCloserController(
             : (Vector3?)null;
 
         var reengageRange = MathF.Max(CombatConstants.MeleeActionRange, jobRangeProvider.EngagementRange);
+        var phantomAoeTargetReengageAllowed = this.ShouldAllowPhantomTargetAoeReengageGapCloser(classJobId, target);
+        var effectiveReengageRange = phantomAoeTargetReengageAllowed
+            ? MathF.Max(
+                CombatConstants.MeleeActionRange,
+                AoePackPositioningController.ResolveEffectivePackAoeRange(classJobId, jobRangeProvider.PackAoeRange, inAoeSituation: true))
+            : reengageRange;
         var originalTargetObjectId = target.GameObjectId;
         IBattleNpc? relayReturnTarget = null;
         if (ShouldTryHostileRelay(classJobId, distanceToHitbox, reengageRange) &&
@@ -145,11 +152,11 @@ internal sealed class GapCloserController(
         var hasFriendlyReengageOption = classJobId is 2 or 20 or 41;
         var allowStyleReengageInsideEngagementRange = this.ShouldAllowStyleReengageInsideEngagementRange(target, styleOpportunity);
         if (relayReturnTarget == null &&
-            ((distanceToHitbox <= reengageRange && !allowStyleReengageInsideEngagementRange) ||
+            ((distanceToHitbox <= effectiveReengageRange && !allowStyleReengageInsideEngagementRange) ||
              (distanceToHitbox > CombatConstants.GapCloserMaxRange && !hasFriendlyReengageOption)))
         {
-            this.lastGapCloserSafety = distanceToHitbox <= reengageRange
-                ? $"target within {reengageRange:0.#}y engagement range"
+            this.lastGapCloserSafety = distanceToHitbox <= effectiveReengageRange
+                ? $"target within {effectiveReengageRange:0.#}y engagement range"
                 : "target not in gap closer range";
             this.lastSafeLandingPosition = null;
             return false;
@@ -191,6 +198,11 @@ internal sealed class GapCloserController(
             return false;
         }
 
+        if (this.TryUsePhantomReengageGapCloser(classJobId, distanceToHitbox, reengageRange, target, safeMovementDestination, styleOpportunity, relayReturnTarget))
+        {
+            return true;
+        }
+
         return classJobId switch
         {
             1 or 19 when config.GapCloserPLD => this.TryUseTargetGapCloser(ActionUse.PaladinInterveneActionId, "Intervene", distanceToHitbox, target, safeMovementDestination, styleOpportunity, relayReturnTarget),
@@ -214,6 +226,116 @@ internal sealed class GapCloserController(
         return styleOpportunity.Active &&
                target is IBattleNpc battleNpc &&
                bossMod.HasModuleByDataId(battleNpc.BaseId);
+    }
+
+    internal static bool ShouldAllowPhantomReengageGapCloser(uint classJobId, bool phantomGapClosersEnabled, bool currentJobGapCloserEnabled)
+    {
+        return ShouldAllowPhantomTargetReengageGapCloser(classJobId, phantomGapClosersEnabled, currentJobGapCloserEnabled) ||
+               ShouldAllowPhantomForwardReengageGapCloser(classJobId, phantomGapClosersEnabled, currentJobGapCloserEnabled);
+    }
+
+    internal static bool ShouldAllowPhantomTargetReengageGapCloser(uint classJobId, bool phantomGapClosersEnabled, bool currentJobGapCloserEnabled)
+    {
+        return phantomGapClosersEnabled &&
+               currentJobGapCloserEnabled &&
+               (JobRoles.IsTankJob(classJobId) || JobRoles.GetRangeRole(classJobId) == RangeRole.Melee);
+    }
+
+    internal static bool ShouldAllowPhantomTargetAoeReengageGapCloser(uint classJobId, bool phantomGapClosersEnabled, bool currentJobGapCloserEnabled, bool inAoePackContext, float packAoeRange)
+    {
+        return phantomGapClosersEnabled &&
+               currentJobGapCloserEnabled &&
+               inAoePackContext &&
+               AoePackPositioningController.ResolveEffectivePackAoeRange(classJobId, packAoeRange, inAoeSituation: true) <= 8f;
+    }
+
+    internal static bool ShouldAllowPhantomForwardReengageGapCloser(uint classJobId, bool phantomGapClosersEnabled, bool currentJobGapCloserEnabled)
+    {
+        return phantomGapClosersEnabled &&
+               currentJobGapCloserEnabled &&
+               !JobRoles.IsTankJob(classJobId) &&
+               JobRoles.GetRangeRole(classJobId) == RangeRole.Melee;
+    }
+
+    private bool TryUsePhantomReengageGapCloser(
+        uint classJobId,
+        float distanceToHitbox,
+        float reengageRange,
+        IGameObject target,
+        Vector3? safeMovementDestination,
+        DashStyleReengageOpportunity styleOpportunity,
+        IBattleNpc? restoreTargetAfterUse)
+    {
+        var targetReengageAllowed = ShouldAllowPhantomTargetReengageGapCloser(
+            classJobId,
+            config.UsePhantomGapClosers,
+            config.IsPhantomGapCloserJobEnabled(classJobId)) ||
+            this.ShouldAllowPhantomTargetAoeReengageGapCloser(classJobId, target);
+        var forwardReengageAllowed = ShouldAllowPhantomForwardReengageGapCloser(
+            classJobId,
+            config.UsePhantomGapClosers,
+            config.IsPhantomGapCloserJobEnabled(classJobId));
+        if (!targetReengageAllowed && !forwardReengageAllowed)
+        {
+            return false;
+        }
+
+        if (targetReengageAllowed &&
+            distanceToHitbox <= CombatConstants.PhantomKickMaxRange &&
+            this.TryUseTargetGapCloser(
+                ActionUse.PhantomKickActionId,
+                "Phantom Kick",
+                distanceToHitbox,
+                target,
+                safeMovementDestination,
+                styleOpportunity,
+                restoreTargetAfterUse))
+        {
+            return true;
+        }
+
+        if (targetReengageAllowed && distanceToHitbox > CombatConstants.PhantomKickMaxRange)
+        {
+            this.lastGapCloserSafety = "target not in Phantom Kick range";
+        }
+
+        if (!forwardReengageAllowed)
+        {
+            return false;
+        }
+
+        return this.TryUseForwardGapCloser(
+            ActionUse.OccultFeatherfootActionId,
+            "Occult Featherfoot",
+            distanceToHitbox,
+            MathF.Max(reengageRange, CombatConstants.MeleeActionRange + 1f),
+            target,
+            safeMovementDestination,
+            styleOpportunity);
+    }
+
+    private bool ShouldAllowPhantomTargetAoeReengageGapCloser(uint classJobId, IGameObject? target)
+    {
+        if (target is not IBattleNpc battleNpc ||
+            battleNpc.BattleNpcKind != BattleNpcSubKind.Combatant ||
+            battleNpc.GameObjectId == 0 ||
+            battleNpc.IsDead ||
+            battleNpc.CurrentHp <= 0 ||
+            bossMod.HasModuleByDataId(battleNpc.BaseId))
+        {
+            return false;
+        }
+
+        var trash = trashPullDiagnostics();
+        var inAoePackContext = trash.Phase is TrashPullPhase.Gathering or TrashPullPhase.Stabilizing or TrashPullPhase.Burning &&
+                               trash.DominantTargetCount >= 2 &&
+                               (trash.DominantTargetIds.Count == 0 || trash.DominantTargetIds.Contains(battleNpc.GameObjectId));
+        return ShouldAllowPhantomTargetAoeReengageGapCloser(
+            classJobId,
+            config.UsePhantomGapClosers,
+            config.IsPhantomGapCloserJobEnabled(classJobId),
+            inAoePackContext,
+            jobRangeProvider.PackAoeRange);
     }
 
     private bool TryResolveRsrAlignedReengageTarget(out IBattleNpc? target, out string reason)

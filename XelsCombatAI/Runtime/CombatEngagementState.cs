@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Dalamud.Game.ClientState.Conditions;
@@ -10,15 +9,13 @@ namespace XelsCombatAI.Runtime;
 internal sealed record CombatEngagementState(
     bool LocalInCombat,
     bool PartyInCombat,
-    bool NearbyHostileCombat,
+    bool PartyTargetedHostileCombat,
     bool EffectiveInCombat,
     string Reason,
     string SuppressedReason);
 
 internal static class CombatEngagementDetector
 {
-    private const float NearbyHostileCombatDistance = 45f;
-
     public static bool IsEffectivelyInCombat(DalamudServices services)
     {
         return Detect(services).EffectiveInCombat;
@@ -33,21 +30,21 @@ internal static class CombatEngagementDetector
         }
 
         var partyIds = BuildPartyIds(services, player, out var partyInCombat);
-        var nearbyHostileCombat = HasNearbyHostileCombat(services, player, partyIds);
-        var effectiveInCombat = localInCombat || partyInCombat || nearbyHostileCombat;
+        var partyTargetedHostileCombat = HasPartyTargetedHostileCombat(services, partyIds);
+        var effectiveInCombat = localInCombat || partyInCombat || partyTargetedHostileCombat;
         var reason = localInCombat
             ? "local"
             : partyInCombat
                 ? "party"
-                : nearbyHostileCombat
-                    ? "nearby hostile"
+                : partyTargetedHostileCombat
+                    ? "party targeted"
                     : "none";
 
         var suppressedReason = services.Condition[ConditionFlag.Unconscious] || player.IsDead || player.CurrentHp == 0
             ? "player dead"
             : string.Empty;
 
-        return new(localInCombat, partyInCombat, nearbyHostileCombat, effectiveInCombat, reason, suppressedReason);
+        return new(localInCombat, partyInCombat, partyTargetedHostileCombat, effectiveInCombat, reason, suppressedReason);
     }
 
     private static HashSet<ulong> BuildPartyIds(DalamudServices services, IBattleChara player, out bool partyInCombat)
@@ -67,7 +64,7 @@ internal static class CombatEngagementDetector
         return ids;
     }
 
-    private static bool HasNearbyHostileCombat(DalamudServices services, IBattleChara player, IReadOnlySet<ulong> partyIds)
+    private static bool HasPartyTargetedHostileCombat(DalamudServices services, IReadOnlySet<ulong> partyIds)
     {
         foreach (var npc in services.ObjectTable.OfType<IBattleNpc>())
         {
@@ -84,20 +81,8 @@ internal static class CombatEngagementDetector
             {
                 return true;
             }
-
-            if (VectorDistance2D(player.Position, npc.Position) <= NearbyHostileCombatDistance)
-            {
-                return true;
-            }
         }
 
         return false;
-    }
-
-    private static float VectorDistance2D(System.Numerics.Vector3 a, System.Numerics.Vector3 b)
-    {
-        var dx = a.X - b.X;
-        var dz = a.Z - b.Z;
-        return MathF.Sqrt((dx * dx) + (dz * dz));
     }
 }

@@ -57,6 +57,8 @@ internal static class ActionUse
     public const uint PictomancerSmudgeActionId = 34684;
     public const uint DancerEnAvantActionId = 16010;
     public const uint BardRepellingShotActionId = 112;
+    public const uint PhantomKickActionId = 41595;
+    public const uint OccultFeatherfootActionId = 41600;
 
     public static unsafe bool CanUseAction(uint actionId)
     {

@@ -36,11 +36,12 @@ public sealed class Configuration : IPluginConfiguration
         new("PCT", config => config.GapCloserPCT, (config, value) => config.GapCloserPCT = value)
     ];
 
-    public int Version { get; set; } = 18;
+    public int Version { get; set; } = 20;
 
     public bool Enabled { get; set; } = false;
     public bool ManageMovement { get; set; } = true;
     public bool RespectManualMovement { get; set; } = true;
+    public bool DisableAutoFaceTargetDuringManualMovement { get; set; } = false;
     public bool ManageSocialTurning { get; set; } = true;
     public bool ManageForbiddenZoneDistance { get; set; } = true;
     public bool ManagePositionals { get; set; } = true;
@@ -51,6 +52,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool ReturnToLeylines { get; set; } = true;
     public bool UseRedMageMeleeComboMovement { get; set; } = false;
     public bool UseGapCloser { get; set; } = false;
+    public bool UsePhantomGapClosers { get; set; } = false;
     public bool GapCloserPLD { get; set; } = true;
     public bool GapCloserWAR { get; set; } = true;
     public bool GapCloserDRK { get; set; } = true;
@@ -341,6 +343,18 @@ public sealed class Configuration : IPluginConfiguration
         {
             this.Version = 18;
         }
+
+        if (this.Version < 19)
+        {
+            this.UsePhantomGapClosers = false;
+            this.Version = 19;
+        }
+
+        if (this.Version < 20)
+        {
+            this.DisableAutoFaceTargetDuringManualMovement = false;
+            this.Version = 20;
+        }
     }
 
     internal void Clamp()
@@ -354,6 +368,7 @@ public sealed class Configuration : IPluginConfiguration
     {
         this.CombatStyle = CombatStyle.Normal;
         this.ManageSocialTurning = true;
+        this.DisableAutoFaceTargetDuringManualMovement = false;
         this.ManageForbiddenZoneDistance = true;
         this.PreferredForbiddenZoneDistance = DefaultPreferredForbiddenZoneDistance;
         this.MinimumGapCloserDistance = DefaultMinimumGapCloserDistance;
@@ -365,6 +380,7 @@ public sealed class Configuration : IPluginConfiguration
         this.Enabled = false;
         this.ManageMovement = true;
         this.RespectManualMovement = true;
+        this.DisableAutoFaceTargetDuringManualMovement = false;
         this.ManageSocialTurning = true;
         this.ManageForbiddenZoneDistance = true;
         this.ManagePositionals = true;
@@ -375,6 +391,7 @@ public sealed class Configuration : IPluginConfiguration
         this.ReturnToLeylines = true;
         this.UseRedMageMeleeComboMovement = false;
         this.UseGapCloser = false;
+        this.UsePhantomGapClosers = false;
         this.SetAllGapCloserJobs(true);
         this.EchoStatusToChat = true;
         this.CombatStyle = CombatStyle.Normal;
@@ -398,6 +415,77 @@ public sealed class Configuration : IPluginConfiguration
         {
             toggle.Set(this, enabled);
         }
+    }
+
+    internal bool IsGapCloserJobEnabled(uint classJobId)
+    {
+        return classJobId switch
+        {
+            1 or 19 => this.GapCloserPLD,
+            3 or 21 => this.GapCloserWAR,
+            32 => this.GapCloserDRK,
+            37 => this.GapCloserGNB,
+            2 or 20 => this.GapCloserMNK,
+            4 or 22 => this.GapCloserDRG,
+            5 or 23 => this.GapCloserBRD,
+            25 => this.GapCloserBLM,
+            29 or 30 => this.GapCloserNIN,
+            34 => this.GapCloserSAM,
+            38 => this.GapCloserDNC,
+            39 => this.GapCloserRPR,
+            24 => this.GapCloserWHM,
+            35 => this.GapCloserRDM,
+            40 => this.GapCloserSGE,
+            41 => this.GapCloserVPR,
+            42 => this.GapCloserPCT,
+            _ => false
+        };
+    }
+
+    internal bool IsPhantomGapCloserJobEnabled(uint classJobId)
+    {
+        if (!IsCombatClassOrJob(classJobId))
+        {
+            return false;
+        }
+
+        return HasGapCloserJobToggle(classJobId)
+            ? this.IsGapCloserJobEnabled(classJobId)
+            : JobRoles.GetRangeRole(classJobId) switch
+            {
+                RangeRole.Melee => this.GapCloserMNK || this.GapCloserDRG || this.GapCloserNIN || this.GapCloserSAM || this.GapCloserRPR || this.GapCloserVPR,
+                RangeRole.PhysicalRanged => this.GapCloserBRD || this.GapCloserDNC,
+                RangeRole.Healer => this.GapCloserWHM || this.GapCloserSGE,
+                RangeRole.MagicRanged => this.GapCloserBLM || this.GapCloserRDM || this.GapCloserPCT,
+                _ => false
+            };
+    }
+
+    private static bool HasGapCloserJobToggle(uint classJobId)
+    {
+        return classJobId is
+            1 or 19 or
+            3 or 21 or
+            32 or
+            37 or
+            2 or 20 or
+            4 or 22 or
+            5 or 23 or
+            25 or
+            29 or 30 or
+            34 or
+            38 or
+            39 or
+            24 or
+            35 or
+            40 or
+            41 or
+            42;
+    }
+
+    private static bool IsCombatClassOrJob(uint classJobId)
+    {
+        return classJobId is >= 1 and <= 7 or >= 19 and <= 42;
     }
 
     private void SetTankGapCloserJobs(bool enabled)

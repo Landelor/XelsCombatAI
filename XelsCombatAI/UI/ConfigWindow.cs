@@ -226,6 +226,13 @@ internal sealed class ConfigWindow : Window, IDisposable
             ImGui.BeginDisabled();
 
         changed |= this.Checkbox("Pause when I move", this.config.RespectManualMovement, this.defaultConfig.RespectManualMovement, v => this.config.RespectManualMovement = v, disabledTooltip: movementDisabledTooltip);
+        changed |= this.Checkbox(
+            "Disable auto-face when I move",
+            this.config.DisableAutoFaceTargetDuringManualMovement,
+            this.defaultConfig.DisableAutoFaceTargetDuringManualMovement,
+            v => this.config.DisableAutoFaceTargetDuringManualMovement = v,
+            "Turns off the game's Auto-face target option while movement input is active, then restores your previous value.",
+            movementDisabledTooltip);
         changed |= this.Combo("Movement timing", this.config.CombatStyle, this.defaultConfig.CombatStyle, v => this.config.CombatStyle = v, "Chooses how late to move for mechanics.\nSafe settings move earlier; greedy settings wait longer.", v => v switch
         {
             CombatStyle.Greed => "Greedy",
@@ -406,6 +413,14 @@ internal sealed class ConfigWindow : Window, IDisposable
         }
 
         ImGui.Unindent(8f);
+        changed |= this.Checkbox(
+            "Phantom duty dashes",
+            this.config.UsePhantomGapClosers,
+            this.defaultConfig.UsePhantomGapClosers,
+            v => this.config.UsePhantomGapClosers = v,
+            "Allows Phantom dash actions using the current job's dash type and archetype rules.\nPhantom Kick follows target-dash safety rules, close-range AoE pack movement, and re-engage limits.\nOccult Featherfoot follows fixed-forward dash rules.\nPhantom actions are preferred over native dashes for the same movement purpose.\nJobs without a native dash use their range archetype.",
+            gapCloserDisabledTooltip);
+
         changed |= this.SliderFloat(
             "Minimum gap-closer distance",
             this.config.MinimumGapCloserDistance,

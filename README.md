@@ -63,9 +63,11 @@ Open the settings window with `/xcai config` or through the Dalamud plugin list.
 
 ### Movement tab
 
-**Movement** — Control automatic movement, social facing during downtime, manual movement pause, movement timing, danger-zone spacing, healer party coverage, defensive ground effects, Passage of Arms, and weak edge-avoidance preferences.
+**Movement** — Control automatic movement, social facing during downtime, manual movement pause, auto-face behavior during manual movement, movement timing, danger-zone spacing, healer party coverage, defensive ground effects, Passage of Arms, and weak edge-avoidance preferences.
 
 While you are casting, advisory movement goals are suppressed so comfort, uptime, AoE, party utility, and style preferences do not interrupt casts. Magic-ranged and healer jobs may still use the final slidecast window for those small adjustments. BossMod Reborn's own mechanic movement still applies, and the plugin may still add a raw mechanic-exit margin when BossMod is already moving you out.
+
+**Disable auto-face when I move** turns off the game's Auto-face target option while movement input is active, then restores your previous value after manual movement ends.
 
 **Follow party facing during downtime** turns roughly toward nearby party members when the target is gone or BossMod reports downtime, without changing facing during manual input, casting, animation lock, or BossMod movement pressure.
 
@@ -88,6 +90,8 @@ While you are casting, advisory movement goals are suppressed so comfort, uptime
 **Dashes** — Optional gap-closer automation for reaching safety faster, returning to a target, or recovering after forced movement. This option is off by default and can very likely kill you in some fights. A single job allow-list covers enemy-target dashes, ally-target dashes, location dashes, forward dashes, backsteps, and return anchors.
 
 Fixed-direction dashes can make a short setup turn when that turn is required for a safe, useful dash. Greedy movement timing also gives safe dash choices a style pass, preferring better ally anchors, precision Shukuchi landings, paired out-and-back returns, knockback recovery dashes, capped-charge spends, trash-pack dash anchors, and cleaner fixed-direction dash angles while still requiring BossMod-safe landings. In BossMod-known boss fights, greedy timing may also spend a safe re-engage dash from normal job range when it saves the configured minimum movement distance.
+
+Phantom duty dashes have a separate opt-in checkbox. When enabled, Phantom dash actions follow the current job's dash-type rules and archetype: Phantom Kick is treated as a 15y target dash, and Occult Featherfoot is treated as a fixed-forward dash. Phantom Kick can be used as a safety target dash when it passes the same BossMod safe-movement progress checks as other emergency target dashes, and close-range AoE jobs can use it to move into trash packs for AoE damage. If a Phantom action and native dash both satisfy the same movement purpose, the Phantom action is tried first because it may carry useful side effects. Ranged/healer boss re-engage reservations are not overridden. Jobs with native dashes use their job allow-list entry; jobs without native dashes use their range archetype. The normal Gap closers option still applies.
 
 During confident multi-target trash pulls, re-engage gap closers are conserved unless the target or trash-pull destination is close to falling out of dash range. If a pack dash chooses a different attackable target, that target is selected before the dash so movement does not immediately walk back to another enemy. Safety dashes are still evaluated separately.
 

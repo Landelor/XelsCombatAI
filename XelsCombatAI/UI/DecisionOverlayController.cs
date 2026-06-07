@@ -416,13 +416,13 @@ internal sealed class DecisionOverlayController(
 
             if (config.UseGapCloser || !movementEnabled)
             {
-                var escapeEnabled = movementEnabled && config.UseGapCloser && this.CurrentJobGapCloserEnabled();
+                var escapeEnabled = movementEnabled && config.UseGapCloser && this.CurrentDashPolicyEnabled();
                 var escapeState = escapeEnabled ? DecisionOverlayState.Future : DecisionOverlayState.Suppressed;
                 var escapeReason = this.DisabledReason(
                     (config.Enabled, "Enabled"),
                     (config.ManageMovement, "Automate movement"),
                     (config.UseGapCloser, "Gap closers"),
-                    (this.CurrentJobGapCloserEnabled(), "Current job gap closer allowlist"));
+                    (this.CurrentDashPolicyEnabled(), "Current job or Phantom archetype dash rule"));
                 yield return new(
                     DecisionOverlaySource.EscapeLanding,
                     escapeState,
@@ -472,14 +472,14 @@ internal sealed class DecisionOverlayController(
     private IEnumerable<DecisionOverlaySnapshot> BuildGapCloserDebugSnapshots(IBattleChara player, IBattleChara target)
     {
         var movementEnabled = config.Enabled && config.ManageMovement;
-        var reengageEnabled = movementEnabled && config.UseGapCloser && this.CurrentJobGapCloserEnabled();
+        var reengageEnabled = movementEnabled && config.UseGapCloser && this.CurrentDashPolicyEnabled();
         var state = reengageEnabled ? DecisionOverlayState.Future : DecisionOverlayState.Suppressed;
         var distanceToHitbox = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, target.Position, target.HitboxRadius);
         var reason = this.DisabledReason(
             (config.Enabled, "Enabled"),
             (config.ManageMovement, "Automate movement"),
             (config.UseGapCloser, "Gap closers"),
-            (this.CurrentJobGapCloserEnabled(), "Current job gap closer allowlist"));
+            (this.CurrentDashPolicyEnabled(), "Current job or Phantom archetype dash rule"));
 
         yield return new(
             DecisionOverlaySource.GapCloser,
@@ -525,6 +525,7 @@ internal sealed class DecisionOverlayController(
             this.DrawConfigSection("Movement");
             this.DrawConfigRow("Automate movement", config.ManageMovement, config.Enabled && config.ManageMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement")));
             this.DrawConfigRow("Pause when I move", config.RespectManualMovement, config.Enabled && config.ManageMovement && config.RespectManualMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.RespectManualMovement, "Pause when I move")));
+            this.DrawConfigRow("Disable auto-face when moving", config.DisableAutoFaceTargetDuringManualMovement, config.Enabled && config.ManageMovement && config.DisableAutoFaceTargetDuringManualMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.DisableAutoFaceTargetDuringManualMovement, "Disable auto-face when moving")));
             this.DrawConfigRow("Movement timing", config.CombatStyle, config.Enabled && config.ManageMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement")));
             this.DrawConfigRow("Avoid danger zones", config.ManageForbiddenZoneDistance, config.Enabled && config.ManageMovement && config.ManageForbiddenZoneDistance, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageForbiddenZoneDistance, "Avoid danger zones")));
             this.DrawConfigRow("Extra danger-zone space", config.PreferredForbiddenZoneDistance, config.Enabled && config.ManageMovement && config.ManageForbiddenZoneDistance, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageForbiddenZoneDistance, "Avoid danger zones")));
@@ -554,6 +555,7 @@ internal sealed class DecisionOverlayController(
             this.DrawConfigSection("Dashes");
             this.DrawConfigRow("Gap closers", config.UseGapCloser, config.Enabled && config.ManageMovement && config.UseGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers")));
             this.DrawConfigRow("Gap closer jobs", this.FormatJobAllowlist("PLD", config.GapCloserPLD, "WAR", config.GapCloserWAR, "DRK", config.GapCloserDRK, "GNB", config.GapCloserGNB, "MNK", config.GapCloserMNK, "DRG", config.GapCloserDRG, "BRD", config.GapCloserBRD, "NIN", config.GapCloserNIN, "SAM", config.GapCloserSAM, "DNC", config.GapCloserDNC, "RPR", config.GapCloserRPR, "VPR", config.GapCloserVPR, "WHM", config.GapCloserWHM, "BLM", config.GapCloserBLM, "RDM", config.GapCloserRDM, "SGE", config.GapCloserSGE, "PCT", config.GapCloserPCT), config.Enabled && config.ManageMovement && config.UseGapCloser && this.CurrentJobGapCloserEnabled(), this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers"), (this.CurrentJobGapCloserEnabled(), "Current job gap closer allowlist")));
+            this.DrawConfigRow("Phantom duty dashes", config.UsePhantomGapClosers, config.Enabled && config.ManageMovement && config.UseGapCloser && config.UsePhantomGapClosers && this.CurrentPhantomGapCloserEnabled(), this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers"), (config.UsePhantomGapClosers, "Phantom duty dashes"), (this.CurrentPhantomGapCloserEnabled(), "Current job or range archetype")));
             this.DrawConfigRow("Minimum gap-closer distance", config.MinimumGapCloserDistance, config.Enabled && config.ManageMovement && config.UseGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers")));
             this.DrawConfigRow("Greedy dash style", config.CombatStyle == CombatStyle.Normal ? "off" : "on", config.Enabled && config.ManageMovement && config.UseGapCloser && config.CombatStyle != CombatStyle.Normal, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers"), (config.CombatStyle != CombatStyle.Normal, "Greedy movement timing")));
             this.DrawConfigRow("Greedy unsafe safety dashes", config.CombatStyle == CombatStyle.Normal ? "off" : config.CombatStyle, config.Enabled && config.ManageMovement && config.UseGapCloser && config.CombatStyle != CombatStyle.Normal, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers"), (config.CombatStyle != CombatStyle.Normal, "Greedy movement timing")));
@@ -605,27 +607,18 @@ internal sealed class DecisionOverlayController(
     private bool CurrentJobGapCloserEnabled()
     {
         var classJobId = services.ObjectTable.LocalPlayer?.ClassJob.RowId ?? 0;
-        return classJobId switch
-        {
-            1 or 19 => config.GapCloserPLD,
-            3 or 21 => config.GapCloserWAR,
-            32 => config.GapCloserDRK,
-            37 => config.GapCloserGNB,
-            2 or 20 => config.GapCloserMNK,
-            4 or 22 => config.GapCloserDRG,
-            5 or 23 => config.GapCloserBRD,
-            25 => config.GapCloserBLM,
-            29 or 30 => config.GapCloserNIN,
-            34 => config.GapCloserSAM,
-            38 => config.GapCloserDNC,
-            39 => config.GapCloserRPR,
-            24 => config.GapCloserWHM,
-            35 => config.GapCloserRDM,
-            40 => config.GapCloserSGE,
-            41 => config.GapCloserVPR,
-            42 => config.GapCloserPCT,
-            _ => false
-        };
+        return config.IsGapCloserJobEnabled(classJobId);
+    }
+
+    private bool CurrentPhantomGapCloserEnabled()
+    {
+        var classJobId = services.ObjectTable.LocalPlayer?.ClassJob.RowId ?? 0;
+        return config.UsePhantomGapClosers && config.IsPhantomGapCloserJobEnabled(classJobId);
+    }
+
+    private bool CurrentDashPolicyEnabled()
+    {
+        return this.CurrentJobGapCloserEnabled() || this.CurrentPhantomGapCloserEnabled();
     }
 
     private string FormatJobAllowlist(params object[] nameValuePairs)

@@ -35,6 +35,7 @@ internal sealed class CombatComposition : IDisposable
         var bossModSafety = new BossModReflectionSafety(pluginInterface, log, bossModGate);
         var vnavmesh = new VNavmeshIpc(pluginInterface);
         var manualMovement = new ManualMovementInputDetector();
+        var autoFaceTargetOptionController = new AutoFaceTargetOptionController(config, services);
         var manualCorrectionFeedback = new ManualCorrectionFeedback();
         var rotationSolver = new RotationSolverIpc(pluginInterface, log);
         var rotationSolverActions = new RotationSolverActionReflection(pluginInterface, log);
@@ -112,6 +113,7 @@ internal sealed class CombatComposition : IDisposable
             redMageMeleeComboController,
             combatLogWriter,
             manualMovement,
+            autoFaceTargetOptionController,
             manualCorrectionFeedback,
             mobilityDecisionEvaluator,
             gapCloserController,

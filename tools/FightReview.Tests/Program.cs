@@ -35,8 +35,10 @@ var tests = new (string Name, Action Body)[]
     ("friendly anchor dash requires meaningful gain", FriendlyAnchorDashRequiresMeaningfulGain),
     ("gap closer follows RSR auto target", GapCloserFollowsRsrAutoTarget),
     ("ranged gap closers skip boss reengage", RangedGapClosersSkipBossReengage),
+    ("phantom gap closers inherit base job reengage rules", PhantomGapClosersInheritBaseJobReengageRules),
     ("knockback recovery bypasses gap closer minimum distance", KnockbackRecoveryBypassesGapCloserMinimumDistance),
     ("BMR safety dash requires destination progress", BmrSafetyDashRequiresDestinationProgress),
+    ("late safety dash continues while unsafe and far", LateSafetyDashContinuesWhileUnsafeAndFar),
     ("hostile relay dash requires target momentum", HostileRelayDashRequiresTargetMomentum),
     ("trash gap closer rejects stale pack", TrashGapCloserRejectsStalePack),
     ("BMR advisory scoring combines enabled preferences", BmrAdvisoryScoringCombinesEnabledPreferences),
@@ -314,17 +316,41 @@ static void ConfigurationLoggingDefaultsAndReset()
     var config = new Configuration();
     var currentVersion = config.Version;
     AssertFalse(config.FightReviewLoggingEnabled, "default logging disabled");
+    AssertFalse(config.UsePhantomGapClosers, "default Phantom dashes disabled");
+    AssertFalse(config.IsGapCloserJobEnabled(31), "MCH has no native gap closer allow-list entry");
+    AssertTrue(config.IsPhantomGapCloserJobEnabled(31), "MCH Phantom dashes follow physical ranged archetype");
+    AssertTrue(config.IsPhantomGapCloserJobEnabled(33), "AST Phantom dashes follow healer archetype");
+    AssertTrue(config.IsPhantomGapCloserJobEnabled(27), "SMN Phantom dashes follow magic ranged archetype");
+    AssertFalse(config.IsPhantomGapCloserJobEnabled(0), "unknown job has no Phantom dash archetype");
+
+    config.GapCloserBRD = false;
+    config.GapCloserDNC = false;
+    AssertFalse(config.IsPhantomGapCloserJobEnabled(31), "physical ranged Phantom archetype respects physical ranged dash toggles");
+    config.GapCloserBRD = true;
+    config.GapCloserDNC = true;
 
     config.FightReviewLoggingEnabled = true;
+    config.UsePhantomGapClosers = true;
     config.ResetAll();
     AssertFalse(config.FightReviewLoggingEnabled, "reset disables logging");
+    AssertFalse(config.UsePhantomGapClosers, "reset disables Phantom dashes");
 
-    config.Version = 16;
+    config.Version = 18;
     config.FightReviewLoggingEnabled = true;
+    config.UsePhantomGapClosers = true;
     config.Migrate();
     AssertEqual(currentVersion, config.Version, "migrated version");
-    AssertFalse(config.FightReviewLoggingEnabled, "migration disables logging");
-    AssertTrue(config.ManageSocialTurning, "migration enables social turning");
+    AssertFalse(config.UsePhantomGapClosers, "migration disables Phantom dashes");
+
+    var oldLoggingConfig = new Configuration
+    {
+        Version = 16,
+        FightReviewLoggingEnabled = true,
+    };
+    oldLoggingConfig.Migrate();
+    AssertEqual(currentVersion, oldLoggingConfig.Version, "old logging config migrated version");
+    AssertFalse(oldLoggingConfig.FightReviewLoggingEnabled, "migration disables logging");
+    AssertTrue(oldLoggingConfig.ManageSocialTurning, "migration enables social turning");
 }
 
 static void TargetUptimeRangeFollowsNextGcd()
@@ -489,6 +515,61 @@ static void RangedGapClosersSkipBossReengage()
         "SAM Gyoten remains a real melee reengage tool");
 }
 
+static void PhantomGapClosersInheritBaseJobReengageRules()
+{
+    AssertFalse(
+        GapCloserController.ShouldAllowPhantomTargetReengageGapCloser(24, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true),
+        "WHM with Phantom Kick should still reserve target reengage dashes");
+    AssertFalse(
+        GapCloserController.ShouldAllowPhantomTargetReengageGapCloser(40, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true),
+        "SGE with Phantom Kick should still reserve target reengage dashes");
+    AssertFalse(
+        GapCloserController.ShouldAllowPhantomReengageGapCloser(34, phantomGapClosersEnabled: false, currentJobGapCloserEnabled: true),
+        "Phantom reengage requires the Phantom dash opt-in");
+    AssertFalse(
+        GapCloserController.ShouldAllowPhantomReengageGapCloser(34, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: false),
+        "Phantom reengage requires the current job or archetype dash gate");
+    AssertTrue(
+        GapCloserController.ShouldAllowPhantomTargetReengageGapCloser(34, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true),
+        "SAM with Phantom Kick may use the normal melee reengage policy");
+    AssertTrue(
+        GapCloserController.ShouldAllowPhantomTargetAoeReengageGapCloser(40, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true, inAoePackContext: true, packAoeRange: 5f),
+        "SGE with Phantom Kick may use target dash rules for close-range AoE pack movement");
+    AssertFalse(
+        GapCloserController.ShouldAllowPhantomTargetAoeReengageGapCloser(40, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true, inAoePackContext: false, packAoeRange: 5f),
+        "SGE Phantom Kick AoE movement requires an AoE pack context");
+    AssertFalse(
+        GapCloserController.ShouldAllowPhantomTargetAoeReengageGapCloser(33, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true, inAoePackContext: true, packAoeRange: 25f),
+        "AST with long-range AoE should not borrow close-range Phantom Kick movement");
+    AssertTrue(
+        GapCloserController.ShouldAllowPhantomTargetAoeReengageGapCloser(28, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true, inAoePackContext: true, packAoeRange: 5f),
+        "SCH with no native dash may use healer close-range AoE Phantom Kick movement");
+    AssertTrue(
+        GapCloserController.ShouldAllowPhantomTargetReengageGapCloser(30, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true),
+        "NIN with Phantom Kick follows the melee target-dash archetype");
+    AssertTrue(
+        GapCloserController.ShouldAllowPhantomForwardReengageGapCloser(34, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true),
+        "SAM with Occult Featherfoot follows the melee forward-dash archetype");
+    AssertFalse(
+        GapCloserController.ShouldAllowPhantomForwardReengageGapCloser(19, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true),
+        "tank archetype does not borrow fixed-forward reengage dashes");
+    AssertTrue(
+        EscapeGapCloserController.ShouldAllowPhantomTargetEscapeGapCloser(40, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true),
+        "SGE with Phantom Kick may use target safety dashes when BMR safety validation proves progress");
+    AssertTrue(
+        EscapeGapCloserController.ShouldAllowPhantomForwardEscapeGapCloser(40, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true),
+        "SGE with Occult Featherfoot follows the healer forward safety archetype");
+    AssertTrue(
+        EscapeGapCloserController.ShouldAllowPhantomForwardEscapeGapCloser(23, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true),
+        "BRD with Occult Featherfoot follows the ranged forward safety archetype");
+    AssertTrue(
+        EscapeGapCloserController.ShouldAllowPhantomForwardEscapeGapCloser(31, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true),
+        "MCH with no native dash follows the physical ranged forward safety archetype");
+    AssertFalse(
+        EscapeGapCloserController.ShouldAllowPhantomForwardEscapeGapCloser(19, phantomGapClosersEnabled: true, currentJobGapCloserEnabled: true),
+        "tank archetype does not borrow fixed-forward safety dashes");
+}
+
 static void KnockbackRecoveryBypassesGapCloserMinimumDistance()
 {
     AssertTrue(
@@ -568,6 +649,38 @@ static void BmrSafetyDashRequiresDestinationProgress()
             new Vector3(4f, 0f, 0f),
             out _),
         "BMR safety dash should scale down the required gain when already close to the destination");
+}
+
+static void LateSafetyDashContinuesWhileUnsafeAndFar()
+{
+    AssertFalse(
+        EscapeGapCloserController.ShouldSuppressLateEscapeGapCloser(
+            currentSafe: false,
+            safeMovementDistance: 18f,
+            minimumGapCloserDistance: 8f,
+            dangerElapsedMilliseconds: CombatConstants.EscapeGapCloserDangerWindowMilliseconds + 1d),
+        "late safety dash should still evaluate while unsafe and far from the BMR safe destination");
+    AssertTrue(
+        EscapeGapCloserController.ShouldSuppressLateEscapeGapCloser(
+            currentSafe: true,
+            safeMovementDistance: 18f,
+            minimumGapCloserDistance: 8f,
+            dangerElapsedMilliseconds: CombatConstants.EscapeGapCloserDangerWindowMilliseconds + 1d),
+        "late safety dash should suppress when already safe");
+    AssertTrue(
+        EscapeGapCloserController.ShouldSuppressLateEscapeGapCloser(
+            currentSafe: false,
+            safeMovementDistance: 6f,
+            minimumGapCloserDistance: 8f,
+            dangerElapsedMilliseconds: CombatConstants.EscapeGapCloserDangerWindowMilliseconds + 1d),
+        "late safety dash should suppress when remaining safe movement is below the dash threshold");
+    AssertFalse(
+        EscapeGapCloserController.ShouldSuppressLateEscapeGapCloser(
+            currentSafe: false,
+            safeMovementDistance: 18f,
+            minimumGapCloserDistance: 8f,
+            dangerElapsedMilliseconds: CombatConstants.EscapeGapCloserDangerWindowMilliseconds - 1d),
+        "early safety dash should still evaluate");
 }
 
 static void HostileRelayDashRequiresTargetMomentum()

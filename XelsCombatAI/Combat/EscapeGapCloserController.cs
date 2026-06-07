@@ -115,16 +115,26 @@ internal sealed class EscapeGapCloserController(
             this.escapeDangerDetectedAt = now;
         }
 
-        if ((now - this.escapeDangerDetectedAt).TotalMilliseconds > CombatConstants.EscapeGapCloserDangerWindowMilliseconds)
+        var safeMovementDistance = Geometry.Distance2D(player.Position, safeMovementDestination);
+        if (ShouldSuppressLateEscapeGapCloser(
+                currentSafe,
+                safeMovementDistance,
+                config.MinimumGapCloserDistance,
+                (now - this.escapeDangerDetectedAt).TotalMilliseconds))
         {
             this.lastEscapeGapCloserSafety = "already walking to safety";
             return false;
         }
 
-        if (Geometry.Distance2D(player.Position, safeMovementDestination) < config.MinimumGapCloserDistance)
+        if (safeMovementDistance < config.MinimumGapCloserDistance)
         {
             this.lastEscapeGapCloserSafety = $"safe movement under {config.MinimumGapCloserDistance:0}y";
             return false;
+        }
+
+        if (this.TryUsePhantomEscapeGapCloser(classJobId, safeMovementDestination))
+        {
+            return true;
         }
 
         return classJobId switch
@@ -144,6 +154,37 @@ internal sealed class EscapeGapCloserController(
             42 when config.GapCloserPCT => this.TryUseForwardEscapeGapCloser(ActionUse.PictomancerSmudgeActionId, "Smudge", safeMovementDestination),
             _ => false
         };
+    }
+
+    private bool TryUsePhantomEscapeGapCloser(uint classJobId, Vector3 safeMovementDestination)
+    {
+        return (ShouldAllowPhantomTargetEscapeGapCloser(classJobId, config.UsePhantomGapClosers, config.IsPhantomGapCloserJobEnabled(classJobId)) &&
+                this.TryUseGreedyTargetEscapeGapCloser(
+                    ActionUse.PhantomKickActionId,
+                    "Phantom Kick",
+                    safeMovementDestination,
+                    CombatConstants.PhantomKickMaxRange)) ||
+               (ShouldAllowPhantomForwardEscapeGapCloser(classJobId, config.UsePhantomGapClosers, config.IsPhantomGapCloserJobEnabled(classJobId)) &&
+                this.TryUseForwardEscapeGapCloser(ActionUse.OccultFeatherfootActionId, "Occult Featherfoot", safeMovementDestination));
+    }
+
+    internal static bool ShouldAllowPhantomTargetEscapeGapCloser(uint classJobId, bool phantomGapClosersEnabled, bool currentJobGapCloserEnabled)
+    {
+        return phantomGapClosersEnabled &&
+               currentJobGapCloserEnabled;
+    }
+
+    internal static bool ShouldAllowPhantomForwardEscapeGapCloser(uint classJobId, bool phantomGapClosersEnabled, bool currentJobGapCloserEnabled)
+    {
+        return phantomGapClosersEnabled &&
+               currentJobGapCloserEnabled &&
+               !JobRoles.IsTankJob(classJobId);
+    }
+
+    internal static bool ShouldSuppressLateEscapeGapCloser(bool currentSafe, float safeMovementDistance, float minimumGapCloserDistance, double dangerElapsedMilliseconds)
+    {
+        return dangerElapsedMilliseconds > CombatConstants.EscapeGapCloserDangerWindowMilliseconds &&
+               (currentSafe || safeMovementDistance < minimumGapCloserDistance);
     }
 
     private unsafe bool TryUseFriendlyEscapeGapCloser(uint actionId, string actionName, float maxRange, Vector3 safeMovementDestination)
@@ -626,7 +667,11 @@ internal sealed class EscapeGapCloserController(
         return true;
     }
 
-    private unsafe bool TryUseGreedyTargetEscapeGapCloser(uint actionId, string actionName, Vector3 safeMovementDestination)
+    private unsafe bool TryUseGreedyTargetEscapeGapCloser(
+        uint actionId,
+        string actionName,
+        Vector3 safeMovementDestination,
+        float maxRange = CombatConstants.GapCloserMaxRange)
     {
         if (!this.GreedyUnsafeEscapeDashesEnabled())
         {
@@ -656,7 +701,7 @@ internal sealed class EscapeGapCloserController(
         }
 
         var distanceToHitbox = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, target.Position, target.HitboxRadius);
-        if (distanceToHitbox > CombatConstants.GapCloserMaxRange)
+        if (distanceToHitbox > maxRange)
         {
             this.lastEscapeGapCloserSafety = "target not in emergency dash range";
             return false;

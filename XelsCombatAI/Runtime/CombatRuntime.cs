@@ -29,6 +29,7 @@ internal sealed class CombatRuntime(
     RedMageMeleeComboController redMageMeleeComboController,
     CombatLogWriter combatLogWriter,
     ManualMovementInputDetector manualMovement,
+    AutoFaceTargetOptionController autoFaceTargetOptionController,
     ManualCorrectionFeedback manualCorrectionFeedback,
     MobilityDecisionEvaluator mobilityDecisionEvaluator,
     GapCloserController gapCloserController,
@@ -85,12 +86,15 @@ internal sealed class CombatRuntime(
         var combatEngagement = CombatEngagementDetector.Detect(services);
         if (!config.Enabled)
         {
+            autoFaceTargetOptionController.Restore();
             this.HandleDisabled(flushCombatHistory: false);
             this.UpdateFightReviewLogging(combatEngagement.EffectiveInCombat, this.DisabledLoggingInactiveReason());
             return;
         }
 
         var now = DateTime.UtcNow;
+        var manualMovementRequested = manualMovement.IsManualMovementRequested();
+        autoFaceTargetOptionController.Update(now < this.manualMovementSuppressUntil || manualMovementRequested);
         var dependenciesAvailable = dependencyChecker.DependenciesAvailable(out var missing);
         var bossModAvailable = dependenciesAvailable || dependencyChecker.IsBossModAvailable();
         this.SetBossModGate(bossModAvailable);
@@ -125,6 +129,7 @@ internal sealed class CombatRuntime(
             this.wasInCombat = false;
             this.wasDead = false;
             this.manualMovementSuppressUntil = DateTime.MinValue;
+            autoFaceTargetOptionController.Update(manualMovementRequested);
             return;
         }
 
@@ -171,7 +176,7 @@ internal sealed class CombatRuntime(
             return;
         }
 
-        var suppressAutomatedMovement = this.ShouldSuppressAutomatedMovement(now);
+        var suppressAutomatedMovement = this.ShouldSuppressAutomatedMovement(now, manualMovementRequested);
         presetController.ApplyStrategies(suppressAutomatedMovement);
         facingController.Update(now, suppressAutomatedMovement, aoeGoalHook.MovementDiagnostics);
         this.UpdateFightReviewLogging(combatEngagement.EffectiveInCombat, "logging disabled");
@@ -219,6 +224,7 @@ internal sealed class CombatRuntime(
     private void ResetRuntimeCache(bool resetBossModHook)
     {
         this.manualMovementSuppressUntil = DateTime.MinValue;
+        autoFaceTargetOptionController.Restore();
         this.dependencyGraceUntil = DateTime.MinValue;
         presetController.ResetCache();
         aoePackPositioningController.Reset();
@@ -353,6 +359,7 @@ internal sealed class CombatRuntime(
         aoeGoalHook.Dispose();
         survivabilityZonePositioningController.Dispose();
         redMageMeleeComboController.Dispose();
+        autoFaceTargetOptionController.Restore();
     }
 
     private void HandleOutOfCombat()
@@ -437,7 +444,7 @@ internal sealed class CombatRuntime(
                now < this.dependencyGraceUntil;
     }
 
-    private bool ShouldSuppressAutomatedMovement(DateTime now)
+    private bool ShouldSuppressAutomatedMovement(DateTime now, bool manualMovementRequested)
     {
         if (!config.RespectManualMovement)
         {
@@ -445,7 +452,7 @@ internal sealed class CombatRuntime(
             return false;
         }
 
-        if (manualMovement.IsManualMovementRequested())
+        if (manualMovementRequested)
         {
             this.manualMovementSuppressUntil = now.Add(ManualMovementResumeDelay);
             var player = services.ObjectTable.LocalPlayer;
