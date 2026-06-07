@@ -413,13 +413,13 @@ internal sealed class ConfigWindow : Window, IDisposable
             icon: FontAwesomeIcon.SkullCrossbones,
             iconTooltip: "Combat risk. This presses tank actions automatically and can spend Provoke or a GCD at a bad time.");
         changed |= this.Checkbox(
-            "Drop stance for co-tank",
+            "Coordinate stance with co-tank",
             this.config.TankDropStanceWhenCoTankHasStance,
             this.defaultConfig.TankDropStanceWhenCoTankHasStance,
             v => this.config.TankDropStanceWhenCoTankHasStance = v,
-            "Tanks only: in BossMod encounters, turns stance off when another visible player tank already has stance.",
+            "Tanks only: in BossMod encounters, turns stance off when another visible party tank already has stance.\nIf no visible party tank has stance, turns your stance on.",
             icon: FontAwesomeIcon.SkullCrossbones,
-            iconTooltip: "Combat risk. This can drop your stance automatically if the other tank has stance on.");
+            iconTooltip: "Combat risk. This can toggle your stance automatically based on visible party tanks.");
         ImGui.Unindent(8f);
         ImGui.Spacing();
 

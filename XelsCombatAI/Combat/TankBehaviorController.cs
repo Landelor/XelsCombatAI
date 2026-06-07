@@ -68,7 +68,7 @@ internal sealed class TankBehaviorController(
 
         if (config.TankDropStanceWhenCoTankHasStance &&
             currentTargetHasBossModule() &&
-            this.TryDropStanceForCoTank(player))
+            this.TryCoordinateTankStance(player))
         {
             return;
         }
@@ -176,14 +176,14 @@ internal sealed class TankBehaviorController(
         return true;
     }
 
-    private unsafe bool TryDropStanceForCoTank(IBattleChara player)
+    private unsafe bool TryCoordinateTankStance(IBattleChara player)
     {
-        if (!PartyAllyProvider.HasTankStance(player) ||
-            !TryGetTankStanceAction(player.ClassJob.RowId, out _, out var releaseActionId, out _))
+        if (!TryGetTankStanceAction(player.ClassJob.RowId, out var stanceActionId, out var releaseActionId, out _))
         {
             return false;
         }
 
+        var playerHasStance = PartyAllyProvider.HasTankStance(player);
         var otherTankHasStance = PartyAllyProvider
             .GetVisiblePartyAllies(services, player)
             .Members
@@ -192,21 +192,40 @@ internal sealed class TankBehaviorController(
                          JobRoles.IsTankJob(ally.ClassJob.RowId) &&
                          PartyAllyProvider.HasTankStance(ally));
 
-        if (!otherTankHasStance)
+        if (playerHasStance)
         {
-            this.LastReason = "no co-tank stance";
+            if (!otherTankHasStance)
+            {
+                this.LastReason = "no co-tank stance";
+                return false;
+            }
+
+            if (!this.CanUseActionNow(releaseActionId))
+            {
+                this.LastReason = "stance release unavailable";
+                return false;
+            }
+
+            var released = ActionManager.Instance()->UseAction(ActionType.Action, releaseActionId, player.GameObjectId);
+            this.RecordAction($"drop stance for co-tank: {released}");
+            return released;
+        }
+
+        if (otherTankHasStance)
+        {
+            this.LastReason = "co-tank stance active";
             return false;
         }
 
-        if (!this.CanUseActionNow(releaseActionId))
+        if (!this.CanUseActionNow(stanceActionId))
         {
-            this.LastReason = "stance release unavailable";
+            this.LastReason = "stance unavailable";
             return false;
         }
 
-        var used = ActionManager.Instance()->UseAction(ActionType.Action, releaseActionId, player.GameObjectId);
-        this.RecordAction($"drop stance for co-tank: {used}");
-        return used;
+        var enabled = ActionManager.Instance()->UseAction(ActionType.Action, stanceActionId, player.GameObjectId);
+        this.RecordAction($"enable stance for party tanks: {enabled}");
+        return enabled;
     }
 
     private List<IBattleNpc> FindLostAggroTrashTargets(IBattleChara player)
