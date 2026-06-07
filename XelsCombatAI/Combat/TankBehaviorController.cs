@@ -24,11 +24,15 @@ internal sealed class TankBehaviorController(
     private static readonly TimeSpan ActionCooldown = TimeSpan.FromMilliseconds(1500);
     private static readonly MethodInfo ScoreConeAwayFromPartyMethod = typeof(TankBehaviorController).GetMethod(nameof(ScoreConeAwayFromParty), BindingFlags.Static | BindingFlags.NonPublic)!;
 
+    private const float ConeCasualtyAvoidanceScoreWeight = 0.98f;
+    private const float ConeAwayTieBreakerScoreWeight = 1f - ConeCasualtyAvoidanceScoreWeight;
     private const float NearbyAggroSurfaceRange = 8f;
+    private const float RangedAggroMinimumSurfaceRange = CombatConstants.MeleeActionRange;
     private const float RangedAggroSurfaceRange = 20f;
     private const float ProvokeSurfaceRange = 25f;
     private const float TrashPackScanRange = 35f;
     private const float ConeOriginTolerance = 3f;
+    private const float CleaveHintConeMinimumRadius = 90f;
     private const float ConePartyGoalMinimumPartyDistance = 6f;
 
     private FieldInfo? forbiddenZonesField;
@@ -36,11 +40,19 @@ internal sealed class TankBehaviorController(
     private FieldInfo? wposZField;
     private FieldInfo? coneOriginXField;
     private FieldInfo? coneOriginZField;
+    private FieldInfo? coneRadiusField;
+    private FieldInfo? coneFactorField;
+    private FieldInfo? coneLeftNormalXField;
+    private FieldInfo? coneLeftNormalZField;
+    private FieldInfo? coneRightNormalXField;
+    private FieldInfo? coneRightNormalZField;
     private Type? resolvedHintsType;
     private Type? resolvedWPosType;
     private Delegate? coneAwayFromPartyGoal;
     private Vector2 coneAwayFromPartyTarget;
     private Vector2 coneAwayFromPartyParty;
+    private Vector2[] coneAwayFromPartyMembers = [];
+    private float coneAwayFromPartyHalfAngleCos;
     private DateTime lastTargetSwitchAt = DateTime.MinValue;
     private DateTime lastActionAt = DateTime.MinValue;
     private string hookState = "unresolved";
@@ -108,19 +120,19 @@ internal sealed class TankBehaviorController(
             return;
         }
 
-        var tankConeActive = false;
+        TankConeHint? tankConeHint = null;
         if (config.TankIgnoreFrontConeMovement)
         {
-            tankConeActive = this.FilterTankFrontConeForbiddenZones(hints, player);
+            tankConeHint = this.FilterTankFrontConeForbiddenZones(hints, player);
         }
         else
         {
-            tankConeActive = this.HasTankFrontConeForbiddenZone(hints, player);
+            tankConeHint = this.FindTankFrontConeForbiddenZone(hints, player);
         }
 
-        if (config.TankKeepFrontConeAwayFromParty && tankConeActive)
+        if (config.TankKeepFrontConeAwayFromParty && tankConeHint is { } hint)
         {
-            this.TryAddConeAwayFromPartyGoal(player, contributions);
+            this.TryAddConeAwayFromPartyGoal(player, hint, contributions);
         }
     }
 
@@ -131,9 +143,17 @@ internal sealed class TankBehaviorController(
         this.wposZField = null;
         this.coneOriginXField = null;
         this.coneOriginZField = null;
+        this.coneRadiusField = null;
+        this.coneFactorField = null;
+        this.coneLeftNormalXField = null;
+        this.coneLeftNormalZField = null;
+        this.coneRightNormalXField = null;
+        this.coneRightNormalZField = null;
         this.resolvedHintsType = null;
         this.resolvedWPosType = null;
         this.coneAwayFromPartyGoal = null;
+        this.coneAwayFromPartyMembers = [];
+        this.coneAwayFromPartyHalfAngleCos = default;
         this.lastTargetSwitchAt = DateTime.MinValue;
         this.lastActionAt = DateTime.MinValue;
         this.LastReason = "reset";
@@ -235,7 +255,8 @@ internal sealed class TankBehaviorController(
         foreach (var target in lostAggroTargets)
         {
             var surfaceDistance = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, target.Position, target.HitboxRadius);
-            if (surfaceDistance > ProvokeSurfaceRange)
+            if (surfaceDistance <= RangedAggroMinimumSurfaceRange ||
+                surfaceDistance > ProvokeSurfaceRange)
             {
                 continue;
             }
@@ -322,19 +343,21 @@ internal sealed class TankBehaviorController(
                this.wposZField != null;
     }
 
-    private bool FilterTankFrontConeForbiddenZones(object hints, IBattleChara player)
+    private TankConeHint? FilterTankFrontConeForbiddenZones(object hints, IBattleChara player)
     {
         if (!this.IsCurrentTargetTankFrontConeSource(player, out var target) ||
             this.forbiddenZonesField?.GetValue(hints) is not IList zones)
         {
-            return false;
+            return null;
         }
 
         var removed = 0;
+        TankConeHint? firstHint = null;
         for (var i = zones.Count - 1; i >= 0; --i)
         {
-            if (this.IsTankFrontConeZone(zones[i], target))
+            if (this.IsTankFrontConeZone(zones[i], target, persistentCleaveOnly: true, out var hint))
             {
+                firstHint ??= hint;
                 zones.RemoveAt(i);
                 removed++;
             }
@@ -343,29 +366,29 @@ internal sealed class TankBehaviorController(
         if (removed > 0)
         {
             this.LastReason = $"ignored tank front cone zones: {removed}";
-            return true;
+            return firstHint;
         }
 
-        return false;
+        return null;
     }
 
-    private bool HasTankFrontConeForbiddenZone(object hints, IBattleChara player)
+    private TankConeHint? FindTankFrontConeForbiddenZone(object hints, IBattleChara player)
     {
         if (!this.IsCurrentTargetTankFrontConeSource(player, out var target) ||
             this.forbiddenZonesField?.GetValue(hints) is not IList zones)
         {
-            return false;
+            return null;
         }
 
         foreach (var zone in zones)
         {
-            if (this.IsTankFrontConeZone(zone, target))
+            if (this.IsTankFrontConeZone(zone, target, persistentCleaveOnly: false, out var hint))
             {
-                return true;
+                return hint;
             }
         }
 
-        return false;
+        return null;
     }
 
     private bool IsCurrentTargetTankFrontConeSource(IBattleChara player, out IBattleChara target)
@@ -388,21 +411,97 @@ internal sealed class TankBehaviorController(
         return true;
     }
 
-    private bool IsTankFrontConeZone(object? zone, IBattleChara target)
+    private bool IsTankFrontConeZone(object? zone, IBattleChara target, bool persistentCleaveOnly, out TankConeHint hint)
     {
+        hint = default;
+        if (persistentCleaveOnly &&
+            (!TryReadZoneActivation(zone, out var activation) ||
+            activation != default))
+        {
+            return false;
+        }
+
         var shape = ReadTupleField(zone, "shapeDistance", "Item1");
         if (shape == null || !string.Equals(shape.GetType().Name, "SDCone", StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (!this.TryReadConeOrigin(shape, out var origin))
+        if (!this.TryReadConeOrigin(shape, out var origin) ||
+            !this.TryReadConeHalfAngleCos(shape, out var halfAngleCos))
+        {
+            return false;
+        }
+
+        if (persistentCleaveOnly &&
+            (!this.TryReadConeRadius(shape, out var radius) ||
+            radius < CleaveHintConeMinimumRadius))
         {
             return false;
         }
 
         var targetPos = new Vector2(target.Position.X, target.Position.Z);
-        return Vector2.Distance(origin, targetPos) <= target.HitboxRadius + ConeOriginTolerance;
+        if (Vector2.Distance(origin, targetPos) > target.HitboxRadius + ConeOriginTolerance)
+        {
+            return false;
+        }
+
+        hint = new TankConeHint(halfAngleCos);
+        return true;
+    }
+
+    private bool TryReadConeRadius(object shape, out float radius)
+    {
+        radius = default;
+        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        var shapeType = shape.GetType();
+        this.coneRadiusField ??= shapeType.GetField("radius", Flags);
+        if (this.coneRadiusField == null)
+        {
+            return false;
+        }
+
+        radius = Convert.ToSingle(this.coneRadiusField.GetValue(shape));
+        return true;
+    }
+
+    private bool TryReadConeHalfAngleCos(object shape, out float halfAngleCos)
+    {
+        halfAngleCos = default;
+        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        var shapeType = shape.GetType();
+        this.coneFactorField ??= shapeType.GetField("coneFactor", Flags);
+        this.coneLeftNormalXField ??= shapeType.GetField("nlX", Flags);
+        this.coneLeftNormalZField ??= shapeType.GetField("nlZ", Flags);
+        this.coneRightNormalXField ??= shapeType.GetField("nrX", Flags);
+        this.coneRightNormalZField ??= shapeType.GetField("nrZ", Flags);
+        if (this.coneFactorField == null ||
+            this.coneLeftNormalXField == null ||
+            this.coneLeftNormalZField == null ||
+            this.coneRightNormalXField == null ||
+            this.coneRightNormalZField == null)
+        {
+            return false;
+        }
+
+        var coneFactor = Convert.ToSingle(this.coneFactorField.GetValue(shape));
+        var left = new Vector2(
+            Convert.ToSingle(this.coneLeftNormalXField.GetValue(shape)),
+            Convert.ToSingle(this.coneLeftNormalZField.GetValue(shape)));
+        var right = new Vector2(
+            Convert.ToSingle(this.coneRightNormalXField.GetValue(shape)),
+            Convert.ToSingle(this.coneRightNormalZField.GetValue(shape)));
+        var normalLengthProduct = left.Length() * right.Length();
+        if (normalLengthProduct <= 0.0001f)
+        {
+            return false;
+        }
+
+        var normalDot = Vector2.Dot(left, right) / normalLengthProduct;
+        var cosDoubleAngle = Math.Clamp(-normalDot, -1f, 1f);
+        var magnitude = MathF.Sqrt(Math.Clamp((1f + cosDoubleAngle) * 0.5f, 0f, 1f));
+        halfAngleCos = coneFactor < 0f ? -magnitude : magnitude;
+        return true;
     }
 
     private bool TryReadConeOrigin(object shape, out Vector2 origin)
@@ -424,7 +523,7 @@ internal sealed class TankBehaviorController(
         return true;
     }
 
-    private void TryAddConeAwayFromPartyGoal(IBattleChara player, ICollection<BossModGoalContribution> contributions)
+    private void TryAddConeAwayFromPartyGoal(IBattleChara player, TankConeHint hint, ICollection<BossModGoalContribution> contributions)
     {
         if (services.TargetManager.Target is not IBattleChara target)
         {
@@ -442,14 +541,21 @@ internal sealed class TankBehaviorController(
         }
 
         var targetPosition = new Vector2(target.Position.X, target.Position.Z);
-        var partyPosition = party.Aggregate(Vector2.Zero, (sum, ally) => sum + new Vector2(ally.Position.X, ally.Position.Z)) / party.Length;
+        var partyPositions = party
+            .Select(ally => new Vector2(ally.Position.X, ally.Position.Z))
+            .ToArray();
+        var partyPosition = partyPositions.Aggregate(Vector2.Zero, (sum, position) => sum + position) / partyPositions.Length;
         if (this.coneAwayFromPartyGoal == null ||
             Vector2.Distance(this.coneAwayFromPartyTarget, targetPosition) > 1f ||
-            Vector2.Distance(this.coneAwayFromPartyParty, partyPosition) > 1f)
+            Vector2.Distance(this.coneAwayFromPartyParty, partyPosition) > 1f ||
+            MathF.Abs(this.coneAwayFromPartyHalfAngleCos - hint.HalfAngleCos) > 0.01f ||
+            !SamePartyPositions(this.coneAwayFromPartyMembers, partyPositions))
         {
-            this.coneAwayFromPartyGoal = this.CreateConeAwayFromPartyGoal(targetPosition, partyPosition);
+            this.coneAwayFromPartyGoal = this.CreateConeAwayFromPartyGoal(targetPosition, partyPosition, partyPositions, hint.HalfAngleCos);
             this.coneAwayFromPartyTarget = targetPosition;
             this.coneAwayFromPartyParty = partyPosition;
+            this.coneAwayFromPartyMembers = partyPositions;
+            this.coneAwayFromPartyHalfAngleCos = hint.HalfAngleCos;
         }
 
         contributions.Add(new(
@@ -458,7 +564,7 @@ internal sealed class TankBehaviorController(
             "Tank cone away from party"));
     }
 
-    private Delegate CreateConeAwayFromPartyGoal(Vector2 targetPosition, Vector2 partyPosition)
+    private Delegate CreateConeAwayFromPartyGoal(Vector2 targetPosition, Vector2 partyPosition, Vector2[] partyPositions, float halfAngleCos)
     {
         var parameter = Expression.Parameter(this.resolvedWPosType!, "p");
         var x = Expression.Convert(Expression.Field(parameter, this.wposXField!), typeof(float));
@@ -470,24 +576,70 @@ internal sealed class TankBehaviorController(
             Expression.Constant(targetPosition.X),
             Expression.Constant(targetPosition.Y),
             Expression.Constant(partyPosition.X),
-            Expression.Constant(partyPosition.Y));
+            Expression.Constant(partyPosition.Y),
+            Expression.Constant(partyPositions),
+            Expression.Constant(halfAngleCos));
         var delegateType = typeof(Func<,>).MakeGenericType(this.resolvedWPosType!, typeof(float));
         return Expression.Lambda(delegateType, score, parameter).Compile();
     }
 
-    private static float ScoreConeAwayFromParty(float candidateX, float candidateZ, float targetX, float targetZ, float partyX, float partyZ)
+    private static float ScoreConeAwayFromParty(
+        float candidateX,
+        float candidateZ,
+        float targetX,
+        float targetZ,
+        float partyX,
+        float partyZ,
+        Vector2[] partyPositions,
+        float halfAngleCos)
     {
         var tankVector = new Vector2(candidateX - targetX, candidateZ - targetZ);
         var partyVector = new Vector2(partyX - targetX, partyZ - targetZ);
-        if (tankVector.LengthSquared() <= 0.01f || partyVector.LengthSquared() <= 0.01f)
+        if (tankVector.LengthSquared() <= 0.01f || partyVector.LengthSquared() <= 0.01f || partyPositions.Length == 0)
         {
             return 0f;
         }
 
         tankVector = Vector2.Normalize(tankVector);
+        var hitCount = 0;
+        foreach (var partyPosition in partyPositions)
+        {
+            var memberVector = partyPosition - new Vector2(targetX, targetZ);
+            if (memberVector.LengthSquared() <= 0.01f)
+            {
+                continue;
+            }
+
+            memberVector = Vector2.Normalize(memberVector);
+            if (Vector2.Dot(tankVector, memberVector) >= halfAngleCos)
+            {
+                hitCount++;
+            }
+        }
+
         partyVector = Vector2.Normalize(partyVector);
+        var casualtyScore = 1f - hitCount / (float)partyPositions.Length;
         var awayScore = Math.Clamp(-Vector2.Dot(tankVector, partyVector), 0f, 1f);
-        return awayScore * GoalZoneScorePolicy.StrongPreference;
+        return casualtyScore * ConeCasualtyAvoidanceScoreWeight +
+               awayScore * ConeAwayTieBreakerScoreWeight;
+    }
+
+    private static bool SamePartyPositions(IReadOnlyList<Vector2> previous, IReadOnlyList<Vector2> current)
+    {
+        if (previous.Count != current.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < previous.Count; i++)
+        {
+            if (Vector2.Distance(previous[i], current[i]) > 1f)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static object? ReadTupleField(object? value, string namedField, string itemField)
@@ -502,6 +654,20 @@ internal sealed class TankBehaviorController(
         return type.GetField(namedField, Flags)?.GetValue(value) ??
                type.GetField(itemField, Flags)?.GetValue(value);
     }
+
+    private static bool TryReadZoneActivation(object? zone, out DateTime activation)
+    {
+        activation = default;
+        if (ReadTupleField(zone, "activation", "Item2") is not DateTime value)
+        {
+            return false;
+        }
+
+        activation = value;
+        return true;
+    }
+
+    private readonly record struct TankConeHint(float HalfAngleCos);
 
     private static bool TryGetTankStanceAction(uint classJobId, out uint stanceActionId, out uint releaseActionId, out uint rangedActionId)
     {

@@ -382,15 +382,15 @@ internal sealed class ConfigWindow : Window, IDisposable
             this.config.TankIgnoreFrontConeMovement,
             this.defaultConfig.TankIgnoreFrontConeMovement,
             v => this.config.TankIgnoreFrontConeMovement = v,
-            "Tanks only: ignores BossMod cone movement when the current target is aiming a cone at you.\nOnly applies to cone zones that originate near the current target.",
+            "Tanks only: ignores BossMod Reborn movement from the hollow cleave cone drawn around the current target.\nTimed cone AOEs and baited cone mechanics are still handled normally.",
             icon: FontAwesomeIcon.SkullCrossbones,
-            iconTooltip: "Combat risk. This can leave you standing in a cone that BossMod marked unsafe.\nUse only for consistent tank-facing cleaves you intend to hold.");
+            iconTooltip: "Combat risk. This can leave you standing in a persistent boss cleave outline.\nUse only for cleaves you intend to hold as the tank.");
         changed |= this.Checkbox(
             "Point tank-front cones away from party",
             this.config.TankKeepFrontConeAwayFromParty,
             this.defaultConfig.TankKeepFrontConeAwayFromParty,
             v => this.config.TankKeepFrontConeAwayFromParty = v,
-            "Tanks only: prefers safe tanking spots opposite the visible party when the current target is aiming a cone at you.\nBossMod forbidden zones still decide what is safe.");
+            "Tanks only: prefers safe tanking spots where the current target's frontal cone or cone tankbuster would hit the fewest visible party members.\nBossMod forbidden zones still decide what is safe.");
         changed |= this.Checkbox(
             "Target nearby lost trash aggro",
             this.config.TankTargetLostTrashAggro,
@@ -402,7 +402,7 @@ internal sealed class ConfigWindow : Window, IDisposable
             this.config.TankUseRangedAggroRecovery,
             this.defaultConfig.TankUseRangedAggroRecovery,
             v => this.config.TankUseRangedAggroRecovery = v,
-            "Tanks only: on trash packs, uses the job ranged attack or Provoke on enemies attacking visible party members.\nDoes not move to the target.",
+            "Tanks only: on trash packs, uses the job ranged attack or Provoke on enemies outside melee range that are attacking visible party members.\nDoes not move to the target.",
             icon: FontAwesomeIcon.SkullCrossbones,
             iconTooltip: "Combat risk. This presses tank actions automatically and can spend Provoke or a GCD at a bad time.");
         changed |= this.Checkbox(
