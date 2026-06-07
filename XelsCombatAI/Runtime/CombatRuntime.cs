@@ -26,6 +26,7 @@ internal sealed class CombatRuntime(
     HealerAoePositioningController healerAoePositioningController,
     SurvivabilityZonePositioningController survivabilityZonePositioningController,
     ArenaEdgePositioningController arenaEdgePositioningController,
+    TankBehaviorController tankBehaviorController,
     RedMageMeleeComboController redMageMeleeComboController,
     CombatLogWriter combatLogWriter,
     ManualMovementInputDetector manualMovement,
@@ -169,6 +170,7 @@ internal sealed class CombatRuntime(
         }
         this.nextRuntimeUpdate = now.AddMilliseconds(250);
         redMageMeleeComboController.Tick();
+        tankBehaviorController.Tick();
 
         if (!presetController.InitializedPreset && !presetController.Initialize())
         {
@@ -231,6 +233,7 @@ internal sealed class CombatRuntime(
         passageOfArmsPositioningController.Reset();
         healerAoePositioningController.Reset();
         survivabilityZonePositioningController.Reset();
+        tankBehaviorController.Reset();
         redMageMeleeComboController.Reset();
         if (resetBossModHook)
         {
@@ -510,7 +513,9 @@ internal sealed class CombatRuntime(
                config.ManagePassageOfArmsPositioning ||
                config.AvoidArenaEdge ||
                config.ManageSocialTurning ||
-               config.UseRedMageMeleeComboMovement;
+               config.UseRedMageMeleeComboMovement ||
+               config.TankIgnoreFrontConeMovement ||
+               config.TankKeepFrontConeAwayFromParty;
     }
 
     private void FlushCombatHistory(string reason)

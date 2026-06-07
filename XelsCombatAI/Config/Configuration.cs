@@ -36,7 +36,7 @@ public sealed class Configuration : IPluginConfiguration
         new("PCT", config => config.GapCloserPCT, (config, value) => config.GapCloserPCT = value)
     ];
 
-    public int Version { get; set; } = 20;
+    public int Version { get; set; } = 21;
 
     public bool Enabled { get; set; } = false;
     public bool ManageMovement { get; set; } = true;
@@ -80,6 +80,11 @@ public sealed class Configuration : IPluginConfiguration
     public bool ManagePassageOfArmsPositioning { get; set; } = true;
     public bool PickBetterAoeTarget { get; set; } = false;
     public bool KeepTrashTargetSelected { get; set; } = true;
+    public bool TankIgnoreFrontConeMovement { get; set; } = false;
+    public bool TankKeepFrontConeAwayFromParty { get; set; } = false;
+    public bool TankTargetLostTrashAggro { get; set; } = false;
+    public bool TankUseRangedAggroRecovery { get; set; } = false;
+    public bool TankDropStanceWhenCoTankHasStance { get; set; } = false;
     public bool AvoidStandingInsideEnemies { get; set; } = true;
     public bool AvoidArenaEdge { get; set; } = true;
     public bool ShowDecisionOverlay { get; set; } = false;
@@ -355,6 +360,16 @@ public sealed class Configuration : IPluginConfiguration
             this.DisableAutoFaceTargetDuringManualMovement = false;
             this.Version = 20;
         }
+
+        if (this.Version < 21)
+        {
+            this.TankIgnoreFrontConeMovement = false;
+            this.TankKeepFrontConeAwayFromParty = false;
+            this.TankTargetLostTrashAggro = false;
+            this.TankUseRangedAggroRecovery = false;
+            this.TankDropStanceWhenCoTankHasStance = false;
+            this.Version = 21;
+        }
     }
 
     internal void Clamp()
@@ -373,6 +388,11 @@ public sealed class Configuration : IPluginConfiguration
         this.PreferredForbiddenZoneDistance = DefaultPreferredForbiddenZoneDistance;
         this.MinimumGapCloserDistance = DefaultMinimumGapCloserDistance;
         this.UseRedMageMeleeComboMovement = false;
+        this.TankIgnoreFrontConeMovement = false;
+        this.TankKeepFrontConeAwayFromParty = false;
+        this.TankTargetLostTrashAggro = false;
+        this.TankUseRangedAggroRecovery = false;
+        this.TankDropStanceWhenCoTankHasStance = false;
     }
 
     internal void ResetAll()
@@ -401,6 +421,11 @@ public sealed class Configuration : IPluginConfiguration
         this.ManagePassageOfArmsPositioning = true;
         this.PickBetterAoeTarget = false;
         this.KeepTrashTargetSelected = true;
+        this.TankIgnoreFrontConeMovement = false;
+        this.TankKeepFrontConeAwayFromParty = false;
+        this.TankTargetLostTrashAggro = false;
+        this.TankUseRangedAggroRecovery = false;
+        this.TankDropStanceWhenCoTankHasStance = false;
         this.AvoidStandingInsideEnemies = true;
         this.AvoidArenaEdge = true;
         this.ShowDecisionOverlay = false;

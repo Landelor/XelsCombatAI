@@ -59,7 +59,8 @@ internal sealed class CombatComposition : IDisposable
         var healerAoePositioningController = new HealerAoePositioningController(config, services, bossMod, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true, () => targetUptimePlanner.CurrentTargetHasBossModule(), mobilityDecisionEvaluator, facingController);
         var survivabilityZonePositioningController = new SurvivabilityZonePositioningController(config, services, () => runtime?.AutomatedMovementSuppressed == true);
         var bossCenterAvoidanceController = new BossCenterAvoidanceController(config, services, () => runtime?.AutomatedMovementSuppressed == true, () => targetUptimePlanner.CurrentTargetHasBossModule());
-        IBossModGoalZoneContributor[] legacyMovementContributors = [aoePackPositioningController, passageOfArmsPositioningController, healerAoePositioningController, survivabilityZonePositioningController, bossCenterAvoidanceController, arenaEdgePositioningController];
+        var tankBehaviorController = new TankBehaviorController(config, services, () => targetUptimePlanner.CurrentTargetHasBossModule());
+        IBossModGoalZoneContributor[] legacyMovementContributors = [aoePackPositioningController, passageOfArmsPositioningController, healerAoePositioningController, survivabilityZonePositioningController, bossCenterAvoidanceController, arenaEdgePositioningController, tankBehaviorController];
         var aoeGoalHook = new BossModGoalZoneHook(config, pluginInterface, services, log, bossModGate, legacyMovementContributors, manualCorrectionFeedback);
         var gapCloserController = new GapCloserController(
             config,
@@ -110,6 +111,7 @@ internal sealed class CombatComposition : IDisposable
             healerAoePositioningController,
             survivabilityZonePositioningController,
             arenaEdgePositioningController,
+            tankBehaviorController,
             redMageMeleeComboController,
             combatLogWriter,
             manualMovement,

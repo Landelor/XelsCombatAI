@@ -376,6 +376,46 @@ internal sealed class ConfigWindow : Window, IDisposable
         ImGui.Unindent(8f);
         ImGui.Spacing();
 
+        this.DrawSectionHeader("Tanks");
+        changed |= this.Checkbox(
+            "Ignore tank-front cone movement",
+            this.config.TankIgnoreFrontConeMovement,
+            this.defaultConfig.TankIgnoreFrontConeMovement,
+            v => this.config.TankIgnoreFrontConeMovement = v,
+            "Tanks only: ignores BossMod cone movement when the current target is aiming a cone at you.\nOnly applies to cone zones that originate near the current target.",
+            icon: FontAwesomeIcon.SkullCrossbones,
+            iconTooltip: "Combat risk. This can leave you standing in a cone that BossMod marked unsafe.\nUse only for consistent tank-facing cleaves you intend to hold.");
+        changed |= this.Checkbox(
+            "Point tank-front cones away from party",
+            this.config.TankKeepFrontConeAwayFromParty,
+            this.defaultConfig.TankKeepFrontConeAwayFromParty,
+            v => this.config.TankKeepFrontConeAwayFromParty = v,
+            "Tanks only: prefers safe tanking spots opposite the visible party when the current target is aiming a cone at you.\nBossMod forbidden zones still decide what is safe.");
+        changed |= this.Checkbox(
+            "Target nearby lost trash aggro",
+            this.config.TankTargetLostTrashAggro,
+            this.defaultConfig.TankTargetLostTrashAggro,
+            v => this.config.TankTargetLostTrashAggro = v,
+            "Tanks only: on trash packs, selects nearby enemies attacking visible party members so RotationSolver can hit them.");
+        changed |= this.Checkbox(
+            "Use ranged aggro recovery",
+            this.config.TankUseRangedAggroRecovery,
+            this.defaultConfig.TankUseRangedAggroRecovery,
+            v => this.config.TankUseRangedAggroRecovery = v,
+            "Tanks only: on trash packs, uses the job ranged attack or Provoke on enemies attacking visible party members.\nDoes not move to the target.",
+            icon: FontAwesomeIcon.SkullCrossbones,
+            iconTooltip: "Combat risk. This presses tank actions automatically and can spend Provoke or a GCD at a bad time.");
+        changed |= this.Checkbox(
+            "Drop stance for co-tank",
+            this.config.TankDropStanceWhenCoTankHasStance,
+            this.defaultConfig.TankDropStanceWhenCoTankHasStance,
+            v => this.config.TankDropStanceWhenCoTankHasStance = v,
+            "Tanks only: in BossMod encounters, turns stance off when another visible player tank already has stance.",
+            icon: FontAwesomeIcon.SkullCrossbones,
+            iconTooltip: "Combat risk. This can drop your stance automatically if the other tank has stance on.");
+        ImGui.Unindent(8f);
+        ImGui.Spacing();
+
         return changed;
     }
 

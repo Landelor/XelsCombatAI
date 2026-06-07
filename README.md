@@ -19,6 +19,8 @@ While you are in combat, the plugin automatically:
 - **Uses BossMod-checked gap closers** to re-engage after being knocked away or escape a dangerous spot (optional, off by default). Greedy movement timing can also use a tightly guarded emergency target dash when you are already in danger.
 - **Moves for better AoE hits** when your next AoE can hit more enemies from another spot, while yielding to active BossMod mechanic safety
 - **Picks better AoE and trash targets** when target choice affects how many enemies you hit
+- **Can help tanks recover trash aggro** by selecting nearby enemies that peel to party members, or by using ranged attacks/Provoke without walking to them
+- **Can adjust tank behavior for persistent front cleaves** by ignoring BossMod cone movement and preferring tank spots that keep the cleave away from the visible party
 - **Keeps healers in comfortable party-healing range** by pre-positioning toward safe spots that preserve more AoE heal coverage, without interrupting casts or competing with active BossMod mechanic positioning
 - **Avoids awkward boss-center positions** and small enemy hitboxes when choosing movement goals
 - **Prefers helpful defensive ground effects** such as Asylum, Sacred Soil, Earthly Star, and Collective Unconscious
@@ -84,6 +86,8 @@ While you are casting, advisory movement goals are suppressed so comfort, uptime
 **Black Mage** — Stay in existing Ley Lines and choose whether to use Between the Lines, Retrace, or walking to return to them.
 
 **Red Mage** — Optionally move for the enchanted melee combo. Boss/single-target behavior waits for `50 Black Mana / 50 White Mana`, stays ranged during Manafication's extended-range sword combo, and moves into melee range when the RDM gauge state says Enchanted Riposte or a melee continuation is needed. Trash AoE behavior uses RSR target context, moves close enough for Enchanted Moulinet's cone when there are 3+ affected targets and the combo is available, and stays in cone range through Moulinet continuations. After Enchanted Redoublement or Enchanted Moulinet Trois lands, it prefers a safe Displacement out; if Displacement or its facing setup is unsafe, unavailable, or blocked by navigation checks, it stays close unless BossMod moves you for safety.
+
+**Tanks** — Optional tank controls can ignore BossMod movement away from current-target cone zones aimed at you, prefer safe tanking spots opposite the visible party for persistent front cleaves, select nearby trash enemies that are attacking party members, use ranged attacks or Provoke on peeled trash without moving, and drop stance in BossMod encounters when another visible player tank already has stance. These options are off by default.
 
 ### Dashes tab
 
