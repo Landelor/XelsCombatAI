@@ -11,7 +11,8 @@ internal sealed class BossModPresetController(
     PositionalsController positionalsController,
     GapCloserController gapCloserController,
     EscapeGapCloserController escapeGapCloserController,
-    RedMageMeleeComboController redMageMeleeComboController)
+    RedMageMeleeComboController redMageMeleeComboController,
+    Func<BossModMechanicPressure> mechanicPressure)
 {
     public Positional LastPositional { get; private set; } = Positional.Any;
     public float LastTargetUptimeRange { get; private set; } = -1f;
@@ -268,6 +269,11 @@ internal sealed class BossModPresetController(
 
         if (!config.UseGapCloser)
         {
+            if (this.ShouldHoldOptionalDashForMechanicPressure())
+            {
+                return;
+            }
+
             if (redMageMeleeComboController.TryUseComboJump())
             {
                 return;
@@ -281,12 +287,24 @@ internal sealed class BossModPresetController(
             return;
         }
 
+        if (this.ShouldHoldOptionalDashForMechanicPressure())
+        {
+            return;
+        }
+
         if (redMageMeleeComboController.TryUseComboJump())
         {
             return;
         }
 
         gapCloserController.TryUseReengageGapCloser();
+    }
+
+    private bool ShouldHoldOptionalDashForMechanicPressure()
+    {
+        var pressure = mechanicPressure();
+        return pressure.BadForOptionalMovement &&
+               !pressure.KnockbackRecoveryActive;
     }
 
     private void WriteNeutralStrategies(string presetName)

@@ -20,6 +20,7 @@ internal sealed record RuntimeStatus(
     float TargetRotation,
     float TargetRadius,
     int PartyCount,
+    BossModMechanicPressure MechanicPressure,
     string? DependencyWarning,
     string? TrueNorthWarning,
     bool? RsrTrueNorthDisabled,

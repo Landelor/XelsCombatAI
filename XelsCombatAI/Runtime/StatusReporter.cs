@@ -10,7 +10,7 @@ internal static class StatusReporter
 {
     public static string Build(RuntimeStatus status)
     {
-        return $"Enabled={status.Enabled}, InCombat={status.InCombat}, Dead={status.IsDead}, Dependencies={(status.DependencyWarning ?? "OK")}, TrueNorthManagement={(status.TrueNorthWarning ?? status.RsrTrueNorthDisabled?.ToString() ?? "NotManaged")}, Preset={BossModIpc.DefaultPresetName}, LastPositional={status.LastPositional}, TrueNorthCharges={status.TrueNorthCharges}, TrueNorthActive={status.TrueNorthActive}, BmrRange={status.LastTargetUptimeRange:0.0}, Movement={status.LastMovement}, MovementRange={status.LastMovementRangeStrategy}, SafetyBuffer={status.LastForbiddenZoneCushion}, MovementSuppressed={status.AutomatedMovementSuppressed}, Facing={FormatFacingSummary(status.Facing)}, Mobility={status.MobilityDecision.State}/{status.MobilityDecision.IntentLabel}, TrashPull={status.AoePackPositioning.TrashPull.Phase}/{status.AoePackPositioning.TrashPull.Reason}, AoEPack={status.AoePackPositioning.LastReason}, HealerCoverage={status.HealerCoveragePositioning.LastReason}, Passage={status.PassageOfArmsPositioning.LastReason}, SurvZone={status.SurvivabilityZonePositioning.LastReason}, RedMageMelee={status.RedMageMeleeCombo.Mode}/{status.RedMageMeleeCombo.LastReason}, Initialized={status.InitializedPreset}";
+        return $"Enabled={status.Enabled}, InCombat={status.InCombat}, Dead={status.IsDead}, Dependencies={(status.DependencyWarning ?? "OK")}, TrueNorthManagement={(status.TrueNorthWarning ?? status.RsrTrueNorthDisabled?.ToString() ?? "NotManaged")}, Preset={BossModIpc.DefaultPresetName}, MechanicPressure={status.MechanicPressure.PrimaryPressure}, LastPositional={status.LastPositional}, TrueNorthCharges={status.TrueNorthCharges}, TrueNorthActive={status.TrueNorthActive}, BmrRange={status.LastTargetUptimeRange:0.0}, Movement={status.LastMovement}, MovementRange={status.LastMovementRangeStrategy}, SafetyBuffer={status.LastForbiddenZoneCushion}, MovementSuppressed={status.AutomatedMovementSuppressed}, Facing={FormatFacingSummary(status.Facing)}, Mobility={status.MobilityDecision.State}/{status.MobilityDecision.IntentLabel}, TrashPull={status.AoePackPositioning.TrashPull.Phase}/{status.AoePackPositioning.TrashPull.Reason}, AoEPack={status.AoePackPositioning.LastReason}, HealerCoverage={status.HealerCoveragePositioning.LastReason}, Passage={status.PassageOfArmsPositioning.LastReason}, SurvZone={status.SurvivabilityZonePositioning.LastReason}, RedMageMelee={status.RedMageMeleeCombo.Mode}/{status.RedMageMeleeCombo.LastReason}, Initialized={status.InitializedPreset}";
     }
 
     public static string BuildDebug(Configuration config, RuntimeStatus status)
@@ -42,6 +42,26 @@ internal static class StatusReporter
         Append(builder, "InitializedPreset", status.InitializedPreset);
         Append(builder, "AutomatedMovementSuppressed", status.AutomatedMovementSuppressed);
         Append(builder, "DisableAutoFaceTargetDuringManualMovement", config.DisableAutoFaceTargetDuringManualMovement);
+        builder.AppendLine();
+
+        AppendSection(builder, "BossMod Mechanic Pressure");
+        Append(builder, "MechanicPressure", status.MechanicPressure.PrimaryPressure);
+        Append(builder, "MechanicPressureSummary", status.MechanicPressure.Summary);
+        Append(builder, "BMRRaidwideIn", status.MechanicPressure.BMRRaidwideIn);
+        Append(builder, "BMRTankbusterIn", status.MechanicPressure.BMRTankbusterIn);
+        Append(builder, "BMRKnockbackIn", status.MechanicPressure.BMRKnockbackIn);
+        Append(builder, "BMRDamageIn", status.MechanicPressure.BMRDamageIn);
+        Append(builder, "BMRDowntimeIn", status.MechanicPressure.BMRDowntimeIn);
+        Append(builder, "BMRDowntimeEndIn", status.MechanicPressure.BMRDowntimeEndIn);
+        Append(builder, "BMRVulnerableIn", status.MechanicPressure.BMRVulnerableIn);
+        Append(builder, "BMRVulnerableEndIn", status.MechanicPressure.BMRVulnerableEndIn);
+        Append(builder, "RaidwideSoon", status.MechanicPressure.RaidwideSoon);
+        Append(builder, "TankbusterSoon", status.MechanicPressure.TankbusterSoon);
+        Append(builder, "KnockbackSoon", status.MechanicPressure.KnockbackSoon);
+        Append(builder, "DamageSoon", status.MechanicPressure.DamageSoon);
+        Append(builder, "DowntimeSoon", status.MechanicPressure.DowntimeSoon);
+        Append(builder, "VulnerableSoon", status.MechanicPressure.VulnerableSoon);
+        Append(builder, "KnockbackRecoveryActive", status.MechanicPressure.KnockbackRecoveryActive);
         builder.AppendLine();
 
         AppendSection(builder, "Facing State");

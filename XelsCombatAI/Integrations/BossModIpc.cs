@@ -61,8 +61,14 @@ internal sealed class BossModIpc
     private ICallGateSubscriber<string, string, string, string, bool>? addTransientStrategy;
     private ICallGateSubscriber<string, string, string, bool>? clearTransientStrategy;
     private ICallGateSubscriber<string, bool>? clearTransientPresetStrategies;
+    private ICallGateSubscriber<float>? nextRaidwideIn;
+    private ICallGateSubscriber<float>? nextTankbusterIn;
+    private ICallGateSubscriber<float>? nextKnockbackIn;
     private ICallGateSubscriber<float>? nextDowntimeIn;
     private ICallGateSubscriber<float>? nextDowntimeEndIn;
+    private ICallGateSubscriber<float>? nextVulnerableIn;
+    private ICallGateSubscriber<float>? nextVulnerableEndIn;
+    private ICallGateSubscriber<float>? nextDamageIn;
     private DateTime nextFailureLog = DateTime.MinValue;
 
     public BossModIpc(IDalamudPluginInterface pluginInterface, IPluginLog log, BossModRuntimeGate gate)
@@ -302,6 +308,25 @@ internal sealed class BossModIpc
         return this.Invoke(subscriber, () => subscriber.InvokeFunc(), float.MaxValue);
     }
 
+    public BossModMechanicPressure GetMechanicPressure()
+    {
+        if (!this.IsAvailable())
+        {
+            return BossModMechanicPressure.None;
+        }
+
+        return new BossModMechanicPressure(
+            this.InvokeOptional(this.nextRaidwideIn, float.MaxValue),
+            this.InvokeOptional(this.nextTankbusterIn, float.MaxValue),
+            this.InvokeOptional(this.nextKnockbackIn, float.MaxValue),
+            this.InvokeOptional(this.nextDamageIn, float.MaxValue),
+            this.InvokeOptional(this.nextDowntimeIn, float.MaxValue),
+            this.InvokeOptional(this.nextDowntimeEndIn, float.MaxValue),
+            this.InvokeOptional(this.nextVulnerableIn, float.MaxValue),
+            this.InvokeOptional(this.nextVulnerableEndIn, float.MaxValue),
+            DateTime.MinValue);
+    }
+
     private bool Invoke(ICallGateSubscriber subscriber, Func<bool> action)
     {
         if (!this.CanInvoke(subscriber))
@@ -356,6 +381,13 @@ internal sealed class BossModIpc
         }
     }
 
+    private float InvokeOptional(ICallGateSubscriber<float>? subscriber, float fallback)
+    {
+        return subscriber == null
+            ? fallback
+            : this.Invoke(subscriber, () => subscriber.InvokeFunc(), fallback);
+    }
+
     private bool CanInvoke(ICallGateSubscriber subscriber)
     {
         if (!this.gate.IsOpen || !this.EnsureSubscribers())
@@ -405,8 +437,14 @@ internal sealed class BossModIpc
             this.addTransientStrategy != null &&
             this.clearTransientStrategy != null &&
             this.clearTransientPresetStrategies != null &&
+            this.nextRaidwideIn != null &&
+            this.nextTankbusterIn != null &&
+            this.nextKnockbackIn != null &&
             this.nextDowntimeIn != null &&
-            this.nextDowntimeEndIn != null)
+            this.nextDowntimeEndIn != null &&
+            this.nextVulnerableIn != null &&
+            this.nextVulnerableEndIn != null &&
+            this.nextDamageIn != null)
         {
             return true;
         }
@@ -423,8 +461,14 @@ internal sealed class BossModIpc
             this.addTransientStrategy = this.pluginInterface.GetIpcSubscriber<string, string, string, string, bool>("BossMod.Presets.AddTransientStrategy");
             this.clearTransientStrategy = this.pluginInterface.GetIpcSubscriber<string, string, string, bool>("BossMod.Presets.ClearTransientStrategy");
             this.clearTransientPresetStrategies = this.pluginInterface.GetIpcSubscriber<string, bool>("BossMod.Presets.ClearTransientPresetStrategies");
+            this.nextRaidwideIn = this.pluginInterface.GetIpcSubscriber<float>("BossMod.Timeline.NextRaidwideIn");
+            this.nextTankbusterIn = this.pluginInterface.GetIpcSubscriber<float>("BossMod.Timeline.NextTankbusterIn");
+            this.nextKnockbackIn = this.pluginInterface.GetIpcSubscriber<float>("BossMod.Timeline.NextKnockbackIn");
             this.nextDowntimeIn = this.pluginInterface.GetIpcSubscriber<float>("BossMod.Timeline.NextDowntimeIn");
             this.nextDowntimeEndIn = this.pluginInterface.GetIpcSubscriber<float>("BossMod.Timeline.NextDowntimeEndIn");
+            this.nextVulnerableIn = this.pluginInterface.GetIpcSubscriber<float>("BossMod.Timeline.NextVulnerableIn");
+            this.nextVulnerableEndIn = this.pluginInterface.GetIpcSubscriber<float>("BossMod.Timeline.NextVulnerableEndIn");
+            this.nextDamageIn = this.pluginInterface.GetIpcSubscriber<float>("BossMod.Hints.NextDamageIn");
             return true;
         }
         catch (Exception ex)
@@ -447,8 +491,14 @@ internal sealed class BossModIpc
         this.addTransientStrategy = null;
         this.clearTransientStrategy = null;
         this.clearTransientPresetStrategies = null;
+        this.nextRaidwideIn = null;
+        this.nextTankbusterIn = null;
+        this.nextKnockbackIn = null;
         this.nextDowntimeIn = null;
         this.nextDowntimeEndIn = null;
+        this.nextVulnerableIn = null;
+        this.nextVulnerableEndIn = null;
+        this.nextDamageIn = null;
     }
 
     private void LogRecoverableFailure(Exception ex, string message)

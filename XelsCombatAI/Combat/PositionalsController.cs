@@ -10,6 +10,7 @@ internal sealed class PositionalsController(
     Configuration config,
     DalamudServices services,
     RotationSolverIpc rotationSolver,
+    RotationSolverActionReflection rotationSolverActions,
     Action<Positional> setPositional,
     Action updateDtr,
     Func<AoePackPositioningStatus> aoePackStatus)
@@ -57,6 +58,12 @@ internal sealed class PositionalsController(
                 }
                 else if (this.trueNorthStrategy == true)
                 {
+                    if (this.ShouldWalkForUpcomingPositional(positional))
+                    {
+                        setPositional(positional);
+                        return;
+                    }
+
                     this.TryUseTrueNorth(positional);
                     var pending = !this.HasActiveTrueNorth() && !this.IsOutsideMeleeRange();
                     setPositional(Positional.Any);
@@ -185,6 +192,45 @@ internal sealed class PositionalsController(
 
         ActionManager.Instance()->UseAction(ActionType.Action, ActionUse.TrueNorthActionId);
         return true;
+    }
+
+    private bool ShouldWalkForUpcomingPositional(Positional positional)
+    {
+        if (!config.ManageMovement)
+        {
+            return false;
+        }
+
+        var player = services.ObjectTable.LocalPlayer;
+        var target = services.TargetManager.Target;
+        if (player == null || target == null)
+        {
+            return false;
+        }
+
+        if (!rotationSolverActions.TryGetUpcomingGcdTiming(out var action, out _))
+        {
+            return false;
+        }
+
+        if (action.PrimaryTargetId != 0 && action.PrimaryTargetId != target.GameObjectId)
+        {
+            return false;
+        }
+
+        if (!PositionalTrueNorthPolicy.TryEstimateWalkDistance(
+            player.Position,
+            player.HitboxRadius,
+            target.Position,
+            target.HitboxRadius,
+            target.Rotation,
+            positional,
+            out var moveDistance))
+        {
+            return false;
+        }
+
+        return PositionalTrueNorthPolicy.ShouldWalkInsteadOfTrueNorth(positional, action, moveDistance, out _);
     }
 
     private static Positional ReadAvaricePositional()

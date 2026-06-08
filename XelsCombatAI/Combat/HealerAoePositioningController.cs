@@ -38,7 +38,8 @@ internal sealed class HealerAoePositioningController(
     Func<bool> automatedMovementSuppressed,
     Func<bool> currentTargetHasBossModule,
     MobilityDecisionEvaluator mobilityEvaluator,
-    FacingController facingController)
+    FacingController facingController,
+    Func<BossModMechanicPressure> mechanicPressure)
     : IBossModGoalZoneContributor
 {
     private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -234,8 +235,12 @@ internal sealed class HealerAoePositioningController(
             plan.BestCoveredCount,
             plan.TotalMembers,
             plan.DistanceToCenter);
-        var partyAoeHealPending = upcomingGcd != null && IsPartyAoeHealAction(upcomingGcd);
-        var partyAoeHealActionName = partyAoeHealPending ? upcomingGcd?.ActionName ?? "<none>" : "<none>";
+        var pressure = mechanicPressure();
+        var partyAoeHealGcdPending = upcomingGcd != null && IsPartyAoeHealAction(upcomingGcd);
+        var partyAoeHealPending = partyAoeHealGcdPending || pressure.RaidwideOrDamageSoon;
+        var partyAoeHealActionName = partyAoeHealGcdPending
+            ? upcomingGcd!.ActionName
+            : pressure.RaidwideOrDamageSoon ? "BossMod damage pressure" : "<none>";
         var forcedMovementActive = VectorLengthSquared(this.forcedMovementField?.GetValue(hints)) > 0.01f;
         var forbiddenSafetyActive = this.forbiddenZonesField?.GetValue(hints) is ICollection { Count: > 0 };
         var bossModGoalZoneActive = goalZones.Count > 0;

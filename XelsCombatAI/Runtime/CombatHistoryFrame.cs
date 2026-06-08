@@ -29,6 +29,7 @@ internal sealed record CombatHistoryFrame(
     string? MovementRangeStrategy,
     string? SafetyBuffer,
     float TargetUptimeRange,
+    BossModMechanicPressure MechanicPressure,
     // Positionals
     Positional LastPositional,
     bool TrueNorthActive,

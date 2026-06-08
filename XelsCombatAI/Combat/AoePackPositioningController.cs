@@ -22,7 +22,8 @@ internal sealed class AoePackPositioningController(
     Func<bool> automatedMovementSuppressed,
     RotationSolverIpc rotationSolverIpc,
     Func<bool> currentTargetHasBossModule,
-    JobRangeProvider jobRangeProvider)
+    JobRangeProvider jobRangeProvider,
+    Func<BossModMechanicPressure> mechanicPressure)
     : IBossModGoalZoneContributor
 {
     private FieldInfo? goalZonesField;
@@ -394,14 +395,21 @@ internal sealed class AoePackPositioningController(
             return;
         }
 
+        var pressure = mechanicPressure();
+        var holdOptionalPackMovement = ShouldHoldOptionalPackMovement(pressure);
         if (!config.ManageAoePackPositioning)
         {
-            if (packCenterMovementEnabled && inAoeSituation && this.TryInjectPackCenterMovement(hints, pathfindBounds, targets, "moving closer to trash pack", this.ResolvePackEngagementRange(meleeAoeHealerFallbackActive, null), inAoeSituation, contributions))
+            if (!holdOptionalPackMovement &&
+                packCenterMovementEnabled &&
+                inAoeSituation &&
+                this.TryInjectPackCenterMovement(hints, pathfindBounds, targets, "moving closer to trash pack", this.ResolvePackEngagementRange(meleeAoeHealerFallbackActive, null), inAoeSituation, contributions))
             {
                 return;
             }
 
-            this.lastReason = inAoeSituation && config.KeepTrashTargetSelected ? "trash targeting active" : inAoeSituation ? "pack movement unavailable" : "not enough priority targets";
+            this.lastReason = holdOptionalPackMovement
+                ? pressure.FormatOptionalMovementHoldReason()
+                : inAoeSituation && config.KeepTrashTargetSelected ? "trash targeting active" : inAoeSituation ? "pack movement unavailable" : "not enough priority targets";
             return;
         }
 
@@ -435,12 +443,14 @@ internal sealed class AoePackPositioningController(
                 this.RestoreRsrIfNeeded();
             }
 
-            if (this.TryInjectProactivePackAoeMovement(hints, pathfindBounds, targets, inAoeSituation, effectivePackAoeRange, contributions))
+            if (!holdOptionalPackMovement &&
+                this.TryInjectProactivePackAoeMovement(hints, pathfindBounds, targets, inAoeSituation, effectivePackAoeRange, contributions))
             {
                 return;
             }
 
-            if (packCenterMovementEnabled &&
+            if (!holdOptionalPackMovement &&
+                packCenterMovementEnabled &&
                 inAoeSituation &&
                 this.TryInjectPackCenterMovement(hints, pathfindBounds, targets, "moving closer to trash pack", this.ResolvePackEngagementRange(meleeAoeHealerFallbackActive, null), inAoeSituation, contributions))
             {
@@ -644,6 +654,14 @@ internal sealed class AoePackPositioningController(
         }
 
         var candidateMoveDistance = Vector2.Distance(playerPos, bestScore.Position);
+        if (ShouldSkipAoeRepositionForMechanicPressure(pressure, candidateMoveDistance, out var mechanicPressureReason))
+        {
+            this.pendingCandidateSince = DateTime.MinValue;
+            this.ClearAoeCandidateGoal();
+            this.lastReason = mechanicPressureReason;
+            return;
+        }
+
         if (ShouldSkipMarginalAoeReposition(
                 this.lastCurrentHits,
                 this.lastBestHits,
@@ -1032,6 +1050,30 @@ internal sealed class AoePackPositioningController(
         _ = forbiddenDirectionSafetyActive;
         return forcedMovementActive ||
                specialModeSafetyActive;
+    }
+
+    internal static bool ShouldHoldOptionalPackMovement(BossModMechanicPressure pressure)
+    {
+        return pressure.RaidwideOrDamageSoon ||
+               pressure.DowntimeSoon ||
+               pressure.KnockbackSoon;
+    }
+
+    internal static bool ShouldSkipAoeRepositionForMechanicPressure(BossModMechanicPressure pressure, float moveDistance, out string reason)
+    {
+        reason = string.Empty;
+        if (!ShouldHoldOptionalPackMovement(pressure))
+        {
+            return false;
+        }
+
+        if (moveDistance <= 2f)
+        {
+            return false;
+        }
+
+        reason = pressure.FormatOptionalMovementHoldReason();
+        return true;
     }
 
     private static bool IsBlockingSpecialMode(string value)

@@ -14,7 +14,8 @@ internal sealed class BossCenterAvoidanceController(
     Configuration config,
     DalamudServices services,
     Func<bool> automatedMovementSuppressed,
-    Func<bool> currentTargetHasBossModule)
+    Func<bool> currentTargetHasBossModule,
+    Func<BossModMechanicPressure> mechanicPressure)
     : IBossModGoalZoneContributor
 {
     private const float BossHitboxAvoidanceMargin = 0.35f;
@@ -24,6 +25,7 @@ internal sealed class BossCenterAvoidanceController(
     private static readonly TimeSpan InsideCenterDwell = TimeSpan.FromMilliseconds(750);
     private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
+    private FieldInfo? goalZonesField;
     private FieldInfo? forcedMovementField;
     private FieldInfo? forbiddenZonesField;
     private FieldInfo? wposXField;
@@ -105,11 +107,26 @@ internal sealed class BossCenterAvoidanceController(
             return;
         }
 
+        if (this.BossModGoalZoneActive(hints))
+        {
+            this.suppressComfortUntil = now.Add(PostMechanicCenterCooldown);
+            this.insideCenterSince = DateTime.MinValue;
+            this.lastReason = "BossMod goal zone active";
+            return;
+        }
+
         if (this.BossModMechanicSafetyActive(hints))
         {
             this.suppressComfortUntil = now.Add(PostMechanicCenterCooldown);
             this.insideCenterSince = DateTime.MinValue;
             this.lastReason = "mechanic safety active";
+            return;
+        }
+
+        var pressure = mechanicPressure();
+        if (pressure.DowntimeSoon || pressure.RaidwideOrDamageSoon || pressure.KnockbackSoon)
+        {
+            this.lastReason = pressure.FormatOptionalMovementHoldReason();
             return;
         }
 
@@ -175,6 +192,7 @@ internal sealed class BossCenterAvoidanceController(
     {
         this.hookState = "unresolved";
         this.lastReason = "reset";
+        this.goalZonesField = null;
         this.forcedMovementField = null;
         this.forbiddenZonesField = null;
         this.wposXField = null;
@@ -194,6 +212,7 @@ internal sealed class BossCenterAvoidanceController(
     {
         if (this.resolvedHintsType == hintsType &&
             this.resolvedWPosType != null &&
+            this.goalZonesField != null &&
             this.forcedMovementField != null &&
             this.forbiddenZonesField != null &&
             this.wposXField != null &&
@@ -202,12 +221,13 @@ internal sealed class BossCenterAvoidanceController(
             return true;
         }
 
+        var goalZones = hintsType.GetField("GoalZones", InstanceFlags);
         var forcedMovement = hintsType.GetField("ForcedMovement", InstanceFlags);
         var forbiddenZones = hintsType.GetField("ForbiddenZones", InstanceFlags);
         var wposType = hintsType.Assembly.GetType("BossMod.WPos");
         var xField = wposType?.GetField("X", InstanceFlags);
         var zField = wposType?.GetField("Z", InstanceFlags);
-        if (forcedMovement == null || forbiddenZones == null || wposType == null || xField == null || zField == null)
+        if (goalZones == null || forcedMovement == null || forbiddenZones == null || wposType == null || xField == null || zField == null)
         {
             this.lastReason = "BMR boss center goal reflection members unavailable";
             return false;
@@ -215,11 +235,17 @@ internal sealed class BossCenterAvoidanceController(
 
         this.resolvedHintsType = hintsType;
         this.resolvedWPosType = wposType;
+        this.goalZonesField = goalZones;
         this.forcedMovementField = forcedMovement;
         this.forbiddenZonesField = forbiddenZones;
         this.wposXField = xField;
         this.wposZField = zField;
         return true;
+    }
+
+    private bool BossModGoalZoneActive(object hints)
+    {
+        return this.goalZonesField?.GetValue(hints) is ICollection { Count: > 0 };
     }
 
     private bool BossModMechanicSafetyActive(object hints)

@@ -31,6 +31,7 @@ internal sealed class CombatComposition : IDisposable
     {
         var bossModGate = new BossModRuntimeGate();
         var bossMod = new BossModIpc(pluginInterface, log, bossModGate);
+        var mechanicPressure = new BossModMechanicPressureMonitor();
         var avarice = new AvariceIpc(pluginInterface, log);
         var bossModSafety = new BossModReflectionSafety(pluginInterface, log, bossModGate);
         var vnavmesh = new VNavmeshIpc(pluginInterface);
@@ -50,17 +51,17 @@ internal sealed class CombatComposition : IDisposable
         var dashStyleController = new DashStyleController(config, jobRangeProvider, arenaEdgePositioningController);
         var facingController = new FacingController(config, services, bossMod, manualMovement, new LocalPlayerFacingActuator());
         var redMageMeleeComboController = new RedMageMeleeComboController(config, services, rotationSolverActions, bossModSafety, mobilityDecisionEvaluator, facingController, () => targetUptimePlanner.CurrentTargetHasBossModule());
-        var aoePackPositioningController = new AoePackPositioningController(config, services, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true, rotationSolver, () => targetUptimePlanner.CurrentTargetHasBossModule(), jobRangeProvider);
+        var aoePackPositioningController = new AoePackPositioningController(config, services, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true, rotationSolver, () => targetUptimePlanner.CurrentTargetHasBossModule(), jobRangeProvider, () => mechanicPressure.Current);
         targetUptimePlanner.TargetUptimeRangeOverride = () =>
             redMageMeleeComboController.GetTargetUptimeRangeOverride() ??
             aoePackPositioningController.GetTargetUptimeRangeOverride();
-        var positionalsController = new PositionalsController(config, services, rotationSolver, positional => presetController!.SetPositional(positional), updateDtr, () => aoePackPositioningController.Status);
+        var positionalsController = new PositionalsController(config, services, rotationSolver, rotationSolverActions, positional => presetController!.SetPositional(positional), updateDtr, () => aoePackPositioningController.Status);
         var passageOfArmsPositioningController = new PassageOfArmsPositioningController(config, services, () => runtime?.AutomatedMovementSuppressed == true);
-        var healerAoePositioningController = new HealerAoePositioningController(config, services, bossMod, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true, () => targetUptimePlanner.CurrentTargetHasBossModule(), mobilityDecisionEvaluator, facingController);
+        var healerAoePositioningController = new HealerAoePositioningController(config, services, bossMod, rotationSolverActions, () => runtime?.AutomatedMovementSuppressed == true, () => targetUptimePlanner.CurrentTargetHasBossModule(), mobilityDecisionEvaluator, facingController, () => mechanicPressure.Current);
         var survivabilityZonePositioningController = new SurvivabilityZonePositioningController(config, services, () => runtime?.AutomatedMovementSuppressed == true);
-        var bossCenterAvoidanceController = new BossCenterAvoidanceController(config, services, () => runtime?.AutomatedMovementSuppressed == true, () => targetUptimePlanner.CurrentTargetHasBossModule());
+        var bossCenterAvoidanceController = new BossCenterAvoidanceController(config, services, () => runtime?.AutomatedMovementSuppressed == true, () => targetUptimePlanner.CurrentTargetHasBossModule(), () => mechanicPressure.Current);
         var socialSpacingPositioningController = new SocialSpacingPositioningController(config, services, bossModSafety, () => runtime?.AutomatedMovementSuppressed == true);
-        var tankBehaviorController = new TankBehaviorController(config, services, () => targetUptimePlanner.CurrentTargetHasBossModule());
+        var tankBehaviorController = new TankBehaviorController(config, services, () => targetUptimePlanner.CurrentTargetHasBossModule(), () => mechanicPressure.Current);
         IBossModGoalZoneContributor[] legacyMovementContributors = [aoePackPositioningController, passageOfArmsPositioningController, healerAoePositioningController, survivabilityZonePositioningController, bossCenterAvoidanceController, arenaEdgePositioningController, socialSpacingPositioningController, tankBehaviorController];
         var aoeGoalHook = new BossModGoalZoneHook(config, pluginInterface, services, log, bossModGate, legacyMovementContributors, manualCorrectionFeedback);
         var gapCloserController = new GapCloserController(
@@ -75,7 +76,8 @@ internal sealed class CombatComposition : IDisposable
             rotationSolverActions,
             () => presetController?.LastPositional ?? Positional.Any,
             () => aoePackPositioningController.RsrHenchedActive,
-            () => aoePackPositioningController.Status.TrashPull);
+            () => aoePackPositioningController.Status.TrashPull,
+            () => mechanicPressure.Current);
         var escapeGapCloserController = new EscapeGapCloserController(
             config,
             services,
@@ -85,7 +87,8 @@ internal sealed class CombatComposition : IDisposable
             dashStyleController,
             facingController,
             () => presetController?.LastPositional ?? Positional.Any,
-            () => aoeGoalHook.MovementDiagnostics);
+            () => aoeGoalHook.MovementDiagnostics,
+            () => mechanicPressure.Current);
         var combatLogWriter = new CombatLogWriter(Path.Combine(configDirectory, "combat-logs"), log);
         presetController = new BossModPresetController(
             config,
@@ -96,11 +99,14 @@ internal sealed class CombatComposition : IDisposable
             positionalsController,
             gapCloserController,
             escapeGapCloserController,
-            redMageMeleeComboController);
+            redMageMeleeComboController,
+            () => mechanicPressure.Current);
 
         runtime = new CombatRuntime(
             config,
             services,
+            bossMod,
+            mechanicPressure,
             bossModGate,
             dependencyChecker,
             presetController,

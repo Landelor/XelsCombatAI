@@ -17,7 +17,8 @@ namespace XelsCombatAI.Combat;
 internal sealed class TankBehaviorController(
     Configuration config,
     DalamudServices services,
-    Func<bool> currentTargetHasBossModule)
+    Func<bool> currentTargetHasBossModule,
+    Func<BossModMechanicPressure> mechanicPressure)
     : IBossModGoalZoneContributor
 {
     private static readonly TimeSpan TargetSwitchCooldown = TimeSpan.FromMilliseconds(1500);
@@ -66,10 +67,18 @@ internal sealed class TankBehaviorController(
             return;
         }
 
+        var pressure = mechanicPressure();
         if (config.TankDropStanceWhenCoTankHasStance &&
             currentTargetHasBossModule() &&
+            !pressure.TankStabilityPressure &&
             this.TryCoordinateTankStance(player))
         {
+            return;
+        }
+
+        if (pressure.TankStabilityPressure)
+        {
+            this.LastReason = pressure.FormatOptionalMovementHoldReason();
             return;
         }
 
@@ -132,7 +141,7 @@ internal sealed class TankBehaviorController(
 
         if (config.TankKeepFrontConeAwayFromParty && tankConeHint is { } hint)
         {
-            this.TryAddConeAwayFromPartyGoal(player, hint, contributions);
+            this.TryAddConeAwayFromPartyGoal(player, hint, mechanicPressure(), contributions);
         }
     }
 
@@ -543,7 +552,7 @@ internal sealed class TankBehaviorController(
         return true;
     }
 
-    private void TryAddConeAwayFromPartyGoal(IBattleChara player, TankConeHint hint, ICollection<BossModGoalContribution> contributions)
+    private void TryAddConeAwayFromPartyGoal(IBattleChara player, TankConeHint hint, BossModMechanicPressure pressure, ICollection<BossModGoalContribution> contributions)
     {
         if (services.TargetManager.Target is not IBattleChara target)
         {
@@ -580,8 +589,11 @@ internal sealed class TankBehaviorController(
 
         contributions.Add(new(
             this.coneAwayFromPartyGoal,
-            BossModGoalPriority.PartyUtility,
+            pressure.TankbusterSoon ? BossModGoalPriority.DefensiveMechanic : BossModGoalPriority.PartyUtility,
             "Tank cone away from party"));
+        this.LastReason = pressure.TankbusterSoon
+            ? "tankbuster soon: cone away from party"
+            : "cone away from party";
     }
 
     private Delegate CreateConeAwayFromPartyGoal(Vector2 targetPosition, Vector2 partyPosition, Vector2[] partyPositions, float halfAngleCos)

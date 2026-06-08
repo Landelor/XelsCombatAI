@@ -34,6 +34,8 @@ var tests = new (string Name, Action Body)[]
     ("target uptime range follows next GCD", TargetUptimeRangeFollowsNextGcd),
     ("positionals suppress on AoE packs", PositionalsSuppressOnAoePacks),
     ("positional dash policy matches rear and flank", PositionalDashPolicyMatchesRearAndFlank),
+    ("positional true north policy prefers reachable movement", PositionalTrueNorthPolicyPrefersReachableMovement),
+    ("positional true north policy rejects mismatched action", PositionalTrueNorthPolicyRejectsMismatchedAction),
     ("friendly anchor dash requires meaningful gain", FriendlyAnchorDashRequiresMeaningfulGain),
     ("gap closer follows RSR auto target", GapCloserFollowsRsrAutoTarget),
     ("ranged gap closers skip boss reengage", RangedGapClosersSkipBossReengage),
@@ -416,6 +418,53 @@ static void PositionalDashPolicyMatchesRearAndFlank()
     AssertEqual(2, flankLandings.Length, "flank should offer both side landings");
     AssertApproximately(5f, flankLandings[0].X, 0.001f, "nearest flank side should be first");
     AssertApproximately(-5f, flankLandings[1].X, 0.001f, "far flank side should remain available");
+}
+
+static void PositionalTrueNorthPolicyPrefersReachableMovement()
+{
+    var action = CreatePositionalAction(
+        adjustedActionId: 7481,
+        actionName: "Gekko",
+        gcdRemaining: 2.3f,
+        gcdElapsed: 0.2f,
+        gcdTotal: 2.5f,
+        gcdActionAhead: 0.35f);
+
+    AssertTrue(
+        PositionalTrueNorthPolicy.ShouldWalkInsteadOfTrueNorth(Positional.Rear, action, moveDistance: 6f, out var reason),
+        $"reachable rear movement should preserve True North: {reason}");
+
+    AssertFalse(
+        PositionalTrueNorthPolicy.ShouldWalkInsteadOfTrueNorth(Positional.Rear, action, moveDistance: 12f, out _),
+        "late rear movement should fall back to True North");
+}
+
+static void PositionalTrueNorthPolicyRejectsMismatchedAction()
+{
+    var action = CreatePositionalAction(
+        adjustedActionId: 7482,
+        actionName: "Kasha",
+        gcdRemaining: 2.3f,
+        gcdElapsed: 0.2f,
+        gcdTotal: 2.5f,
+        gcdActionAhead: 0.35f);
+
+    AssertFalse(
+        PositionalTrueNorthPolicy.ShouldWalkInsteadOfTrueNorth(Positional.Rear, action, moveDistance: 1f, out _),
+        "rear Avarice intent should not use a flank RSR action timing snapshot");
+}
+
+static RsrGcdActionTimingSnapshot CreatePositionalAction(uint adjustedActionId, string actionName, float gcdRemaining, float gcdElapsed, float gcdTotal, float gcdActionAhead)
+{
+    return new RsrGcdActionTimingSnapshot(
+        ActionId: adjustedActionId,
+        AdjustedActionId: adjustedActionId,
+        ActionName: actionName,
+        PrimaryTargetId: 0,
+        GcdRemaining: gcdRemaining,
+        GcdElapsed: gcdElapsed,
+        GcdTotal: gcdTotal,
+        GcdActionAhead: gcdActionAhead);
 }
 
 static void FriendlyAnchorDashRequiresMeaningfulGain()

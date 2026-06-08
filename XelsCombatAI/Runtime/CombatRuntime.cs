@@ -13,6 +13,8 @@ namespace XelsCombatAI.Runtime;
 internal sealed class CombatRuntime(
     Configuration config,
     DalamudServices services,
+    BossModIpc bossMod,
+    BossModMechanicPressureMonitor mechanicPressure,
     BossModRuntimeGate bossModGate,
     DependencyChecker dependencyChecker,
     BossModPresetController presetController,
@@ -99,6 +101,7 @@ internal sealed class CombatRuntime(
         var dependenciesAvailable = dependencyChecker.DependenciesAvailable(out var missing);
         var bossModAvailable = dependenciesAvailable || dependencyChecker.IsBossModAvailable();
         this.SetBossModGate(bossModAvailable);
+        mechanicPressure.Update(bossMod);
         if (!dependenciesAvailable)
         {
             if (!this.ShouldContinueThroughTransientDependencyLoss(
@@ -228,6 +231,7 @@ internal sealed class CombatRuntime(
         this.manualMovementSuppressUntil = DateTime.MinValue;
         autoFaceTargetOptionController.Restore();
         this.dependencyGraceUntil = DateTime.MinValue;
+        mechanicPressure.Reset();
         presetController.ResetCache();
         aoePackPositioningController.Reset();
         passageOfArmsPositioningController.Reset();
@@ -289,6 +293,7 @@ internal sealed class CombatRuntime(
             target?.Rotation ?? 0f,
             target?.HitboxRadius ?? 0f,
             player != null ? PartyAllyProvider.GetVisiblePartyAllies(services, player).Members.Count : services.PartyList.Count,
+            mechanicPressure.Current,
             this.GetDependencyWarning(),
             this.GetTrueNorthWarning(),
             positionalsController.RsrTrueNorthDisabled,

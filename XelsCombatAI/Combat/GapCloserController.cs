@@ -21,7 +21,8 @@ internal sealed class GapCloserController(
     RotationSolverActionReflection rotationSolverActions,
     Func<Positional> positionalIntent,
     Func<bool> rsrHenchedActive,
-    Func<TrashPullDiagnostics> trashPullDiagnostics)
+    Func<TrashPullDiagnostics> trashPullDiagnostics,
+    Func<BossModMechanicPressure> mechanicPressure)
 {
     private const float DirectionalDashBetterLandingThreshold = 0.75f;
     private readonly record struct DirectionalDashFacingCandidate(float Rotation, Vector3 Destination);
@@ -121,6 +122,14 @@ internal sealed class GapCloserController(
         var safeMovementDestination = bossModSafety.TryGetSafeMovementIntent(player.Position, out var safeDestination, out _)
             ? safeDestination
             : (Vector3?)null;
+        var pressure = mechanicPressure();
+        if (this.ShouldHoldOptionalReengageDash(pressure))
+        {
+            this.lastGapCloserSafety = pressure.FormatOptionalMovementHoldReason();
+            this.lastSafeLandingPosition = null;
+            mobilityEvaluator.RecordIdle(MobilityIntent.Uptime, "Gap closer", this.lastGapCloserSafety);
+            return false;
+        }
 
         var reengageRange = MathF.Max(CombatConstants.MeleeActionRange, jobRangeProvider.EngagementRange);
         var phantomAoeTargetReengageAllowed = this.ShouldAllowPhantomTargetAoeReengageGapCloser(classJobId, target);
@@ -165,7 +174,7 @@ internal sealed class GapCloserController(
 
         var targetHasBossModule = target is IBattleNpc moduleTarget && bossMod.HasModuleByDataId(moduleTarget.BaseId);
         var bypassMinimumDistanceForKnockback = ShouldBypassMinimumGapCloserDistanceForKnockback(
-            dashStyleController.KnockbackRecoveryActive,
+            dashStyleController.KnockbackRecoveryActive || pressure.KnockbackRecoveryActive,
             JobRoles.GetRangeRole(player) == RangeRole.Melee,
             targetHasBossModule,
             HasAntiKnockbackStatus(player),
@@ -1381,6 +1390,15 @@ internal sealed class GapCloserController(
 
     private bool AcceptStyleOpportunity(DashStyleReengageOpportunity? styleOpportunity, MobilityDecisionDiagnostics decision, ref string lastSafety)
     {
+        var pressure = mechanicPressure();
+        if (styleOpportunity is { Active: true } &&
+            pressure.BadForGreedyDash &&
+            !pressure.KnockbackRecoveryActive)
+        {
+            lastSafety = pressure.FormatOptionalMovementHoldReason();
+            return false;
+        }
+
         if (styleOpportunity is not { Active: true } activeStyle || !activeStyle.RequiresStrongGain)
         {
             return true;
@@ -1393,6 +1411,13 @@ internal sealed class GapCloserController(
 
         lastSafety = $"{activeStyle.Reason}: style gain under 3y";
         return false;
+    }
+
+    private bool ShouldHoldOptionalReengageDash(BossModMechanicPressure pressure)
+    {
+        return pressure.BadForOptionalMovement &&
+               !pressure.KnockbackRecoveryActive &&
+               !dashStyleController.KnockbackRecoveryActive;
     }
 
     private bool ShouldConserveTrashPullGapCloser(IBattleChara player, IGameObject target, float distanceToHitbox, uint classJobId, out string reason)

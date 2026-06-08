@@ -17,7 +17,8 @@ internal sealed class EscapeGapCloserController(
     DashStyleController dashStyleController,
     FacingController facingController,
     Func<Positional> positionalIntent,
-    Func<BossModMovementDiagnostics> bossModMovementDiagnostics)
+    Func<BossModMovementDiagnostics> bossModMovementDiagnostics,
+    Func<BossModMechanicPressure> mechanicPressure)
 {
     private const float GreedGcdAssistUrgencySeconds = 2.5f;
     private const float GreedLastMomentAssistUrgencySeconds = 1.0f;
@@ -789,6 +790,14 @@ internal sealed class EscapeGapCloserController(
             out var safeDecision))
         {
             return this.TryUseTargetEscapeAction(actionId, actionName, target, destination, safeDecision);
+        }
+
+        var pressure = mechanicPressure();
+        if (pressure.BadForGreedyDash && !pressure.KnockbackRecoveryActive)
+        {
+            this.lastEscapeGapCloserSafety = pressure.FormatOptionalMovementHoldReason();
+            mobilityEvaluator.RecordIdle(MobilityIntent.Safety, actionName, this.lastEscapeGapCloserSafety);
+            return false;
         }
 
         if (!mobilityEvaluator.TryValidateGreedyUnsafeEscapeDashDestination(

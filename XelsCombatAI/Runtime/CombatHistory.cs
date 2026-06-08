@@ -99,6 +99,7 @@ internal sealed class CombatHistory
             MovementRangeStrategy: status.LastMovementRangeStrategy,
             SafetyBuffer: status.LastForbiddenZoneCushion,
             TargetUptimeRange: status.LastTargetUptimeRange,
+            MechanicPressure: status.MechanicPressure,
             LastPositional: status.LastPositional,
             TrueNorthActive: status.TrueNorthActive,
             TrueNorthCharges: status.TrueNorthCharges,
@@ -228,6 +229,7 @@ internal sealed class CombatHistory
             AppendIfChanged(sb, "BMRHints", frame.BossModHintSummary, prev?.BossModHintSummary);
             AppendIfChanged(sb, "SafetyBuffer", frame.SafetyBuffer, prev?.SafetyBuffer);
             AppendIfChanged(sb, "TargetUptime", $"{frame.TargetUptimeRange:0.0}", prev == null ? null : $"{prev.TargetUptimeRange:0.0}");
+            AppendIfChanged(sb, "MechanicPressure", FormatMechanicPressure(frame.MechanicPressure), prev == null ? null : FormatMechanicPressure(prev.MechanicPressure));
             AppendIfChanged(sb, "Positional", frame.LastPositional, prev?.LastPositional);
             AppendIfChanged(sb, "TrueNorth", frame.TrueNorthActive, prev?.TrueNorthActive);
             AppendIfChanged(sb, "TNCharges", frame.TrueNorthCharges, prev?.TrueNorthCharges);
@@ -443,6 +445,20 @@ internal sealed class CombatHistory
         var candidate = FormatVector(status.CandidateDestination);
         var landing = FormatVector(status.LastJumpLanding);
         return $"enabled={status.Enabled}/mode={status.Mode}/reason={status.LastReason}/mana={status.WhiteMana}:{status.BlackMana}/stacks={status.ManaStacks}/next={status.NextActionName}({status.NextActionId})/targets={status.AffectedTargets}/candidate={candidate}/jump={landing}";
+    }
+
+    private static string FormatMechanicPressure(BossModMechanicPressure pressure)
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{pressure.PrimaryPressure}/raidwide={FormatPressureTimer(pressure.BMRRaidwideIn)}/tankbuster={FormatPressureTimer(pressure.BMRTankbusterIn)}/knockback={FormatPressureTimer(pressure.BMRKnockbackIn)}/damage={FormatPressureTimer(pressure.BMRDamageIn)}/downtime={FormatPressureTimer(pressure.BMRDowntimeIn)}/vulnerable={FormatPressureTimer(pressure.BMRVulnerableIn)}/kbRecovery={pressure.KnockbackRecoveryActive}");
+    }
+
+    private static string FormatPressureTimer(float value)
+    {
+        return float.IsFinite(value) && value < float.MaxValue / 2f
+            ? value.ToString("0.0", CultureInfo.InvariantCulture)
+            : "none";
     }
 
     private uint FirstNonZero(Func<CombatHistoryFrame, uint> selector)
