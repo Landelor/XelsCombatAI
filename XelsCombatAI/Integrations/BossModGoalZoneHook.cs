@@ -366,9 +366,16 @@ internal sealed class BossModGoalZoneHook : IDisposable
         private Type? mechanicEscapeMarginWPosType;
         private FieldInfo? mechanicEscapeMarginWPosXField;
         private FieldInfo? mechanicEscapeMarginWPosZField;
+        private Vector3? lastNavigationMovementIntent;
+        private DateTime lastNavigationMovementIntentAcceptedAt = DateTime.MinValue;
+        private string lastNavigationMovementIntentStatus = "inactive";
         private static readonly TimeSpan MovementDiagnosticsCaptureInterval = TimeSpan.FromMilliseconds(250);
+        private static readonly TimeSpan NavigationMovementIntentUpdateInterval = TimeSpan.FromMilliseconds(150);
         private const string LegacyDirectMovementStatus = "legacy direct contributors";
         private const string LegacyForwardBrakeStatus = "legacy direct disabled";
+        private const float NavigationMovementImmediateTurnDot = 0.92f;
+        private const float NavigationMovementSettleDistance = 1f;
+        private const float NavigationMovementMinimumDistanceSquared = 0.01f;
         private const int MaxSafetyRasterDimension = 48;
         private static readonly MethodInfo ScoreMechanicEscapeMarginMethod = typeof(ReflectedDraw).GetMethod(nameof(ScoreMechanicEscapeMargin), BindingFlags.Static | BindingFlags.NonPublic)!;
 
@@ -632,7 +639,9 @@ internal sealed class BossModGoalZoneHook : IDisposable
             this.InjectContributorGoals();
             this.queueManualActionsMethod.Invoke(this.actionManager, []);
             this.rotationUpdateMethod.Invoke(this.rotation, [this.animationLockDelayEstimateProperty.GetValue(this.actionManager), (bool)this.isMovingMethod.Invoke(this.movementOverride, [])!, this.services.Condition[ConditionFlag.DutyRecorderPlayback]]);
+            var forcedMovementBeforeNavigation = ReadVector3(ReadField(this.hints, "ForcedMovement", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
             this.aiUpdateMethod.Invoke(this.ai, []);
+            this.StabilizeNavigationMovementIntent(forcedMovementBeforeNavigation);
             this.CaptureMovementDiagnosticsIfDue(activeBossModule);
             this.broadcastUpdateMethod.Invoke(this.broadcast, []);
             this.finishActionGatherMethod.Invoke(this.actionManager, []);
@@ -1073,6 +1082,7 @@ internal sealed class BossModGoalZoneHook : IDisposable
                         $"RasterMs={FormatTimeMs(rasterizeTime)}",
                         $"ForceMoveIn={FormatNumber(forceMovementIn)}",
                         $"PlannerSteer={LegacyDirectMovementStatus}",
+                        $"IntentDampener={this.lastNavigationMovementIntentStatus}",
                         $"MechanicWhisper={this.lastMechanicWhisperStatus}",
                         $"ForwardBrake={LegacyForwardBrakeStatus}"),
                     LegacyDirectMovementStatus,
@@ -1157,6 +1167,18 @@ internal sealed class BossModGoalZoneHook : IDisposable
         private static object? ReadField(object? instance, string name, BindingFlags flags)
         {
             return instance?.GetType().GetField(name, flags)?.GetValue(instance);
+        }
+
+        private static bool TryWriteField(object instance, string name, object? value, BindingFlags flags)
+        {
+            var field = instance.GetType().GetField(name, flags);
+            if (field == null)
+            {
+                return false;
+            }
+
+            field.SetValue(instance, value);
+            return true;
         }
 
         private static int CountField(object instance, string name, BindingFlags flags)
@@ -1556,6 +1578,97 @@ internal sealed class BossModGoalZoneHook : IDisposable
             }
 
             return (value.Value.X * value.Value.X) + (value.Value.Z * value.Value.Z);
+        }
+
+        private void StabilizeNavigationMovementIntent(Vector3? forcedMovementBeforeNavigation)
+        {
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var currentMovement = ReadVector3(ReadField(this.hints, "ForcedMovement", Flags));
+            if (XzLengthSquared(currentMovement) < NavigationMovementMinimumDistanceSquared)
+            {
+                this.ResetNavigationMovementIntent("inactive");
+                return;
+            }
+
+            var movement = currentMovement.GetValueOrDefault();
+            if (XzLengthSquared(forcedMovementBeforeNavigation) >= NavigationMovementMinimumDistanceSquared)
+            {
+                this.AcceptNavigationMovementIntent(currentMovement, DateTime.UtcNow, "direct forced movement");
+                return;
+            }
+
+            if (XzLengthSquared(currentMovement) <= NavigationMovementSettleDistance * NavigationMovementSettleDistance)
+            {
+                this.AcceptNavigationMovementIntent(currentMovement, DateTime.UtcNow, "passthrough");
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            if (!this.lastNavigationMovementIntent.HasValue)
+            {
+                this.AcceptNavigationMovementIntent(currentMovement, now, "accepted");
+                return;
+            }
+
+            if (now - this.lastNavigationMovementIntentAcceptedAt >= NavigationMovementIntentUpdateInterval)
+            {
+                this.AcceptNavigationMovementIntent(currentMovement, now, "cadence");
+                return;
+            }
+
+            if (DirectionDot2D(this.lastNavigationMovementIntent.Value, movement) < NavigationMovementImmediateTurnDot)
+            {
+                this.AcceptNavigationMovementIntent(currentMovement, now, "turn");
+                return;
+            }
+
+            var heldMovement = WithHeldDirection(this.lastNavigationMovementIntent.Value, movement);
+            if (TryWriteField(this.hints, "ForcedMovement", heldMovement, Flags))
+            {
+                this.lastNavigationMovementIntentStatus = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"held {(now - this.lastNavigationMovementIntentAcceptedAt).TotalMilliseconds:0}ms");
+            }
+        }
+
+        private void AcceptNavigationMovementIntent(Vector3? currentMovement, DateTime now, string status)
+        {
+            this.lastNavigationMovementIntent = currentMovement;
+            this.lastNavigationMovementIntentAcceptedAt = now;
+            this.lastNavigationMovementIntentStatus = status;
+        }
+
+        private void ResetNavigationMovementIntent(string status)
+        {
+            this.lastNavigationMovementIntent = null;
+            this.lastNavigationMovementIntentAcceptedAt = DateTime.MinValue;
+            this.lastNavigationMovementIntentStatus = status;
+        }
+
+        private static float DirectionDot2D(Vector3 previous, Vector3 current)
+        {
+            var previousLength = MathF.Sqrt((previous.X * previous.X) + (previous.Z * previous.Z));
+            var currentLength = MathF.Sqrt((current.X * current.X) + (current.Z * current.Z));
+            if (previousLength <= 0f || currentLength <= 0f)
+            {
+                return 1f;
+            }
+
+            return ((previous.X / previousLength) * (current.X / currentLength)) +
+                   ((previous.Z / previousLength) * (current.Z / currentLength));
+        }
+
+        private static Vector3 WithHeldDirection(Vector3 heldDirection, Vector3 currentMovement)
+        {
+            var heldLength = MathF.Sqrt((heldDirection.X * heldDirection.X) + (heldDirection.Z * heldDirection.Z));
+            var currentLength = MathF.Sqrt((currentMovement.X * currentMovement.X) + (currentMovement.Z * currentMovement.Z));
+            if (heldLength <= 0f || currentLength <= 0f)
+            {
+                return currentMovement;
+            }
+
+            var scale = currentLength / heldLength;
+            return new Vector3(heldDirection.X * scale, currentMovement.Y, heldDirection.Z * scale);
         }
 
         private static bool IsFinite(Vector3 value)
