@@ -33,7 +33,10 @@ var tests = new (string Name, Action Body)[]
     ("configuration logging defaults/reset", ConfigurationLoggingDefaultsAndReset),
     ("target uptime range follows next GCD", TargetUptimeRangeFollowsNextGcd),
     ("positionals suppress on AoE packs", PositionalsSuppressOnAoePacks),
+    ("boss center avoidance stays active for positional goals", BossCenterAvoidanceStaysActiveForPositionalGoals),
     ("positional dash policy matches rear and flank", PositionalDashPolicyMatchesRearAndFlank),
+    ("positional landing scorer avoids boss center", PositionalLandingScorerAvoidsBossCenter),
+    ("positional landing scorer prefers arc centers", PositionalLandingScorerPrefersArcCenters),
     ("positional true north policy prefers reachable movement", PositionalTrueNorthPolicyPrefersReachableMovement),
     ("positional true north policy samples safe partial arcs", PositionalTrueNorthPolicySamplesSafePartialArcs),
     ("positional true north policy rejects mismatched action", PositionalTrueNorthPolicyRejectsMismatchedAction),
@@ -56,6 +59,8 @@ var tests = new (string Name, Action Body)[]
     ("healer coverage combines with forbidden zones", HealerCoverageCombinesWithForbiddenZones),
     ("healer coverage respects cast timing", HealerCoverageRespectsCastTiming),
     ("healer boss coverage prefers ranged comfort", HealerBossCoveragePrefersRangedComfort),
+    ("party healer range moves DPS for raid damage", PartyHealerRangeMovesDpsForRaidDamage),
+    ("defensive zone movement skips tanks", DefensiveZoneMovementSkipsTanks),
     ("pack movement combines with BossMod forbidden zones", PackMovementCombinesWithBossModForbiddenZones),
     ("mechanic whisper guard keeps aligned, shorter, or confident goals", MechanicWhisperGuardKeepsAlignedShorterOrConfidentGoals),
     ("mechanic safety isolates top goal contributions", MechanicSafetyIsolatesTopGoalContributions),
@@ -392,6 +397,21 @@ static void PositionalsSuppressOnAoePacks()
         "single-target context should keep positional handling available");
 }
 
+static void BossCenterAvoidanceStaysActiveForPositionalGoals()
+{
+    AssertTrue(
+        BossCenterAvoidanceController.ShouldSuppressForBossModGoalZone(goalZoneActive: true, recommendedPositionalActive: false),
+        "non-positional BossMod goal zones should suppress center comfort movement");
+
+    AssertFalse(
+        BossCenterAvoidanceController.ShouldSuppressForBossModGoalZone(goalZoneActive: true, recommendedPositionalActive: true),
+        "positional BossMod goal zones should allow center comfort movement");
+
+    AssertFalse(
+        BossCenterAvoidanceController.ShouldSuppressForBossModGoalZone(goalZoneActive: false, recommendedPositionalActive: false),
+        "missing BossMod goal zone should not suppress center comfort movement");
+}
+
 static void PositionalDashPolicyMatchesRearAndFlank()
 {
     var targetPosition = Vector3.Zero;
@@ -419,6 +439,130 @@ static void PositionalDashPolicyMatchesRearAndFlank()
     AssertEqual(2, flankLandings.Length, "flank should offer both side landings");
     AssertApproximately(5f, flankLandings[0].X, 0.001f, "nearest flank side should be first");
     AssertApproximately(-5f, flankLandings[1].X, 0.001f, "far flank side should remain available");
+}
+
+static void PositionalLandingScorerAvoidsBossCenter()
+{
+    const float targetRotation = 0f;
+    const float targetRadius = 5f;
+    const float playerRadius = 0.5f;
+    var flankCenterDistance = targetRadius + playerRadius + 1.2f;
+
+    AssertTrue(
+        PositionalsController.ScoreLanding(
+            x: flankCenterDistance,
+            z: 0f,
+            targetX: 0f,
+            targetZ: 0f,
+            targetRotation,
+            targetRadius,
+            playerRadius,
+            Positional.Flank) > 0f,
+        "comfortable flank landing should score");
+
+    AssertEqual(
+        0f,
+        PositionalsController.ScoreLanding(
+            x: 0f,
+            z: 0f,
+            targetX: 0f,
+            targetZ: 0f,
+            targetRotation,
+            targetRadius,
+            playerRadius,
+            Positional.Flank),
+        "boss center should not score as a final positional landing");
+
+    AssertTrue(
+        PositionalsController.ScoreLanding(
+            x: targetRadius + playerRadius + 0.2f,
+            z: 0f,
+            targetX: 0f,
+            targetZ: 0f,
+            targetRotation,
+            targetRadius,
+            playerRadius,
+            Positional.Flank) > 0f,
+        "tight but usable flank landing should still score");
+
+    AssertTrue(
+        PositionalsController.ScoreLanding(
+            x: targetRadius * 0.5f,
+            z: 0f,
+            targetX: 0f,
+            targetZ: 0f,
+            targetRotation,
+            targetRadius,
+            playerRadius,
+            Positional.Flank) > 0f,
+        "inside-hitbox flank landing should remain available when BMR safety leaves it as the best safe option");
+
+    AssertEqual(
+        0f,
+        PositionalsController.ScoreLanding(
+            x: 0f,
+            z: -flankCenterDistance,
+            targetX: 0f,
+            targetZ: 0f,
+            targetRotation,
+            targetRadius,
+            playerRadius,
+            Positional.Flank),
+        "wrong positional arc should not score");
+}
+
+static void PositionalLandingScorerPrefersArcCenters()
+{
+    const float targetRotation = 0f;
+    const float targetRadius = 5f;
+    const float playerRadius = 0.5f;
+    var radius = targetRadius + playerRadius + 1.2f;
+
+    var flankCenter = PositionalsController.ScoreLanding(
+        x: radius,
+        z: 0f,
+        targetX: 0f,
+        targetZ: 0f,
+        targetRotation,
+        targetRadius,
+        playerRadius,
+        Positional.Flank);
+
+    var flankEdge = PositionalsController.ScoreLanding(
+        x: radius * 0.72f,
+        z: radius * 0.69f,
+        targetX: 0f,
+        targetZ: 0f,
+        targetRotation,
+        targetRadius,
+        playerRadius,
+        Positional.Flank);
+
+    AssertTrue(flankCenter > flankEdge, "flank center should score above a valid edge landing");
+    AssertTrue(flankEdge > 0f, "valid flank edge landing should remain available for mechanics");
+
+    var rearCenter = PositionalsController.ScoreLanding(
+        x: 0f,
+        z: -radius,
+        targetX: 0f,
+        targetZ: 0f,
+        targetRotation,
+        targetRadius,
+        playerRadius,
+        Positional.Rear);
+
+    var rearEdge = PositionalsController.ScoreLanding(
+        x: radius * 0.69f,
+        z: -radius * 0.72f,
+        targetX: 0f,
+        targetZ: 0f,
+        targetRotation,
+        targetRadius,
+        playerRadius,
+        Positional.Rear);
+
+    AssertTrue(rearCenter > rearEdge, "rear center should score above a valid edge landing");
+    AssertTrue(rearEdge > 0f, "valid rear edge landing should remain available for mechanics");
 }
 
 static void PositionalTrueNorthPolicyPrefersReachableMovement()
@@ -784,14 +928,14 @@ static void LateSafetyDashContinuesWhileUnsafeAndFar()
             canAssistSafeMovement: true,
             dangerElapsedMilliseconds: CombatConstants.EscapeGapCloserDangerWindowMilliseconds + 1d),
         "late safety dash should keep evaluating while safe when far movement assist is allowed");
-    AssertTrue(
+    AssertFalse(
         EscapeGapCloserController.ShouldSuppressLateEscapeGapCloser(
             currentSafe: false,
             safeMovementDistance: 6f,
             minimumGapCloserDistance: 8f,
             canAssistSafeMovement: true,
             dangerElapsedMilliseconds: CombatConstants.EscapeGapCloserDangerWindowMilliseconds + 1d),
-        "late safety dash should suppress when remaining safe movement is below the dash threshold");
+        "late safety dash should still evaluate while unsafe even when the nearest BMR safe destination is below the dash threshold");
     AssertFalse(
         EscapeGapCloserController.ShouldSuppressLateEscapeGapCloser(
             currentSafe: false,
@@ -1305,6 +1449,63 @@ static void HealerBossCoveragePrefersRangedComfort()
             bestBossRangeScore: 0.95f,
             bossModuleContext: true),
         "boss ranged comfort should not trade away existing healer coverage");
+}
+
+static void PartyHealerRangeMovesDpsForRaidDamage()
+{
+    AssertFalse(
+        PartyHealerRangePositioningController.ShouldSkipPartyHealerRangeForRole(25),
+        "DPS jobs should be eligible for party healer range movement");
+
+    AssertTrue(
+        PartyHealerRangePositioningController.ShouldSkipPartyHealerRangeForRole(19),
+        "tank jobs should not move toward healers for raid damage");
+
+    AssertTrue(
+        PartyHealerRangePositioningController.ShouldSkipPartyHealerRangeForRole(24),
+        "healer jobs use the healer coverage controller instead");
+
+    AssertTrue(
+        PartyHealerRangePositioningController.ShouldMoveForPartyHealerRange(BossModMechanicPressure.None with { BMRRaidwideIn = 2f }),
+        "raidwide pressure should trigger party healer range movement");
+
+    AssertTrue(
+        PartyHealerRangePositioningController.ShouldMoveForPartyHealerRange(BossModMechanicPressure.None with
+        {
+            BMRDamageIn = 2f,
+            BMRNextDamageType = (int)BossModPredictedDamageType.Shared
+        }),
+        "shared raid damage should trigger party healer range movement");
+
+    AssertFalse(
+        PartyHealerRangePositioningController.ShouldMoveForPartyHealerRange(BossModMechanicPressure.None with
+        {
+            BMRDamageIn = 2f,
+            BMRNextDamageType = (int)BossModPredictedDamageType.Tankbuster
+        }),
+        "tankbusters should not trigger DPS healer-range movement");
+
+    var preferred = PartyHealerRangePositioningController.FindPreferredEntryPosition(
+        new Vector2(25f, 0f),
+        Vector2.Zero,
+        25f);
+    AssertApproximately(18.5f, preferred.X, 0.001f, "preferred entry x");
+    AssertApproximately(0f, preferred.Y, 0.001f, "preferred entry y");
+}
+
+static void DefensiveZoneMovementSkipsTanks()
+{
+    AssertTrue(
+        SurvivabilityZonePositioningController.ShouldSkipDefensiveZoneMovementForRole(19),
+        "tank jobs should not move toward defensive or healing ground zones");
+
+    AssertFalse(
+        SurvivabilityZonePositioningController.ShouldSkipDefensiveZoneMovementForRole(24),
+        "healer jobs may still use defensive ground zones");
+
+    AssertFalse(
+        SurvivabilityZonePositioningController.ShouldSkipDefensiveZoneMovementForRole(25),
+        "non-tank DPS jobs may still use defensive ground zones");
 }
 
 static void PackMovementCombinesWithBossModForbiddenZones()

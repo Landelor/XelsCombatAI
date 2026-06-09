@@ -19,6 +19,8 @@ internal enum DecisionOverlaySource
     SurvivabilityZone,
     RedMageMeleeCombo,
     StarryMuse,
+    PartyHealerRange,
+    BossCenterAvoidance,
 }
 
 internal enum DecisionOverlayState

@@ -8,7 +8,9 @@ internal static class ActionUse
     public const uint TrueNorthStatusId = 1250;
     public const uint SurecastStatusId = 160;
     public const uint ArmsLengthStatusId = 1209;
+    public const uint LeyLinesStatusId = 737;
     public const uint CircleOfPowerStatusId = 738;
+    public const uint BlackMageLeyLinesObjectDataId = 0x179u;
     public const uint PassageOfArmsActionId = 7385;
     public const uint PassageOfArmsStatusId = 1175;
     public const uint PaladinIronWillStatusId = 79;

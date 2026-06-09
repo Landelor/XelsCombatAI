@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -13,16 +12,25 @@ internal sealed class DecisionOverlayController(
     Configuration config,
     DalamudServices services,
     AoePackPositioningController aoePackPositioningController,
-    Func<bool> currentTargetHasBossModule,
     PassageOfArmsPositioningController passageOfArmsPositioningController,
     HealerAoePositioningController healerAoePositioningController,
+    PartyHealerRangePositioningController partyHealerRangePositioningController,
     SurvivabilityZonePositioningController survivabilityZonePositioningController,
     PictomancerStarryMusePositioningController pictomancerStarryMusePositioningController,
+    BossCenterAvoidanceController bossCenterAvoidanceController,
     BossModReflectionSafety bossModSafety,
     MobilityDecisionEvaluator mobilityDecisionEvaluator,
     GapCloserController gapCloserController,
     EscapeGapCloserController escapeGapCloserController,
     RedMageMeleeComboController redMageMeleeComboController,
+    Func<Positional> activePositional,
+    Func<bool> trueNorthActive,
+    Func<float> targetUptimeRange,
+    Func<string> targetUptimeRangeSource,
+    Func<string> targetUptimeRangeReason,
+    Func<bool?> leylinesBetweenTheLines,
+    Func<bool?> leylinesRetrace,
+    Func<bool?> leylinesGoal,
     RotationSolverActionReflection rotationSolverActions)
 {
 
@@ -31,8 +39,10 @@ internal sealed class DecisionOverlayController(
     private DateTime gapCloserPendingStateAt = DateTime.MinValue;
     private DateTime nextDrawErrorLog = DateTime.MinValue;
     private static readonly TimeSpan GapCloserStateDebounce = TimeSpan.FromMilliseconds(400);
+    private const int MaxHudLinesPerSection = 4;
 
-    private sealed record OverlayLabel(DecisionOverlayState State, DecisionOverlaySource Source, string Text);
+    private sealed record OverlayBadge(DecisionOverlayState State, DecisionOverlaySource Source, string Text);
+    private sealed record MovementHudLine(DecisionOverlayState State, DecisionOverlaySource Source, string Text);
 
     public void Draw()
     {
@@ -46,11 +56,6 @@ internal sealed class DecisionOverlayController(
             if (this.ShouldHideForGameUiState())
             {
                 return;
-            }
-
-            if (config.ShowDecisionOverlayHud)
-            {
-                this.DrawConfigHud();
             }
 
             this.DrawWorldDebug();
@@ -85,37 +90,36 @@ internal sealed class DecisionOverlayController(
         }
 
         var drawList = ImGui.GetBackgroundDrawList();
-        var snapshotSource = this.BuildSnapshots(player);
+        var snapshots = this.BuildSnapshots(player)
+            .OrderBy(snapshot => snapshot.Priority)
+            .ToArray();
         if (config.ShowDecisionOverlayHud)
         {
-            snapshotSource = snapshotSource.Concat(this.BuildConfigDebugSnapshots(player));
+            this.DrawMovementStatusHud(snapshots);
         }
 
-        var snapshots = snapshotSource.OrderBy(snapshot => snapshot.Priority).ToArray();
-        var labelGroups = new Dictionary<(int, int), (Vector3 Anchor, List<OverlayLabel> Labels)>();
+        var badgeGroups = new Dictionary<(int, int), (Vector3 Anchor, List<OverlayBadge> Badges)>();
         foreach (var snapshot in snapshots)
         {
-            var anchor = snapshot.Markers.FirstOrDefault()?.Position ??
-                         snapshot.Shapes.FirstOrDefault()?.Origin ??
-                         snapshot.Lines.FirstOrDefault()?.To;
-            if (anchor.HasValue)
+            var badgeAnchor = BadgeAnchor(snapshot);
+            if (badgeAnchor.HasValue && ShouldDrawWorldBadge(snapshot))
             {
-                var key = ((int)MathF.Round(anchor.Value.X * 2f), (int)MathF.Round(anchor.Value.Z * 2f));
-                if (!labelGroups.TryGetValue(key, out var group))
+                var key = ((int)MathF.Round(badgeAnchor.Value.X * 2f), (int)MathF.Round(badgeAnchor.Value.Z * 2f));
+                if (!badgeGroups.TryGetValue(key, out var group))
                 {
-                    group = (anchor.Value, []);
-                    labelGroups[key] = group;
+                    group = (badgeAnchor.Value, []);
+                    badgeGroups[key] = group;
                 }
 
-                group.Labels.Add(new(snapshot.State, snapshot.Source, BuildSnapshotLabel(snapshot)));
+                group.Badges.Add(new(snapshot.State, snapshot.Source, BuildSnapshotBadge(snapshot)));
             }
 
             this.DrawSnapshot(drawList, snapshot);
         }
 
-        foreach (var group in labelGroups.Values)
+        foreach (var group in badgeGroups.Values)
         {
-            this.DrawLabelGroup(drawList, group.Anchor, group.Labels);
+            this.DrawBadgeGroup(drawList, group.Anchor, group.Badges);
         }
     }
 
@@ -137,6 +141,24 @@ internal sealed class DecisionOverlayController(
                 [new(DecisionOverlayState.Candidate, redMage.CandidateDestination.Value, 0.35f, "RDM")]);
         }
 
+
+        var positionalSnapshot = this.BuildPositionalSnapshot(player, target);
+        if (positionalSnapshot != null)
+        {
+            yield return positionalSnapshot;
+        }
+
+        var targetUptimeSnapshot = this.BuildTargetUptimeSnapshot(player, target);
+        if (targetUptimeSnapshot != null)
+        {
+            yield return targetUptimeSnapshot;
+        }
+
+        var leyLinesSnapshot = this.BuildLeyLinesSnapshot(player);
+        if (leyLinesSnapshot != null)
+        {
+            yield return leyLinesSnapshot;
+        }
 
         if (rotationSolverActions.TryGetUpcomingGcd(requirePreview: false, out var nextAction, out _))
         {
@@ -181,11 +203,52 @@ internal sealed class DecisionOverlayController(
                 20,
                 [new(DecisionOverlayShapeKind.Circle, coverageState, healerCoverage.Center, healerCoverage.Radius, 0f, 0f, 0f, "coverage zone")],
                 healerCoverage.Injected
-                    ? [new(DecisionOverlayState.Candidate, player.Position, healerCoverage.Center, "move into zone")]
+                    ? [new(DecisionOverlayState.Candidate, player.Position, healerCoverage.Center, "")]
                     : [],
                 healerCoverage.Members
                     .Select(member => new DecisionOverlayMarker(coverageState, member, 0.35f, null))
                     .ToArray());
+        }
+
+        var partyHealerRange = partyHealerRangePositioningController.Overlay;
+        if (partyHealerRange != null)
+        {
+            var partyHealerStatus = partyHealerRangePositioningController.Status;
+            var partyHealerBlocked = partyHealerStatus.LastReason.Contains("too far", StringComparison.OrdinalIgnoreCase);
+            var partyHealerState = !config.Enabled || !config.ManageMovement || !config.ManageHealerCoverageZone
+                ? DecisionOverlayState.Suppressed
+                : partyHealerRange.PlayerInRange
+                    ? DecisionOverlayState.Active
+                    : partyHealerRange.Injected
+                        ? DecisionOverlayState.Candidate
+                        : partyHealerBlocked
+                            ? DecisionOverlayState.Rejected
+                            : DecisionOverlayState.Future;
+            var reason = partyHealerState == DecisionOverlayState.Suppressed
+                ? this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageHealerCoverageZone, "Stay in healer range"))
+                : partyHealerRange.PlayerInRange
+                    ? $"{partyHealerRange.DistanceToHealer:0.0}y from {partyHealerRange.HealerName}"
+                    : partyHealerBlocked
+                        ? partyHealerStatus.LastReason
+                    : $"{partyHealerRange.DistanceToEntry:0.0}y to healer range";
+            yield return new(
+                DecisionOverlaySource.PartyHealerRange,
+                partyHealerState,
+                partyHealerRange.PlayerInRange
+                    ? "Inside healer range"
+                    : partyHealerBlocked
+                        ? "Healer range too far"
+                        : "Move into healer range",
+                reason,
+                21,
+                [new(DecisionOverlayShapeKind.Circle, partyHealerState, partyHealerRange.HealerPosition, partyHealerRange.Radius, 0f, 0f, 0f, "healer range")],
+                partyHealerRange.PlayerInRange
+                    ? []
+                    : [new DecisionOverlayLine(partyHealerState, player.Position, partyHealerRange.PreferredEntryPosition, "")],
+                [
+                    new DecisionOverlayMarker(DecisionOverlayState.Active, partyHealerRange.HealerPosition, 0.35f, "HEAL"),
+                    new DecisionOverlayMarker(partyHealerState, partyHealerRange.PreferredEntryPosition, 0.28f, null)
+                ]);
         }
 
         var aoe = aoePackPositioningController.Overlay;
@@ -203,7 +266,7 @@ internal sealed class DecisionOverlayController(
                     $"target range {rangeLabel}",
                     40,
                     [new(DecisionOverlayShapeKind.Circle, DecisionOverlayState.Candidate, centroid, aoe.Radius, 0f, aoe.Radius, 0f, "attack range")],
-                    [new(DecisionOverlayState.Candidate, player.Position, centroid, $"move to {rangeLabel}")],
+                    [new(DecisionOverlayState.Candidate, player.Position, centroid, "")],
                     aoe.Targets.Select(t => new DecisionOverlayMarker(DecisionOverlayState.Suppressed, t.Position, t.Radius, null)).ToArray());
             }
             else
@@ -225,7 +288,7 @@ internal sealed class DecisionOverlayController(
                     aoe.ActionName,
                     40,
                     [new(shapeKind, DecisionOverlayState.Candidate, aoe.Candidate, aoe.Radius, aoe.HalfWidth, aoe.Radius, rotation, "AoE from here")],
-                    [new(DecisionOverlayState.Candidate, player.Position, aoe.Candidate, "move for AoE")],
+                    [new(DecisionOverlayState.Candidate, player.Position, aoe.Candidate, "")],
                     aoe.Targets.Select(t => new DecisionOverlayMarker(
                         t.InsideAvoidedHitbox ? DecisionOverlayState.Rejected
                             : t.Hit ? DecisionOverlayState.Active : DecisionOverlayState.Rejected,
@@ -252,7 +315,7 @@ internal sealed class DecisionOverlayController(
                 suggestion.ActionName,
                 39,
                 [new(shapeKind, DecisionOverlayState.Future, suggestion.Candidate, suggestion.Radius, suggestion.HalfWidth, suggestion.Radius, rotation, "AoE preview")],
-                [new(DecisionOverlayState.Future, player.Position, suggestion.Candidate, "preview AoE")],
+                [new(DecisionOverlayState.Future, player.Position, suggestion.Candidate, "")],
                 suggestion.Targets.Select(t => new DecisionOverlayMarker(
                     t.Hit ? DecisionOverlayState.Future : DecisionOverlayState.Suppressed,
                     t.Position, t.Radius, null)).ToArray());
@@ -278,7 +341,7 @@ internal sealed class DecisionOverlayController(
                 reason ?? passage.PaladinName,
                 45,
                 [new(DecisionOverlayShapeKind.Cone, state, passage.PaladinPosition, passage.Radius, passage.HalfAngle, passage.Radius, passage.RotationRadians, "protected cone")],
-                [new(state, player.Position, passage.PreferredPosition, "move to Passage")],
+                [new(state, player.Position, passage.PreferredPosition, "")],
                 [
                     new DecisionOverlayMarker(DecisionOverlayState.Active, passage.PaladinPosition, 0.35f, "PLD"),
                     new DecisionOverlayMarker(state, passage.PreferredPosition, 0.35f, "Wings")
@@ -307,7 +370,7 @@ internal sealed class DecisionOverlayController(
                 [new(DecisionOverlayShapeKind.Circle, state, survZone.ZoneCenter, survZone.Radius, 0f, 0f, 0f, "defensive ground")],
                 survZone.PlayerInZone
                     ? []
-                    : [new DecisionOverlayLine(state, player.Position, survZone.ZoneCenter, $"move into {survZone.ZoneName}")],
+                    : [new DecisionOverlayLine(state, player.Position, survZone.ZoneCenter, "")],
                 [
                     new DecisionOverlayMarker(DecisionOverlayState.Active, survZone.CasterPosition, 0.35f, survZone.ZoneName[..3]),
                     new DecisionOverlayMarker(state, survZone.ZoneCenter, 0.25f, "Zone")
@@ -335,8 +398,23 @@ internal sealed class DecisionOverlayController(
                 [new(DecisionOverlayShapeKind.Circle, state, starryMuse.ZoneCenter, starryMuse.Radius, 0f, 0f, 0f, "Starry Muse")],
                 starryMuse.PlayerInZone
                     ? []
-                    : [new DecisionOverlayLine(state, player.Position, starryMuse.PreferredPosition, "move into Starry Muse")],
+                    : [new DecisionOverlayLine(state, player.Position, starryMuse.PreferredPosition, "")],
                 [new DecisionOverlayMarker(state, starryMuse.PreferredPosition, 0.25f, "Starry")]);
+        }
+
+        var bossCenter = bossCenterAvoidanceController.Overlay;
+        if (bossCenter != null)
+        {
+            var state = bossCenter.Injected ? DecisionOverlayState.Candidate : DecisionOverlayState.Future;
+            yield return new(
+                DecisionOverlaySource.BossCenterAvoidance,
+                state,
+                bossCenter.Injected ? "Move out of boss center" : "Avoid boss center",
+                bossCenter.Reason,
+                46,
+                [new(DecisionOverlayShapeKind.Circle, state, bossCenter.TargetPosition, bossCenter.Radius, 0f, 0f, 0f, "boss center")],
+                [],
+                []);
         }
 
         this.AddGapCloserSnapshot(player, target, out var gapCloserSnapshot);
@@ -357,8 +435,8 @@ internal sealed class DecisionOverlayController(
                     "safe landing preview",
                     55,
                     [],
-                    [new(DecisionOverlayState.Future, player.Position, escapeDest.Value, "dash to safe spot")],
-                    [new(DecisionOverlayState.Future, escapeDest.Value, 0.35f, "safe landing")]);
+                    [new(DecisionOverlayState.Future, player.Position, escapeDest.Value, "")],
+                    [new(DecisionOverlayState.Future, escapeDest.Value, 0.35f, null)]);
             }
         }
 
@@ -371,154 +449,207 @@ internal sealed class DecisionOverlayController(
                 "encounter safety destination",
                 100,
                 [],
-                [new(DecisionOverlayState.Active, player.Position, destination, "BMR safe spot")],
-                [new(DecisionOverlayState.Active, destination, 0.35f, "safe spot")]);
+                [new(DecisionOverlayState.Active, player.Position, destination, "")],
+                [new(DecisionOverlayState.Active, destination, 0.35f, null)]);
         }
     }
 
-    private IEnumerable<DecisionOverlaySnapshot> BuildConfigDebugSnapshots(IBattleChara player)
+    private DecisionOverlaySnapshot? BuildPositionalSnapshot(IBattleChara player, IBattleChara? target)
     {
-        var target = services.TargetManager.Target as IBattleChara;
-        if (target != null)
+        if (!config.Enabled ||
+            !config.ManagePositionals ||
+            trueNorthActive() ||
+            target == null ||
+            JobRoles.GetRangeRole(player) != RangeRole.Melee)
         {
-            if (!config.Enabled || !config.ManageMovement || !config.ManageForbiddenZoneDistance)
-            {
-                var forbiddenReason = this.DisabledReason(
-                    (config.Enabled, "Enabled"),
-                    (config.ManageMovement, "Automate movement"),
-                    (config.ManageForbiddenZoneDistance, "Avoid danger zones"));
-                yield return new(
-                    DecisionOverlaySource.TargetUptime,
-                    DecisionOverlayState.Suppressed,
-                    $"Danger buffer disabled ({config.PreferredForbiddenZoneDistance:0.#}y)",
-                    forbiddenReason,
-                    16,
-                    [new(DecisionOverlayShapeKind.Circle, DecisionOverlayState.Suppressed, target.Position, target.HitboxRadius + config.PreferredForbiddenZoneDistance, 0f, 0f, 0f, "danger buffer")],
-                    [],
-                    []);
-            }
-
-            var insideEnemiesEnabled = config.Enabled && config.ManageMovement && config.AvoidStandingInsideEnemies
-                && currentTargetHasBossModule();
-            var insideEnemiesState = insideEnemiesEnabled ? DecisionOverlayState.Future : DecisionOverlayState.Suppressed;
-            var insideEnemiesReason = this.DisabledReason(
-                (config.Enabled, "Enabled"),
-                (config.ManageMovement, "Automate movement"),
-                (config.AvoidStandingInsideEnemies, "Avoid standing inside bosses"));
-            yield return new(
-                DecisionOverlaySource.TargetUptime,
-                insideEnemiesState,
-                insideEnemiesEnabled ? "Avoid boss center" : "Boss center avoidance disabled",
-                insideEnemiesReason,
-                17,
-                [new(DecisionOverlayShapeKind.Circle, insideEnemiesState, target.Position, BossCenterAvoidanceController.AvoidanceRadius(target.HitboxRadius), 0f, 0f, 0f, "avoid center")],
-                [],
-                [new(insideEnemiesState, target.Position, 0.35f, "Boss")]);
-
-            foreach (var positionalSnapshot in this.BuildPositionalDebugSnapshots(target))
-            {
-                yield return positionalSnapshot;
-            }
-
-            foreach (var gapSnapshot in this.BuildGapCloserDebugSnapshots(player, target))
-            {
-                yield return gapSnapshot;
-            }
+            return null;
         }
 
-        if (bossModSafety.TryGetSafeMovementIntent(player.Position, out var safeDestination, out var safeReason))
+        if (!rotationSolverActions.TryGetUpcomingGcdTiming(out var action, out var reason))
         {
-            var movementEnabled = config.Enabled && config.ManageMovement;
-            var state = movementEnabled ? DecisionOverlayState.Active : DecisionOverlayState.Suppressed;
-            yield return new(
-                DecisionOverlaySource.FinalMovement,
-                state,
-                movementEnabled ? "Safe move" : "Safe move disabled",
-                movementEnabled ? safeReason : this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement")),
-                90,
-                [],
-                [new(state, player.Position, safeDestination, "move to safe spot")],
-                [new(state, safeDestination, 0.35f, "safe spot")]);
-
-            if (config.UseGapCloser || !movementEnabled)
-            {
-                var escapeEnabled = movementEnabled && config.UseGapCloser && this.CurrentDashPolicyEnabled();
-                var escapeState = escapeEnabled ? DecisionOverlayState.Future : DecisionOverlayState.Suppressed;
-                var escapeReason = this.DisabledReason(
-                    (config.Enabled, "Enabled"),
-                    (config.ManageMovement, "Automate movement"),
-                    (config.UseGapCloser, "Gap closers"),
-                    (this.CurrentDashPolicyEnabled(), "Current job or Phantom archetype dash rule"));
-                yield return new(
-                    DecisionOverlaySource.EscapeLanding,
-                    escapeState,
-                    $"Safety gap closer {config.MinimumGapCloserDistance:0}y",
-                    escapeReason,
-                    54,
-                    [],
-                    [new(escapeState, player.Position, safeDestination, "dash to safety")],
-                    [new(escapeState, safeDestination, 0.35f, "safe landing")]);
-            }
-        }
-    }
-
-    private IEnumerable<DecisionOverlaySnapshot> BuildPositionalDebugSnapshots(IBattleChara target)
-    {
-        var player = services.ObjectTable.LocalPlayer;
-        if (player == null || JobRoles.GetRangeRole(player) != RangeRole.Melee)
-        {
-            yield break;
+            return null;
         }
 
-        var state = config.Enabled && config.ManagePositionals ? DecisionOverlayState.Future : DecisionOverlayState.Suppressed;
-        var reason = this.DisabledReason(
-            (config.Enabled, "Enabled"),
-            (config.ManagePositionals, "Do positionals"));
-        var radius = MathF.Max(target.HitboxRadius + 1.5f, 2.5f);
-        var rearRotation = target.Rotation + MathF.PI;
-        var flankLeftRotation = target.Rotation + MathF.PI * 0.5f;
-        var flankRightRotation = target.Rotation - MathF.PI * 0.5f;
+        if (action.PrimaryTargetId != 0 && action.PrimaryTargetId != target.GameObjectId)
+        {
+            return null;
+        }
 
-        yield return new(
+        if (!PositionalTrueNorthPolicy.TryGetActionPositional(action, out var positional) ||
+            !PositionalDashPolicy.IsActive(positional))
+        {
+            return null;
+        }
+
+        var satisfied = PositionalDashPolicy.IsSatisfied(positional, player.Position, target.Position, target.Rotation);
+        var state = satisfied
+            ? DecisionOverlayState.Active
+            : activePositional() == positional
+                ? DecisionOverlayState.Candidate
+                : DecisionOverlayState.Future;
+        var radius = MathF.Max(
+            target.HitboxRadius + player.HitboxRadius + CombatConstants.MeleeActionRange,
+            2.5f);
+        return new(
             DecisionOverlaySource.Positionals,
             state,
-            state == DecisionOverlayState.Future ? "Positionals: rear/flank zones" : "Positionals disabled",
-            reason,
-            20,
-            [
-                new(DecisionOverlayShapeKind.Cone, state, target.Position, radius, MathF.PI / 4f, radius, rearRotation, "rear"),
-                new(DecisionOverlayShapeKind.Cone, state, target.Position, radius, MathF.PI / 5f, radius, flankLeftRotation, "flank"),
-                new(DecisionOverlayShapeKind.Cone, state, target.Position, radius, MathF.PI / 5f, radius, flankRightRotation, "flank")
-            ],
+            $"{positional}: {action.ActionName}",
+            satisfied ? "already in positional" : reason,
+            15,
+            BuildPositionalShapes(positional, state, target.Position, target.Rotation, radius),
             [],
             []);
-
     }
 
-    private IEnumerable<DecisionOverlaySnapshot> BuildGapCloserDebugSnapshots(IBattleChara player, IBattleChara target)
+    private DecisionOverlaySnapshot? BuildTargetUptimeSnapshot(IBattleChara player, IBattleChara? target)
     {
-        var movementEnabled = config.Enabled && config.ManageMovement;
-        var reengageEnabled = movementEnabled && config.UseGapCloser && this.CurrentDashPolicyEnabled();
-        var state = reengageEnabled ? DecisionOverlayState.Future : DecisionOverlayState.Suppressed;
-        var distanceToHitbox = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, target.Position, target.HitboxRadius);
-        var reason = this.DisabledReason(
-            (config.Enabled, "Enabled"),
-            (config.ManageMovement, "Automate movement"),
-            (config.UseGapCloser, "Gap closers"),
-            (this.CurrentDashPolicyEnabled(), "Current job or Phantom archetype dash rule"));
+        if (!config.Enabled ||
+            !config.ManageMovement ||
+            target == null ||
+            target.IsDead ||
+            target.CurrentHp == 0)
+        {
+            return null;
+        }
 
-        yield return new(
-            DecisionOverlaySource.GapCloser,
+        var range = targetUptimeRange();
+        if (range <= 0f || range >= Configuration.InternalDisabledUptimeRange - 0.5f)
+        {
+            return null;
+        }
+
+        var source = targetUptimeRangeSource();
+        var reason = targetUptimeRangeReason();
+        var surfaceDistance = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, target.Position, target.HitboxRadius);
+        var outOfRange = surfaceDistance > range + 0.2f;
+        var noteworthyRange = !source.Equals("local", StringComparison.OrdinalIgnoreCase) &&
+                              !source.Equals("none", StringComparison.OrdinalIgnoreCase);
+        if (!outOfRange && !noteworthyRange)
+        {
+            return null;
+        }
+
+        var state = outOfRange ? DecisionOverlayState.Candidate : DecisionOverlayState.Active;
+        return new(
+            DecisionOverlaySource.TargetUptime,
             state,
-            $"Reengage gap closer {distanceToHitbox:0.#}y / min {config.MinimumGapCloserDistance:0}y",
-            reason,
-            51,
-            [],
-            [new(state, player.Position, target.Position, "dash to target")],
-            [new(state, target.Position, target.HitboxRadius, "Target")]);
+            outOfRange ? "Move into attack range" : "In attack range",
+            $"{surfaceDistance:0.0}/{range:0.0}y - {NormalizeRangeReason(reason)}",
+            22,
+            [new(DecisionOverlayShapeKind.Circle, state, target.Position, target.HitboxRadius + range, 0f, 0f, 0f, "attack range")],
+            outOfRange
+                ? [new DecisionOverlayLine(state, player.Position, target.Position, "")]
+                : [],
+            []);
     }
 
-    private void DrawConfigHud()
+    private DecisionOverlaySnapshot? BuildLeyLinesSnapshot(IBattleChara player)
+    {
+        if (!config.Enabled ||
+            !config.ManageMovement ||
+            !config.ManageLeylines ||
+            !IsBlackMage(player))
+        {
+            return null;
+        }
+
+        var inLeyLines = HasStatus(player, ActionUse.CircleOfPowerStatusId);
+        var hasLeyLines = HasStatus(player, ActionUse.LeyLinesStatusId);
+        var leyLinesObject = this.TryFindLeyLinesObject(player);
+        if (!inLeyLines && !hasLeyLines && leyLinesObject == null)
+        {
+            return null;
+        }
+
+        var btl = leylinesBetweenTheLines() == true;
+        var retrace = leylinesRetrace() == true;
+        var goal = leylinesGoal() == true;
+        var state = inLeyLines ? DecisionOverlayState.Active : DecisionOverlayState.Candidate;
+        var reason = BuildLeyLinesReason(btl, retrace, goal, leyLinesObject != null);
+        if (leyLinesObject == null)
+        {
+            return new(
+                DecisionOverlaySource.LeyLines,
+                state,
+                inLeyLines ? "In Ley Lines" : "Ley Lines active",
+                reason,
+                42,
+                [],
+                [],
+                []);
+        }
+
+        return new(
+            DecisionOverlaySource.LeyLines,
+            state,
+            inLeyLines ? "Stay in Ley Lines" : "Return to Ley Lines",
+            reason,
+            42,
+            [new(DecisionOverlayShapeKind.Circle, state, leyLinesObject.Position, 3f, 0f, 0f, 0f, "Ley Lines")],
+            inLeyLines
+                ? []
+                : [new DecisionOverlayLine(state, player.Position, leyLinesObject.Position, "")],
+            [new DecisionOverlayMarker(state, leyLinesObject.Position, 0.32f, "LL")]);
+    }
+
+    private IGameObject? TryFindLeyLinesObject(IBattleChara player)
+    {
+        foreach (var obj in services.ObjectTable)
+        {
+            if (obj.BaseId == ActionUse.BlackMageLeyLinesObjectDataId &&
+                obj.OwnerId == player.GameObjectId)
+            {
+                return obj;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsBlackMage(IBattleChara player)
+        => player.ClassJob.RowId is 7 or 25;
+
+    private static bool HasStatus(IBattleChara player, uint statusId)
+        => player.StatusList.Any(status => status.StatusId == statusId && status.RemainingTime > 0f);
+
+    private static string NormalizeRangeReason(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason) ||
+            reason.Equals("not checked", StringComparison.OrdinalIgnoreCase))
+        {
+            return "desired attack range";
+        }
+
+        return reason;
+    }
+
+    private static string BuildLeyLinesReason(bool betweenTheLines, bool retrace, bool goal, bool objectVisible)
+    {
+        var parts = new List<string>(3);
+        if (betweenTheLines)
+        {
+            parts.Add("Between the Lines");
+        }
+
+        if (retrace)
+        {
+            parts.Add("Retrace");
+        }
+
+        if (goal)
+        {
+            parts.Add("walk back");
+        }
+
+        if (!objectVisible)
+        {
+            parts.Add("zone not visible");
+        }
+
+        return parts.Count == 0 ? "Ley Lines handling enabled" : string.Join(", ", parts);
+    }
+
+    private void DrawMovementStatusHud(IReadOnlyList<DecisionOverlaySnapshot> snapshots)
     {
         var viewport = ImGui.GetMainViewport();
         ImGui.SetNextWindowPos(viewport.WorkPos + new Vector2(12f, 12f), ImGuiCond.FirstUseEver);
@@ -528,93 +659,68 @@ internal sealed class DecisionOverlayController(
                     ImGuiWindowFlags.NoNav |
                     ImGuiWindowFlags.AlwaysAutoResize |
                     ImGuiWindowFlags.NoCollapse;
-        if (!ImGui.Begin("XCAI Debug Overlay###XCAIConfigDebugOverlay", flags))
+        if (!ImGui.Begin("Movement Overlay###XCAIMovementStatusOverlay", flags))
         {
             ImGui.End();
             return;
         }
 
-        ImGui.TextUnformatted("XCAI debug overlay");
+        ImGui.TextUnformatted("Movement overlay");
         ImGui.Separator();
-        if (ImGui.BeginTable("##xcai_config_overlay_table", 3, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg))
+
+        if (!config.Enabled || !config.ManageMovement)
         {
-            ImGui.TableSetupColumn("Setting", ImGuiTableColumnFlags.WidthFixed, 210f);
-            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthFixed, 82f);
-            ImGui.TableSetupColumn("State", ImGuiTableColumnFlags.WidthFixed, 190f);
-
-            this.DrawConfigSection("General");
-            this.DrawConfigRow("Enabled", config.Enabled, config.Enabled);
-            this.DrawConfigRow("Print command messages in chat", config.EchoStatusToChat, config.EchoStatusToChat);
-            this.DrawConfigRow("Show movement overlay", config.ShowDecisionOverlay, config.ShowDecisionOverlay);
-            this.DrawConfigRow("Show overlay debug HUD", config.ShowDecisionOverlayHud, config.ShowDecisionOverlay && config.ShowDecisionOverlayHud, this.DisabledReason((config.ShowDecisionOverlay, "Show movement overlay"), (config.ShowDecisionOverlayHud, "Show overlay debug HUD")));
-
-            this.DrawConfigSection("Movement");
-            this.DrawConfigRow("Automate movement", config.ManageMovement, config.Enabled && config.ManageMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement")));
-            this.DrawConfigRow("Pause when I move", config.RespectManualMovement, config.Enabled && config.ManageMovement && config.RespectManualMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.RespectManualMovement, "Pause when I move")));
-            this.DrawConfigRow("Disable auto-face when moving", config.DisableAutoFaceTargetDuringManualMovement, config.Enabled && config.ManageMovement && config.DisableAutoFaceTargetDuringManualMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.DisableAutoFaceTargetDuringManualMovement, "Disable auto-face when moving")));
-            this.DrawConfigRow("Movement timing", config.CombatStyle, config.Enabled && config.ManageMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement")));
-            this.DrawConfigRow("Avoid danger zones", config.ManageForbiddenZoneDistance, config.Enabled && config.ManageMovement && config.ManageForbiddenZoneDistance, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageForbiddenZoneDistance, "Avoid danger zones")));
-            this.DrawConfigRow("Extra danger-zone space", config.PreferredForbiddenZoneDistance, config.Enabled && config.ManageMovement && config.ManageForbiddenZoneDistance, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageForbiddenZoneDistance, "Avoid danger zones")));
-            this.DrawConfigRow("Stand in defensive ground effects", config.ManageDefensiveGroundZonePositioning, config.Enabled && config.ManageMovement && config.ManageDefensiveGroundZonePositioning, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageDefensiveGroundZonePositioning, "Stand in defensive ground effects")));
-            this.DrawConfigRow("Stand behind Passage of Arms", config.ManagePassageOfArmsPositioning, config.Enabled && config.ManageMovement && config.ManagePassageOfArmsPositioning, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManagePassageOfArmsPositioning, "Stand behind Passage of Arms")));
-            this.DrawConfigRow("Avoid standing inside bosses", config.AvoidStandingInsideEnemies, config.Enabled && config.ManageMovement && config.AvoidStandingInsideEnemies, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.AvoidStandingInsideEnemies, "Avoid standing inside bosses")));
-            this.DrawConfigRow("Avoid arena edge", config.AvoidArenaEdge, config.Enabled && config.ManageMovement && config.AvoidArenaEdge, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.AvoidArenaEdge, "Avoid arena edge")));
-
-            this.DrawConfigSection("AoE & Trash");
-            this.DrawConfigRow("Move for better AoE hits", config.ManageAoePackPositioning, config.Enabled && config.ManageMovement && config.ManageAoePackPositioning, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageAoePackPositioning, "Move for better AoE hits")));
-            this.DrawConfigRow("Pick better AoE target", config.PickBetterAoeTarget, config.Enabled && config.PickBetterAoeTarget, this.DisabledReason((config.Enabled, "Enabled"), (config.PickBetterAoeTarget, "Pick better AoE target")));
-            this.DrawConfigRow("Keep a trash target selected", config.KeepTrashTargetSelected, config.Enabled && config.KeepTrashTargetSelected, this.DisabledReason((config.Enabled, "Enabled"), (config.KeepTrashTargetSelected, "Keep a trash target selected")));
-            this.DrawConfigRow("Healer coverage zone", config.ManageHealerCoverageZone, config.Enabled && config.ManageMovement && config.ManageHealerCoverageZone, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageHealerCoverageZone, "Healer coverage zone")));
-
-            this.DrawConfigSection("Positionals");
-            this.DrawConfigRow("Do positionals", config.ManagePositionals, config.Enabled && config.ManagePositionals, this.DisabledReason((config.Enabled, "Enabled"), (config.ManagePositionals, "Do positionals")));
-            this.DrawConfigRow("Use True North", config.ManageTrueNorth, config.Enabled && config.ManagePositionals && config.ManageTrueNorth, this.DisabledReason((config.Enabled, "Enabled"), (config.ManagePositionals, "Do positionals"), (config.ManageTrueNorth, "Use True North")));
-
-            this.DrawConfigSection("Job Specific");
-            this.DrawConfigRow("RDM melee combo movement", config.UseRedMageMeleeComboMovement, config.Enabled && config.ManageMovement && config.UseRedMageMeleeComboMovement, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseRedMageMeleeComboMovement, "Move for melee combo")));
-            this.DrawConfigRow("RDM combo state", redMageMeleeComboController.Status.Mode, config.Enabled && config.ManageMovement && config.UseRedMageMeleeComboMovement && redMageMeleeComboController.Status.Enabled, redMageMeleeComboController.Status.LastReason);
-            this.DrawConfigRow("Stay in Ley Lines", config.ManageLeylines, config.Enabled && config.ManageMovement && config.ManageLeylines, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageLeylines, "Stay in Ley Lines")));
-            this.DrawConfigRow("Use Between the Lines", config.UseBetweenTheLines, config.Enabled && config.ManageMovement && config.ManageLeylines && config.UseBetweenTheLines, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageLeylines, "Stay in Ley Lines"), (config.UseBetweenTheLines, "Use Between the Lines")));
-            this.DrawConfigRow("Use Retrace", config.UseRetrace, config.Enabled && config.ManageMovement && config.ManageLeylines && config.UseRetrace, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageLeylines, "Stay in Ley Lines"), (config.UseRetrace, "Use Retrace")));
-            this.DrawConfigRow("Walk back to Ley Lines", config.ReturnToLeylines, config.Enabled && config.ManageMovement && config.ManageLeylines && config.ReturnToLeylines, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageLeylines, "Stay in Ley Lines"), (config.ReturnToLeylines, "Walk back to Ley Lines")));
-
-            this.DrawConfigSection("Dashes");
-            this.DrawConfigRow("Gap closers", config.UseGapCloser, config.Enabled && config.ManageMovement && config.UseGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers")));
-            this.DrawConfigRow("Gap closer jobs", this.FormatJobAllowlist("PLD", config.GapCloserPLD, "WAR", config.GapCloserWAR, "DRK", config.GapCloserDRK, "GNB", config.GapCloserGNB, "MNK", config.GapCloserMNK, "DRG", config.GapCloserDRG, "BRD", config.GapCloserBRD, "NIN", config.GapCloserNIN, "SAM", config.GapCloserSAM, "DNC", config.GapCloserDNC, "RPR", config.GapCloserRPR, "VPR", config.GapCloserVPR, "WHM", config.GapCloserWHM, "BLM", config.GapCloserBLM, "RDM", config.GapCloserRDM, "SGE", config.GapCloserSGE, "PCT", config.GapCloserPCT), config.Enabled && config.ManageMovement && config.UseGapCloser && this.CurrentJobGapCloserEnabled(), this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers"), (this.CurrentJobGapCloserEnabled(), "Current job gap closer allowlist")));
-            this.DrawConfigRow("Phantom duty dashes", config.UsePhantomGapClosers, config.Enabled && config.ManageMovement && config.UseGapCloser && config.UsePhantomGapClosers && this.CurrentPhantomGapCloserEnabled(), this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers"), (config.UsePhantomGapClosers, "Phantom duty dashes"), (this.CurrentPhantomGapCloserEnabled(), "Current job or range archetype")));
-            this.DrawConfigRow("Minimum gap-closer distance", config.MinimumGapCloserDistance, config.Enabled && config.ManageMovement && config.UseGapCloser, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers")));
-            this.DrawConfigRow("Greedy dash style", config.CombatStyle == CombatStyle.Normal ? "off" : "on", config.Enabled && config.ManageMovement && config.UseGapCloser && config.CombatStyle != CombatStyle.Normal, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers"), (config.CombatStyle != CombatStyle.Normal, "Greedy movement timing")));
-            this.DrawConfigRow("Greedy unsafe safety dashes", config.CombatStyle == CombatStyle.Normal ? "off" : config.CombatStyle, config.Enabled && config.ManageMovement && config.UseGapCloser && config.CombatStyle != CombatStyle.Normal, this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.UseGapCloser, "Gap closers"), (config.CombatStyle != CombatStyle.Normal, "Greedy movement timing")));
-
-            ImGui.EndTable();
+            this.DrawMovementHudMuted(!config.Enabled ? "Disabled" : "Movement automation off");
+            ImGui.End();
+            return;
         }
+
+        var now = this.BuildMovementHudLines(snapshots, future: false)
+            .Take(MaxHudLinesPerSection)
+            .ToArray();
+        var next = this.BuildMovementHudLines(snapshots, future: true)
+            .Take(MaxHudLinesPerSection)
+            .ToArray();
+
+        this.DrawMovementHudSection("Now", now, "No movement decision active");
+        ImGui.Spacing();
+        this.DrawMovementHudSection("Next", next, "Waiting for enabled option trigger");
 
         ImGui.End();
     }
 
-    private void DrawConfigSection(string label)
+    private IEnumerable<MovementHudLine> BuildMovementHudLines(IReadOnlyList<DecisionOverlaySnapshot> snapshots, bool future)
     {
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
-        ImGui.TextColored(new Vector4(0.75f, 0.75f, 1f, 1f), label);
-        ImGui.TableSetColumnIndex(1);
-        ImGui.TextUnformatted(string.Empty);
-        ImGui.TableSetColumnIndex(2);
-        ImGui.TextUnformatted(string.Empty);
+        foreach (var snapshot in snapshots
+                     .Where(snapshot => IsMovementHudSource(snapshot.Source))
+                     .Where(snapshot => future ? snapshot.State == DecisionOverlayState.Future : snapshot.State is DecisionOverlayState.Active or DecisionOverlayState.Candidate or DecisionOverlayState.Rejected)
+                     .OrderBy(snapshot => MovementHudStatePriority(snapshot.State))
+                     .ThenBy(snapshot => snapshot.Priority))
+        {
+            yield return new(snapshot.State, snapshot.Source, FormatMovementHudText(snapshot));
+        }
     }
 
-    private void DrawConfigRow(string label, object? value, bool effective, string? reason = null)
+    private void DrawMovementHudSection(string label, IReadOnlyList<MovementHudLine> lines, string emptyText)
     {
-        var color = effective
-            ? new Vector4(0.92f, 0.92f, 0.92f, 1f)
-            : new Vector4(0.55f, 0.55f, 0.55f, 1f);
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
-        ImGui.TextColored(color, label);
-        ImGui.TableSetColumnIndex(1);
-        ImGui.TextColored(color, FormatConfigValue(value));
-        ImGui.TableSetColumnIndex(2);
-        ImGui.TextColored(color, effective ? "active" : reason ?? "inactive");
+        ImGui.TextColored(new Vector4(0.75f, 0.75f, 1f, 1f), label);
+        if (lines.Count == 0)
+        {
+            this.DrawMovementHudMuted(emptyText);
+            return;
+        }
+
+        foreach (var line in lines)
+        {
+            ImGui.TextColored(ColorVectorFor(line.State, line.Source), $"{MovementHudStateLabel(line.State),-7}");
+            ImGui.SameLine();
+            ImGui.TextUnformatted(line.Text);
+        }
+    }
+
+    private void DrawMovementHudMuted(string text)
+    {
+        ImGui.TextColored(new Vector4(0.58f, 0.58f, 0.58f, 1f), text);
     }
 
     private string? DisabledReason(params (bool Enabled, string Label)[] gates)
@@ -630,47 +736,31 @@ internal sealed class DecisionOverlayController(
         return null;
     }
 
-    private bool CurrentJobGapCloserEnabled()
+    private static IReadOnlyList<DecisionOverlayShape> BuildPositionalShapes(
+        Positional positional,
+        DecisionOverlayState state,
+        Vector3 targetPosition,
+        float targetRotation,
+        float radius)
     {
-        var classJobId = services.ObjectTable.LocalPlayer?.ClassJob.RowId ?? 0;
-        return config.IsGapCloserJobEnabled(classJobId);
-    }
+        const float PositionalHalfAngle = MathF.PI / 4f;
 
-    private bool CurrentPhantomGapCloserEnabled()
-    {
-        var classJobId = services.ObjectTable.LocalPlayer?.ClassJob.RowId ?? 0;
-        return config.UsePhantomGapClosers && config.IsPhantomGapCloserJobEnabled(classJobId);
-    }
-
-    private bool CurrentDashPolicyEnabled()
-    {
-        return this.CurrentJobGapCloserEnabled() || this.CurrentPhantomGapCloserEnabled();
-    }
-
-    private string FormatJobAllowlist(params object[] nameValuePairs)
-    {
-        var enabled = new List<string>();
-        for (var i = 0; i + 1 < nameValuePairs.Length; i += 2)
+        return positional switch
         {
-            if (nameValuePairs[i] is string name && nameValuePairs[i + 1] is bool value && value)
-            {
-                enabled.Add(name);
-            }
-        }
-
-        return enabled.Count == 0 ? "none" : string.Join(", ", enabled);
-    }
-
-    private static string FormatConfigValue(object? value)
-    {
-        return value switch
-        {
-            null => "<null>",
-            bool boolValue => boolValue ? "on" : "off",
-            float floatValue => floatValue.ToString("0.###", CultureInfo.InvariantCulture),
-            double doubleValue => doubleValue.ToString("0.###", CultureInfo.InvariantCulture),
-            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
-            _ => value.ToString() ?? string.Empty
+            Positional.Rear =>
+            [
+                new(DecisionOverlayShapeKind.Cone, state, targetPosition, radius, PositionalHalfAngle, radius, targetRotation + MathF.PI, null)
+            ],
+            Positional.Flank =>
+            [
+                new(DecisionOverlayShapeKind.Cone, state, targetPosition, radius, PositionalHalfAngle, radius, targetRotation + MathF.PI * 0.5f, null),
+                new(DecisionOverlayShapeKind.Cone, state, targetPosition, radius, PositionalHalfAngle, radius, targetRotation - MathF.PI * 0.5f, null)
+            ],
+            Positional.Front =>
+            [
+                new(DecisionOverlayShapeKind.Cone, state, targetPosition, radius, PositionalHalfAngle, radius, targetRotation, null)
+            ],
+            _ => []
         };
     }
 
@@ -752,7 +842,7 @@ internal sealed class DecisionOverlayController(
             : showingEscapeDash ? escapeGapCloserController.LastSafeEscapeDestination : gapCloserController.LastSafeLandingPosition;
         var lineTarget = landingPos ?? target.Position;
         var landingMarker = state == DecisionOverlayState.Candidate && landingPos.HasValue
-            ? new DecisionOverlayMarker(DecisionOverlayState.Future, landingPos.Value, 0.35f, "dash landing")
+            ? new DecisionOverlayMarker(DecisionOverlayState.Future, landingPos.Value, 0.35f, null)
             : null;
 
         snapshot = new(
@@ -762,10 +852,10 @@ internal sealed class DecisionOverlayController(
             readableReason,
             50,
             [],
-            [new(state, player.Position, lineTarget, label)],
+            [new(state, player.Position, lineTarget, "")],
             landingMarker != null
-                ? [new(state, target.Position, target.HitboxRadius, "target"), landingMarker]
-                : [new(state, target.Position, target.HitboxRadius, "target")]);
+                ? [new(state, target.Position, target.HitboxRadius, null), landingMarker]
+                : [new(state, target.Position, target.HitboxRadius, null)]);
 
     }
 
@@ -946,6 +1036,11 @@ internal sealed class DecisionOverlayController(
 
     private void DrawSnapshot(ImDrawListPtr drawList, DecisionOverlaySnapshot snapshot)
     {
+        if (!ShouldDrawWorldSnapshot(snapshot))
+        {
+            return;
+        }
+
         foreach (var shape in snapshot.Shapes)
         {
             this.DrawShape(drawList, shape, snapshot.Source, ColorFor(shape.State, snapshot.Source));
@@ -957,7 +1052,7 @@ internal sealed class DecisionOverlayController(
 
         foreach (var line in snapshot.Lines)
         {
-            this.DrawLine(drawList, line.From, line.To, ColorFor(line.State, snapshot.Source), thickness: snapshot.Source == DecisionOverlaySource.FinalMovement ? 3f : 2f, arrow: true);
+            this.DrawLine(drawList, line.From, line.To, ColorFor(line.State, snapshot.Source), thickness: LineThickness(snapshot.Source, line.State), arrow: true);
             if (ShouldDrawLineLabel(snapshot.Source, line))
             {
                 this.DrawLabel(drawList, Midpoint(line.From, line.To), line.Label!, ColorFor(line.State, snapshot.Source), pixelYOffset: 8f);
@@ -966,10 +1061,17 @@ internal sealed class DecisionOverlayController(
 
         foreach (var marker in snapshot.Markers)
         {
-            this.DrawCircle(drawList, marker.Position, Math.Max(marker.Radius, 0.25f), ColorFor(marker.State, snapshot.Source), thickness: 2f);
+            var markerRadius = MarkerRadius(snapshot.Source, marker);
+            var markerColor = ColorFor(marker.State, snapshot.Source);
+            if (ShouldFillMarker(marker.State, snapshot.Source))
+            {
+                this.DrawCircleFilled(drawList, marker.Position, markerRadius, MarkerFillColorFor(marker.State, snapshot.Source));
+            }
+
+            this.DrawCircle(drawList, marker.Position, markerRadius, markerColor, thickness: MarkerThickness(snapshot.Source, marker.State));
             if (marker.Label != null)
             {
-                this.DrawLabel(drawList, marker.Position, marker.Label, ColorFor(marker.State, snapshot.Source));
+                this.DrawLabel(drawList, marker.Position, marker.Label, markerColor);
             }
         }
     }
@@ -984,21 +1086,27 @@ internal sealed class DecisionOverlayController(
                 {
                     this.DrawCircleFilled(drawList, shape.Origin, shape.Radius, fillColor);
                 }
-                this.DrawCircle(drawList, shape.Origin, shape.Radius, color, shape.State == DecisionOverlayState.Suppressed ? 1.5f : 2.5f);
+                this.DrawCircle(drawList, shape.Origin, shape.Radius, color, ShapeThickness(source, shape.State));
                 break;
             case DecisionOverlayShapeKind.Cone:
                 if (ShouldFillShape(shape.State, source))
                 {
                     this.DrawConeFilled(drawList, shape.Origin, shape.Radius, shape.RotationRadians, shape.HalfWidth, fillColor);
                 }
-                this.DrawCone(drawList, shape.Origin, shape.Radius, shape.RotationRadians, shape.HalfWidth, color);
+                if (source == DecisionOverlaySource.Positionals)
+                {
+                    this.DrawPositionalArc(drawList, shape, color);
+                    break;
+                }
+
+                this.DrawCone(drawList, shape.Origin, shape.Radius, shape.RotationRadians, shape.HalfWidth, color, ShapeThickness(source, shape.State));
                 break;
             case DecisionOverlayShapeKind.Rectangle:
                 if (ShouldFillShape(shape.State, source))
                 {
                     this.DrawRectangleFilled(drawList, shape.Origin, shape.RotationRadians, shape.Length, shape.HalfWidth, fillColor);
                 }
-                this.DrawRectangle(drawList, shape.Origin, shape.RotationRadians, shape.Length, shape.HalfWidth, color);
+                this.DrawRectangle(drawList, shape.Origin, shape.RotationRadians, shape.Length, shape.HalfWidth, color, ShapeThickness(source, shape.State));
                 break;
         }
     }
@@ -1019,6 +1127,7 @@ internal sealed class DecisionOverlayController(
 
             if (previous.HasValue)
             {
+                drawList.AddLine(previous.Value, screen, ShadowColor(), thickness + 2.5f);
                 drawList.AddLine(previous.Value, screen, color, thickness);
             }
 
@@ -1046,12 +1155,12 @@ internal sealed class DecisionOverlayController(
         }
     }
 
-    private void DrawCone(ImDrawListPtr drawList, Vector3 center, float radius, float rotation, float halfWidth, uint color)
+    private void DrawCone(ImDrawListPtr drawList, Vector3 center, float radius, float rotation, float halfWidth, uint color, float thickness)
     {
         var left = center + Direction(rotation - halfWidth) * radius;
         var right = center + Direction(rotation + halfWidth) * radius;
-        this.DrawLine(drawList, center, left, color, 2f);
-        this.DrawLine(drawList, center, right, color, 2f);
+        this.DrawLine(drawList, center, left, color, thickness);
+        this.DrawLine(drawList, center, right, color, thickness);
 
         const int Segments = 24;
         Vector2? previous = null;
@@ -1067,11 +1176,66 @@ internal sealed class DecisionOverlayController(
 
             if (previous.HasValue)
             {
-                drawList.AddLine(previous.Value, screen, color, 2f);
+                drawList.AddLine(previous.Value, screen, ShadowColor(), thickness + 2.5f);
+                drawList.AddLine(previous.Value, screen, color, thickness);
             }
 
             previous = screen;
         }
+    }
+
+    private void DrawPositionalArc(ImDrawListPtr drawList, DecisionOverlayShape shape, uint color)
+    {
+        var thickness = shape.State switch
+        {
+            DecisionOverlayState.Active => 3.2f,
+            DecisionOverlayState.Candidate => 3.6f,
+            DecisionOverlayState.Future => 2.8f,
+            _ => 2.2f
+        };
+        var start = shape.RotationRadians - shape.HalfWidth;
+        var end = shape.RotationRadians + shape.HalfWidth;
+        var dashed = shape.State == DecisionOverlayState.Future;
+        this.DrawArc(drawList, shape.Origin, shape.Radius, start, end, color, thickness, dashed);
+        this.DrawRadialTick(drawList, shape.Origin, shape.Radius, start, color, thickness);
+        this.DrawRadialTick(drawList, shape.Origin, shape.Radius, end, color, thickness);
+        if (shape.State is DecisionOverlayState.Candidate or DecisionOverlayState.Active)
+        {
+            this.DrawRadialTick(drawList, shape.Origin, shape.Radius, shape.RotationRadians, color, thickness);
+        }
+    }
+
+    private void DrawArc(ImDrawListPtr drawList, Vector3 center, float radius, float start, float end, uint color, float thickness, bool dashed)
+    {
+        const int MinimumSegments = 8;
+        var segments = Math.Max(MinimumSegments, (int)(MathF.Abs(end - start) / MathF.Tau * 96f));
+        Vector2? previous = null;
+        for (var i = 0; i <= segments; ++i)
+        {
+            var angle = start + (end - start) * i / segments;
+            var point = center + Direction(angle) * radius;
+            if (!this.Project(point, out var screen))
+            {
+                previous = null;
+                continue;
+            }
+
+            if (previous.HasValue && (!dashed || i % 3 != 1))
+            {
+                drawList.AddLine(previous.Value, screen, ShadowColor(), thickness + 2.8f);
+                drawList.AddLine(previous.Value, screen, color, thickness);
+            }
+
+            previous = screen;
+        }
+    }
+
+    private void DrawRadialTick(ImDrawListPtr drawList, Vector3 center, float radius, float angle, uint color, float thickness)
+    {
+        var direction = Direction(angle);
+        var outer = center + direction * radius;
+        var inner = center + direction * MathF.Max(0.1f, radius - 0.75f);
+        this.DrawLine(drawList, inner, outer, color, thickness);
     }
 
     private void DrawConeFilled(ImDrawListPtr drawList, Vector3 center, float radius, float rotation, float halfWidth, uint color)
@@ -1100,7 +1264,7 @@ internal sealed class DecisionOverlayController(
         }
     }
 
-    private void DrawRectangle(ImDrawListPtr drawList, Vector3 origin, float rotation, float length, float halfWidth, uint color)
+    private void DrawRectangle(ImDrawListPtr drawList, Vector3 origin, float rotation, float length, float halfWidth, uint color, float thickness)
     {
         var forward = Direction(rotation);
         var side = new Vector3(forward.Z, 0f, -forward.X);
@@ -1108,10 +1272,10 @@ internal sealed class DecisionOverlayController(
         var p2 = origin - side * halfWidth;
         var p3 = origin + forward * length - side * halfWidth;
         var p4 = origin + forward * length + side * halfWidth;
-        this.DrawLine(drawList, p1, p2, color, 2f);
-        this.DrawLine(drawList, p2, p3, color, 2f);
-        this.DrawLine(drawList, p3, p4, color, 2f);
-        this.DrawLine(drawList, p4, p1, color, 2f);
+        this.DrawLine(drawList, p1, p2, color, thickness);
+        this.DrawLine(drawList, p2, p3, color, thickness);
+        this.DrawLine(drawList, p3, p4, color, thickness);
+        this.DrawLine(drawList, p4, p1, color, thickness);
     }
 
     private void DrawRectangleFilled(ImDrawListPtr drawList, Vector3 origin, float rotation, float length, float halfWidth, uint color)
@@ -1143,10 +1307,13 @@ internal sealed class DecisionOverlayController(
     {
         if (this.Project(from, out var fromScreen) && this.Project(to, out var toScreen))
         {
+            drawList.AddLine(fromScreen, toScreen, ShadowColor(), thickness + 2.5f);
             drawList.AddLine(fromScreen, toScreen, color, thickness);
             if (arrow)
             {
-                DrawArrowHead(drawList, fromScreen, toScreen, color, MathF.Max(8f, thickness * 4f));
+                var arrowSize = MathF.Max(8f, thickness * 4f);
+                DrawArrowHead(drawList, fromScreen, toScreen, ShadowColor(), arrowSize + 2f);
+                DrawArrowHead(drawList, fromScreen, toScreen, color, arrowSize);
             }
         }
     }
@@ -1170,32 +1337,45 @@ internal sealed class DecisionOverlayController(
         drawList.AddText(pos, color, label);
     }
 
-    private void DrawLabelGroup(ImDrawListPtr drawList, Vector3 anchor, IReadOnlyList<OverlayLabel> labels)
+    private void DrawBadgeGroup(ImDrawListPtr drawList, Vector3 anchor, IReadOnlyList<OverlayBadge> badges)
     {
-        if (labels.Count == 0 || !this.Project(anchor, out var anchorScreen))
+        if (badges.Count == 0 || !this.Project(anchor, out var anchorScreen))
         {
             return;
         }
 
-        var lines = labels
-            .OrderBy(label => LabelSortPriority(label.State))
-            .ThenBy(label => label.Source)
+        var visibleBadges = badges
+            .Where(badge => badge.State != DecisionOverlayState.Suppressed)
+            .OrderBy(badge => LabelSortPriority(badge.State))
+            .ThenBy(badge => badge.Source)
+            .Take(4)
             .ToArray();
-
-        var padding = new Vector2(6f, 4f);
-        var lineHeight = ImGui.GetTextLineHeight();
-        var width = 0f;
-        foreach (var label in lines)
+        if (visibleBadges.Length == 0)
         {
-            width = MathF.Max(width, ImGui.CalcTextSize(label.Text).X);
+            return;
         }
 
-        var size = new Vector2(width + padding.X * 2f, lineHeight * lines.Length + padding.Y * 2f);
+        var padding = new Vector2(5f, 3f);
+        var badgeHeight = ImGui.GetTextLineHeight() + padding.Y * 2f;
+        var gap = 4f;
+        var widths = new float[visibleBadges.Length];
+        var totalWidth = 0f;
+        for (var i = 0; i < visibleBadges.Length; ++i)
+        {
+            widths[i] = ImGui.CalcTextSize(visibleBadges[i].Text).X + padding.X * 2f;
+            totalWidth += widths[i];
+            if (i > 0)
+            {
+                totalWidth += gap;
+            }
+        }
+
+        var size = new Vector2(totalWidth, badgeHeight);
         var displaySize = ImGui.GetIO().DisplaySize;
-        var pos = anchorScreen + new Vector2(14f, -size.Y - 12f);
+        var pos = anchorScreen + new Vector2(-size.X * 0.5f, -size.Y - 18f);
         if (pos.X + size.X > displaySize.X - 8f)
         {
-            pos.X = anchorScreen.X - size.X - 14f;
+            pos.X = displaySize.X - size.X - 8f;
         }
 
         if (pos.Y < 8f)
@@ -1206,17 +1386,21 @@ internal sealed class DecisionOverlayController(
         pos.X = Math.Clamp(pos.X, 8f, MathF.Max(8f, displaySize.X - size.X - 8f));
         pos.Y = Math.Clamp(pos.Y, 8f, MathF.Max(8f, displaySize.Y - size.Y - 8f));
 
-        var bg = ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.62f));
+        var bg = ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.50f));
         var border = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.18f));
         drawList.AddLine(anchorScreen, new Vector2(pos.X, pos.Y + size.Y * 0.5f), border, 1f);
-        drawList.AddRectFilled(pos, pos + size, bg, 5f);
-        drawList.AddRect(pos, pos + size, border, 5f);
-
-        var textPos = pos + padding;
-        foreach (var label in lines)
+        var cursor = pos;
+        for (var i = 0; i < visibleBadges.Length; ++i)
         {
-            drawList.AddText(textPos, ColorFor(label.State, label.Source), label.Text);
-            textPos.Y += lineHeight;
+            var badge = visibleBadges[i];
+            var badgeSize = new Vector2(widths[i], badgeHeight);
+            var fill = BadgeFillColorFor(badge.State, badge.Source);
+            var textColor = BadgeTextColorFor(badge.State, badge.Source);
+            drawList.AddRectFilled(cursor, cursor + badgeSize, bg, 4f);
+            drawList.AddRectFilled(cursor, cursor + new Vector2(4f, badgeSize.Y), fill, 4f);
+            drawList.AddRect(cursor, cursor + badgeSize, border, 4f);
+            drawList.AddText(cursor + padding, textColor, badge.Text);
+            cursor.X += badgeSize.X + gap;
         }
     }
 
@@ -1261,18 +1445,192 @@ internal sealed class DecisionOverlayController(
         drawList.AddTriangleFilled(tip, basePoint + side * (size * 0.45f), basePoint - side * (size * 0.45f), color);
     }
 
-    private static string BuildSnapshotLabel(DecisionOverlaySnapshot snapshot)
+    private static Vector3? BadgeAnchor(DecisionOverlaySnapshot snapshot)
     {
-        if (snapshot.Source == DecisionOverlaySource.FinalMovement &&
-            snapshot.State == DecisionOverlayState.Active &&
-            !string.IsNullOrWhiteSpace(snapshot.Reason))
+        return snapshot.Markers.FirstOrDefault(marker => marker.State != DecisionOverlayState.Suppressed)?.Position ??
+               snapshot.Lines.FirstOrDefault(line => line.State != DecisionOverlayState.Suppressed)?.To ??
+               snapshot.Shapes.FirstOrDefault(shape => shape.State != DecisionOverlayState.Suppressed)?.Origin;
+    }
+
+    private static bool ShouldDrawWorldBadge(DecisionOverlaySnapshot snapshot)
+    {
+        return ShouldDrawWorldSnapshot(snapshot) &&
+               snapshot.Source is DecisionOverlaySource.AoE
+                   or DecisionOverlaySource.EscapeLanding
+                   or DecisionOverlaySource.FinalMovement
+                   or DecisionOverlaySource.GapCloser
+                   or DecisionOverlaySource.HealerCoverage
+                   or DecisionOverlaySource.LeyLines
+                   or DecisionOverlaySource.NextAction
+                   or DecisionOverlaySource.PassageOfArms
+                   or DecisionOverlaySource.PartyHealerRange
+                   or DecisionOverlaySource.Positionals
+                   or DecisionOverlaySource.RedMageMeleeCombo
+                   or DecisionOverlaySource.StarryMuse
+                   or DecisionOverlaySource.SurvivabilityZone
+                   or DecisionOverlaySource.TargetUptime
+                   or DecisionOverlaySource.BossCenterAvoidance;
+    }
+
+    private static bool ShouldDrawWorldSnapshot(DecisionOverlaySnapshot snapshot)
+    {
+        if (snapshot.State == DecisionOverlayState.Suppressed)
         {
-            return $"{snapshot.Label}: {snapshot.Reason}";
+            return false;
         }
 
-        return snapshot.State == DecisionOverlayState.Suppressed && snapshot.Reason != null
-            ? $"{snapshot.Label} ({snapshot.Reason})"
-            : snapshot.Label;
+        return snapshot.Source != DecisionOverlaySource.GapCloser ||
+               snapshot.State is DecisionOverlayState.Active or DecisionOverlayState.Candidate;
+    }
+
+    private static string BuildSnapshotBadge(DecisionOverlaySnapshot snapshot)
+    {
+        return snapshot.Source switch
+        {
+            DecisionOverlaySource.AoE when snapshot.State == DecisionOverlayState.Future => "AOE?",
+            DecisionOverlaySource.AoE => "AOE",
+            DecisionOverlaySource.EscapeLanding => "SAFE",
+            DecisionOverlaySource.FinalMovement => "SAFE",
+            DecisionOverlaySource.GapCloser => "DASH",
+            DecisionOverlaySource.HealerCoverage => "HEAL",
+            DecisionOverlaySource.PartyHealerRange => "HEAL",
+            DecisionOverlaySource.LeyLines => "LL",
+            DecisionOverlaySource.TargetUptime => "RANGE",
+            DecisionOverlaySource.BossCenterAvoidance => "CENTER",
+            DecisionOverlaySource.NextAction => BuildNextActionBadge(snapshot.Label),
+            DecisionOverlaySource.PassageOfArms => "WINGS",
+            DecisionOverlaySource.Positionals => snapshot.Label.StartsWith("Rear", StringComparison.OrdinalIgnoreCase)
+                ? "REAR"
+                : snapshot.Label.StartsWith("Flank", StringComparison.OrdinalIgnoreCase)
+                    ? "FLANK"
+                    : "FRONT",
+            DecisionOverlaySource.RedMageMeleeCombo => "RDM",
+            DecisionOverlaySource.StarryMuse => "STAR",
+            DecisionOverlaySource.SurvivabilityZone => "ZONE",
+            _ => snapshot.Source.ToString()
+        };
+    }
+
+    private static string BuildNextActionBadge(string label)
+    {
+        const string Prefix = "Next cast: ";
+        var actionName = label.StartsWith(Prefix, StringComparison.Ordinal)
+            ? label[Prefix.Length..]
+            : label;
+        const int MaxLength = 22;
+        return actionName.Length <= MaxLength
+            ? actionName
+            : string.Concat(actionName.AsSpan(0, MaxLength - 3), "...");
+    }
+
+    private static string FormatMovementHudText(DecisionOverlaySnapshot snapshot)
+    {
+        var sourceLabel = MovementHudSourceLabel(snapshot.Source);
+        var text = snapshot.Label.StartsWith(sourceLabel, StringComparison.OrdinalIgnoreCase)
+            ? snapshot.Label
+            : $"{sourceLabel}: {snapshot.Label}";
+        var reason = NormalizeMovementHudReason(snapshot.Reason);
+        if (reason != null &&
+            !text.Contains(reason, StringComparison.OrdinalIgnoreCase))
+        {
+            text = $"{text} - {reason}";
+        }
+
+        return TruncateMovementHudText(text);
+    }
+
+    private static string? NormalizeMovementHudReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return null;
+        }
+
+        var trimmed = reason.Trim();
+        if (trimmed.Equals("not evaluated", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("reset", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("disabled", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("not active in combat", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("movement management disabled", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return trimmed;
+    }
+
+    private static string TruncateMovementHudText(string text)
+    {
+        const int MaxLength = 78;
+        return text.Length <= MaxLength
+            ? text
+            : string.Concat(text.AsSpan(0, MaxLength - 3), "...");
+    }
+
+    private static string MovementHudSourceLabel(DecisionOverlaySource source)
+    {
+        return source switch
+        {
+            DecisionOverlaySource.AoE => "AoE",
+            DecisionOverlaySource.HealerCoverage => "Healer",
+            DecisionOverlaySource.PartyHealerRange => "Healer",
+            DecisionOverlaySource.GapCloser => "Dash",
+            DecisionOverlaySource.EscapeLanding => "Dash",
+            DecisionOverlaySource.FinalMovement => "Safety",
+            DecisionOverlaySource.LeyLines => "Ley Lines",
+            DecisionOverlaySource.TargetUptime => "Range",
+            DecisionOverlaySource.BossCenterAvoidance => "Center",
+            DecisionOverlaySource.NextAction => "Action",
+            DecisionOverlaySource.PassageOfArms => "Passage",
+            DecisionOverlaySource.Positionals => "Positional",
+            DecisionOverlaySource.RedMageMeleeCombo => "RDM",
+            DecisionOverlaySource.StarryMuse => "Starry",
+            DecisionOverlaySource.SurvivabilityZone => "Defensive",
+            _ => source.ToString()
+        };
+    }
+
+    private static string MovementHudStateLabel(DecisionOverlayState state)
+    {
+        return state switch
+        {
+            DecisionOverlayState.Active => "now",
+            DecisionOverlayState.Candidate => "move",
+            DecisionOverlayState.Future => "next",
+            DecisionOverlayState.Rejected => "blocked",
+            _ => "idle"
+        };
+    }
+
+    private static int MovementHudStatePriority(DecisionOverlayState state)
+    {
+        return state switch
+        {
+            DecisionOverlayState.Active => 0,
+            DecisionOverlayState.Candidate => 1,
+            DecisionOverlayState.Future => 2,
+            DecisionOverlayState.Rejected => 3,
+            _ => 4
+        };
+    }
+
+    private static bool IsMovementHudSource(DecisionOverlaySource source)
+    {
+        return source is DecisionOverlaySource.AoE
+            or DecisionOverlaySource.EscapeLanding
+            or DecisionOverlaySource.FinalMovement
+            or DecisionOverlaySource.GapCloser
+            or DecisionOverlaySource.HealerCoverage
+            or DecisionOverlaySource.LeyLines
+            or DecisionOverlaySource.NextAction
+            or DecisionOverlaySource.PassageOfArms
+            or DecisionOverlaySource.PartyHealerRange
+            or DecisionOverlaySource.Positionals
+            or DecisionOverlaySource.RedMageMeleeCombo
+            or DecisionOverlaySource.StarryMuse
+            or DecisionOverlaySource.SurvivabilityZone
+            or DecisionOverlaySource.TargetUptime
+            or DecisionOverlaySource.BossCenterAvoidance;
     }
 
     private static int LabelSortPriority(DecisionOverlayState state)
@@ -1290,17 +1648,14 @@ internal sealed class DecisionOverlayController(
 
     private static bool ShouldFillShape(DecisionOverlayState state, DecisionOverlaySource source)
     {
-        if (source is DecisionOverlaySource.NextAction or DecisionOverlaySource.HealerCoverage)
-        {
-            return false;
-        }
-
-        return state is DecisionOverlayState.Active or DecisionOverlayState.Candidate;
+        _ = state;
+        _ = source;
+        return false;
     }
 
     private static bool ShouldDrawShapeLabel(DecisionOverlaySource source, DecisionOverlayShape shape)
     {
-        if (shape.Label == null || shape.State == DecisionOverlayState.Suppressed)
+        if (string.IsNullOrWhiteSpace(shape.Label) || shape.State == DecisionOverlayState.Suppressed)
         {
             return false;
         }
@@ -1309,45 +1664,160 @@ internal sealed class DecisionOverlayController(
         {
             DecisionOverlaySource.Positionals => false,
             DecisionOverlaySource.TargetUptime => false,
+            DecisionOverlaySource.BossCenterAvoidance => false,
             DecisionOverlaySource.GapCloser => false,
             DecisionOverlaySource.NextAction => false,
+            DecisionOverlaySource.AoE => false,
+            DecisionOverlaySource.HealerCoverage => false,
+            DecisionOverlaySource.PartyHealerRange => false,
+            DecisionOverlaySource.LeyLines => false,
             _ => true
         };
     }
 
     private static bool ShouldDrawLineLabel(DecisionOverlaySource source, DecisionOverlayLine line)
     {
-        if (line.Label == null || line.State == DecisionOverlayState.Suppressed)
+        if (string.IsNullOrWhiteSpace(line.Label) || line.State == DecisionOverlayState.Suppressed)
         {
             return false;
         }
 
-        return source is DecisionOverlaySource.FinalMovement
-            or DecisionOverlaySource.EscapeLanding
-            or DecisionOverlaySource.AoE
-            or DecisionOverlaySource.HealerCoverage
-            or DecisionOverlaySource.PassageOfArms
-            or DecisionOverlaySource.SurvivabilityZone
-            or DecisionOverlaySource.RedMageMeleeCombo;
+        return false;
+    }
+
+    private static float LineThickness(DecisionOverlaySource source, DecisionOverlayState state)
+    {
+        if (source == DecisionOverlaySource.FinalMovement)
+        {
+            return 4.5f;
+        }
+
+        return state switch
+        {
+            DecisionOverlayState.Active => 3.4f,
+            DecisionOverlayState.Candidate => 3.6f,
+            DecisionOverlayState.Future => 2.1f,
+            DecisionOverlayState.Rejected => 2.2f,
+            _ => 1.5f
+        };
+    }
+
+    private static float ShapeThickness(DecisionOverlaySource source, DecisionOverlayState state)
+    {
+        if (source == DecisionOverlaySource.FinalMovement)
+        {
+            return 4f;
+        }
+
+        return state switch
+        {
+            DecisionOverlayState.Active => 3.2f,
+            DecisionOverlayState.Candidate => 3.4f,
+            DecisionOverlayState.Future => 1.9f,
+            DecisionOverlayState.Rejected => 2.4f,
+            DecisionOverlayState.Suppressed => 1.4f,
+            _ => 2f
+        };
+    }
+
+    private static float MarkerRadius(DecisionOverlaySource source, DecisionOverlayMarker marker)
+    {
+        var radius = Math.Max(marker.Radius, 0.25f);
+        return source switch
+        {
+            DecisionOverlaySource.FinalMovement => MathF.Max(radius, 0.55f),
+            DecisionOverlaySource.EscapeLanding => MathF.Max(radius, 0.5f),
+            DecisionOverlaySource.GapCloser when marker.State == DecisionOverlayState.Future => MathF.Max(radius, 0.45f),
+            DecisionOverlaySource.Positionals => MathF.Max(radius, 0.45f),
+            DecisionOverlaySource.PassageOfArms => MathF.Max(radius, 0.4f),
+            DecisionOverlaySource.SurvivabilityZone => MathF.Max(radius, 0.4f),
+            DecisionOverlaySource.StarryMuse => MathF.Max(radius, 0.4f),
+            DecisionOverlaySource.PartyHealerRange => MathF.Max(radius, 0.4f),
+            DecisionOverlaySource.LeyLines => MathF.Max(radius, 0.4f),
+            _ => radius
+        };
+    }
+
+    private static bool ShouldFillMarker(DecisionOverlayState state, DecisionOverlaySource source)
+    {
+        return source is (DecisionOverlaySource.FinalMovement
+                   or DecisionOverlaySource.EscapeLanding
+                   or DecisionOverlaySource.GapCloser
+                   or DecisionOverlaySource.PassageOfArms
+                   or DecisionOverlaySource.Positionals
+                   or DecisionOverlaySource.SurvivabilityZone
+                   or DecisionOverlaySource.StarryMuse
+                   or DecisionOverlaySource.PartyHealerRange
+                   or DecisionOverlaySource.LeyLines) &&
+               state is DecisionOverlayState.Active or DecisionOverlayState.Candidate or DecisionOverlayState.Future;
+    }
+
+    private static float MarkerThickness(DecisionOverlaySource source, DecisionOverlayState state)
+    {
+        if (source is DecisionOverlaySource.FinalMovement or DecisionOverlaySource.EscapeLanding)
+        {
+            return 3f;
+        }
+
+        return state == DecisionOverlayState.Suppressed ? 1.5f : 2.2f;
+    }
+
+    private static uint MarkerFillColorFor(DecisionOverlayState state, DecisionOverlaySource source)
+    {
+        var color = ColorVectorFor(state, source);
+        color.W = 0.18f;
+        return ImGui.GetColorU32(color);
+    }
+
+    private static uint BadgeFillColorFor(DecisionOverlayState state, DecisionOverlaySource source)
+    {
+        return ImGui.GetColorU32(ColorVectorFor(state, source));
+    }
+
+    private static uint BadgeTextColorFor(DecisionOverlayState state, DecisionOverlaySource source)
+    {
+        _ = state;
+        _ = source;
+        return ImGui.GetColorU32(new Vector4(0.96f, 0.96f, 0.96f, 1f));
+    }
+
+    private static uint ShadowColor()
+    {
+        return ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.68f));
     }
 
     private static uint ColorFor(DecisionOverlayState state, DecisionOverlaySource source)
     {
-        if (source == DecisionOverlaySource.FinalMovement && state == DecisionOverlayState.Active)
+        return ImGui.GetColorU32(ColorVectorFor(state, source));
+    }
+
+    private static Vector4 ColorVectorFor(DecisionOverlayState state, DecisionOverlaySource source)
+    {
+        if (source == DecisionOverlaySource.Positionals)
         {
-            return ImGui.GetColorU32(new Vector4(0.95f, 1f, 1f, 1f));
+            return state switch
+            {
+                DecisionOverlayState.Active => new Vector4(0.20f, 0.95f, 0.35f, 1f),
+                DecisionOverlayState.Candidate => new Vector4(1f, 0.18f, 0.12f, 1f),
+                DecisionOverlayState.Future => new Vector4(1f, 0.56f, 0.12f, 1f),
+                _ => new Vector4(0.58f, 0.58f, 0.58f, 0.82f)
+            };
         }
 
-        var color = state switch
+        if (source == DecisionOverlaySource.FinalMovement && state == DecisionOverlayState.Active)
         {
-            DecisionOverlayState.Active => ImGui.GetColorU32(new Vector4(0.25f, 0.82f, 0.38f, 1f)),
-            DecisionOverlayState.Candidate => ImGui.GetColorU32(SourceAccent(source, 1f)),
-            DecisionOverlayState.Future => ImGui.GetColorU32(new Vector4(1f, 0.86f, 0.25f, 1f)),
-            DecisionOverlayState.Rejected => ImGui.GetColorU32(new Vector4(1f, 0.2f, 0.2f, 1f)),
-            DecisionOverlayState.Suppressed => ImGui.GetColorU32(new Vector4(0.58f, 0.58f, 0.58f, 0.82f)),
-            _ => ImGui.GetColorU32(new Vector4(0.55f, 0.55f, 0.55f, 1f))
+            return new Vector4(0.95f, 1f, 1f, 1f);
+        }
+
+        return state switch
+        {
+            DecisionOverlayState.Active => new Vector4(0.25f, 0.82f, 0.38f, 1f),
+            DecisionOverlayState.Candidate => SourceAccent(source, 1f),
+            DecisionOverlayState.Future => new Vector4(1f, 0.86f, 0.25f, 1f),
+            DecisionOverlayState.Rejected => new Vector4(1f, 0.2f, 0.2f, 1f),
+            DecisionOverlayState.Suppressed => new Vector4(0.58f, 0.58f, 0.58f, 0.82f),
+            _ => new Vector4(0.55f, 0.55f, 0.55f, 1f)
         };
-        return color;
     }
 
     private static uint FillColorFor(DecisionOverlayState state, DecisionOverlaySource source)
@@ -1361,15 +1831,19 @@ internal sealed class DecisionOverlayController(
             DecisionOverlayState.Suppressed => 0.0f,
             _ => 0.08f
         };
-        var color = state switch
+        if (source == DecisionOverlaySource.Positionals)
         {
-            DecisionOverlayState.Active => new Vector4(0.25f, 0.82f, 0.38f, alpha),
-            DecisionOverlayState.Candidate => SourceAccent(source, alpha),
-            DecisionOverlayState.Future => new Vector4(1f, 0.86f, 0.25f, alpha),
-            DecisionOverlayState.Rejected => new Vector4(1f, 0.2f, 0.2f, alpha),
-            DecisionOverlayState.Suppressed => new Vector4(0.58f, 0.58f, 0.58f, alpha),
-            _ => new Vector4(0.55f, 0.55f, 0.55f, alpha)
-        };
+            alpha = state switch
+            {
+                DecisionOverlayState.Active => 0.10f,
+                DecisionOverlayState.Candidate => 0.12f,
+                DecisionOverlayState.Future => 0.07f,
+                _ => alpha
+            };
+        }
+
+        var color = ColorVectorFor(state, source);
+        color.W = alpha;
         return ImGui.GetColorU32(color);
     }
 
@@ -1379,12 +1853,15 @@ internal sealed class DecisionOverlayController(
         {
             DecisionOverlaySource.AoE => new Vector4(1f, 0.55f, 0.18f, alpha),
             DecisionOverlaySource.HealerCoverage => new Vector4(0.35f, 0.95f, 0.48f, alpha),
+            DecisionOverlaySource.PartyHealerRange => new Vector4(0.30f, 0.82f, 0.95f, alpha),
             DecisionOverlaySource.SurvivabilityZone => new Vector4(0.35f, 0.95f, 0.48f, alpha),
             DecisionOverlaySource.PassageOfArms => new Vector4(1f, 0.88f, 0.25f, alpha),
             DecisionOverlaySource.Positionals => new Vector4(0.88f, 0.45f, 1f, alpha),
             DecisionOverlaySource.GapCloser => new Vector4(0.25f, 0.95f, 0.95f, alpha),
             DecisionOverlaySource.EscapeLanding => new Vector4(0.25f, 0.95f, 0.95f, alpha),
             DecisionOverlaySource.TargetUptime => new Vector4(0.35f, 0.68f, 1f, alpha),
+            DecisionOverlaySource.LeyLines => new Vector4(0.72f, 0.52f, 1f, alpha),
+            DecisionOverlaySource.BossCenterAvoidance => new Vector4(1f, 0.30f, 0.18f, alpha),
             DecisionOverlaySource.NextAction => new Vector4(1f, 0.86f, 0.25f, alpha),
             DecisionOverlaySource.RedMageMeleeCombo => new Vector4(1f, 0.35f, 0.35f, alpha),
             DecisionOverlaySource.FinalMovement => new Vector4(0.95f, 1f, 1f, alpha),
