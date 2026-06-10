@@ -26,7 +26,7 @@ While you are in combat, the plugin automatically:
 - **Prefers Paladin Passage of Arms protection** by letting BossMod prefer the protected cone behind a party Paladin while the buff is active
 - **Avoids hugging the arena edge** as a weak preference when stronger movement goals do not matter
 - **Avoids pixel-perfect player stacks** by preferring a tiny safe offset from visible player party members, while staying out of intentional party clumps during mechanics
-- **Shows a decision overlay** with projected in-world markers for current movement decisions and candidates, plus an optional compact status HUD for what is happening now and what is likely next (off by default)
+- **Shows a decision overlay** with projected in-world markers for current movement decisions and candidates (off by default)
 - **Can write opt-in run-review logs** for offline analysis with BossMod Reborn replay files (off by default)
 - **Pauses automated movement** briefly when you move manually, including remapped movement or gamepad input reported by BossMod, and briefly lowers the same advisory movement preference if your input looks like a correction
 - **Manages True North** usage and disables RSR's Auto True North to prevent conflicts (optional, requires RSR)
@@ -61,7 +61,13 @@ Open the settings window with `/xcai config` or through the Dalamud plugin list.
 
 ### General tab
 
-**General** — Toggle the plugin, command chat messages, and reset settings.
+**General** — Toggle the plugin, party intent discovery, command chat messages, and reset settings.
+
+**Party intent discovery** is on by default and announces blinded party-context availability to the hosted party-intent server. The server endpoint is fixed by the plugin, and missing or unreachable servers are ignored without changing movement behavior.
+
+When another party member is also connected, cooperative social destack uses a direct peer data channel after server rendezvous. It shares only short-lived blinded destack bias, and only as a weak local scoring hint when social spacing is already active.
+
+When party intent is connected, a player who cannot reach BossMod-safe ground in time may send a short Rescue SOS. Healer clients recheck local safety, range, and Rescue availability before showing an advisory in the movement overlay. **Auto Rescue SOS** is off by default; when enabled by a healer, it may automatically interrupt the healer's current cast and use Rescue only after winning the SOS claim and rechecking local safety, visibility, range, animation lock, and Rescue availability.
 
 ### Movement tab
 
@@ -109,7 +115,7 @@ When the Gap closers option is enabled, safe-position escape dashes follow Movem
 
 ### Troubleshooting tab
 
-**Troubleshooting** — Show the movement overlay, toggle the compact status HUD, copy a debug snapshot, or enable run-review logging.
+**Troubleshooting** — Show the movement overlay, copy a debug snapshot, or enable run-review logging.
 
 Run-review logging is off by default. When enabled, the plugin writes one detailed JSONL file for the current duty, matching BossMod Reborn's whole-replay style so dungeon pulls can be compared in one analyzer run. If no duty is active, it falls back to a single combat log. Files are written to the plugin config directory under `XelsCombatAI/combat-logs`. Combat is sampled at the normal review cadence and downtime is sampled slower to keep resource cost bounded. Movement review data includes BossMod movement, goal-zone, and safety-raster diagnostics; it no longer emits the removed movement-intent planner candidate model.
 

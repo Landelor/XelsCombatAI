@@ -12,7 +12,7 @@ Codex instruction discovery for this repository should be treated as:
 - Later files in the root-to-working-directory chain override earlier guidance when they conflict.
 - Keep the combined instruction set small enough for Codex to load; the default project instruction cap is 32 KiB.
 
-Xel's Combat AI is a C# Dalamud plugin for Final Fantasy XIV. It manages a dedicated BossMod Reborn preset during combat, using BossMod IPC for movement/range/positioning strategies, Avarice shared data for positionals, and optional RotationSolver Reborn IPC for True North behavior.
+Xel's Combat AI is a C# Dalamud plugin for Final Fantasy XIV. It manages a dedicated BossMod Reborn preset during combat, using BossMod IPC for movement/range/positioning strategies, RotationSolver Reborn action prediction for primary positional intent, Avarice shared data as a positional fallback, and optional RotationSolver Reborn IPC for True North behavior.
 
 ## Agent Instruction Standards
 
@@ -75,6 +75,7 @@ A change is not aligned if it primarily:
 - `XelsCombatAI/Services/` - injected Dalamud service container/wrappers.
 - `XelsCombatAI/Models/` - small shared enums and simple types.
 - `XelsCombatAI/GlobalUsings.cs` - global imports for internal XCAI namespaces.
+- `XelsCombatAI/Integrations/PartyIntentClient.cs` - best-effort party-intent transport client for blinded availability, WebSocket room messages, and advisory Rescue SOS state. Its server-side protocol and relay live in the separate sibling repository `../XelsCombatAI.PartyIntent`.
 - `scripts/test-and-build.sh` - local validation helper. Its `--package` mode delegates to the reusable package script from `XelsDalamudRepo`.
 - `.github/workflows/validate.yml` - thin wrapper calling reusable validation from `XelsPlugins/XelsDalamudRepo`.
 - `.github/workflows/publish-testing.yml` - thin wrapper calling reusable manual testing publication from `XelsPlugins/XelsDalamudRepo`.
@@ -143,6 +144,14 @@ Do not guess Dalamud APIs. Before using a Dalamud service, method, event, or typ
 - If a checkout is missing or stale and the answer depends on current upstream behavior, run `external/fetch-sources.sh` before drawing conclusions.
 - If unsure, inspect the current API in the installed package or say that the API needs verification.
 
+## XelsDevBridge Runtime Inspection
+
+When live runtime state would reduce guessing for XCAI work, use the `xels-tweaks-devbridge` skill instead of duplicating local bridge routes, commands, environment variables, or endpoint assumptions here.
+
+Use DevBridge only for narrow, reviewable investigations such as validating combat state assumptions, target/object visibility, condition flags, addon/UI behavior, or small in-game experiments that cannot be proven from source alone. Preserve the product-purpose and combat-automation safety rules in this file: do not use DevBridge to bypass BossMod Reborn authority, automate broad gameplay, or make behavior more perfect or robotic than a human player.
+
+If DevBridge is unavailable, continue from static code when reasonable and state the limitation. If runtime state is essential, propose the smallest missing bridge capability.
+
 Follow these Dalamud plugin conventions:
 
 - The plugin entrypoint must implement `IDalamudPlugin`.
@@ -179,16 +188,45 @@ Follow these Dalamud plugin conventions:
 - Use skull icons only for combat-risk warnings. When a feature can put the player in danger during combat, keep the normal info icon focused on what the option does and put the risk warning on the skull icon tooltip.
 - Do not make config text patronizing or alarmist. Be plain about risk, limitations, and dependencies without blaming the user.
 
+## Decision Overlay Policy
+
+- When adding or updating a movement, targeting, positioning, party-utility, or rescue-related feature, update `UI/DecisionOverlayController.cs` and any relevant `Combat/*Overlay*` snapshot model so the movement overlay stays accurate for player-visible decisions.
+- If a feature affects combat decisions but should not appear in the overlay, state why in the final response. Valid reasons include no actionable player value, duplicate information already shown by another marker, or no stable in-world position to render.
+- Do not add overlay items just because internal state exists. Overlay entries should help a player understand a current, candidate, rejected, or near-future decision that could affect their movement, target choice, safety, or party utility.
+- Preserve the existing in-world marker, line, shape, badge, color-state, and label style. Style changes or new overlay visual primitives are allowed only after consulting the user.
+- Do not add or restore a separate overlay status HUD or text panel for decision summaries. Prefer concise in-world markers and badges.
+
 ## Integration Safety
 
 - Keep plugin behavior conservative. The code runs during combat and writes BossMod transient strategies, so avoid broad refactors or timing changes unless the task requires them.
 - Preserve IPC names, track names, option strings, preset payload module names, and BossMod preset name unless you have verified the upstream contract in `external/` or the relevant upstream project.
-- Required runtime dependencies are BossMod Reborn and Avarice. Do not remove or loosen those dependency checks unless the requested behavior explicitly requires it.
+- BossMod Reborn is the required runtime dependency. Avarice is an optional positional fallback while RSR/local positional parity is proven. Do not remove remaining Avarice fallback behavior unless parity evidence shows it is unused.
 - RotationSolver Reborn is optional and only required for `Manage True North`. Do not loosen this behavior unless explicitly requested.
 - Do not introduce network calls or background tasks in the combat update path.
 - Log recoverable integration failures with `IPluginLog.Verbose` where the plugin should keep running.
 - The plugin should fully hand control back out of combat by disabling movement, resetting range/role/positional strategy state, and clearing the active preset when appropriate.
 - Death/resurrection handling matters because BossMod can clear active presets on death.
+
+## Party Intent Protocol
+
+Party intent is an optional, best-effort coordination transport. The plugin owns local combat interpretation and UI; the sibling server repository `../XelsCombatAI.PartyIntent` owns the protocol schemas, rendezvous matching, WebSocket routing, relay-domain logic, deployment examples, and server compatibility tests.
+
+Current plugin implementation:
+
+- `Configuration.PartyIntentEnabled` and `Configuration.PartyIntentAutoRescueEnabled` belong in the General tab. Keep automatic Rescue disabled by default.
+- `PartyIntentClient` uses the static server URL `https://xcai.xel-serv.com`; do not add server URL, room code, or secret config unless explicitly requested.
+- Server failures, TLS failures, routing failures, and protocol errors must be non-fatal. Treat the server as unavailable and keep combat behavior local.
+- Raw character names, content IDs, actor IDs, world names, party IDs, territory IDs, and instance IDs must not be sent. Use HMAC-derived room, context, roster, party, and actor tokens.
+- Peer data is untrusted. Always revalidate visible local party actors, current BossMod safety, local range, local cooldowns, and local job state before using peer intent.
+
+Current v1 room messages:
+
+- `client.available` announces blinded availability over WebSocket.
+- `rescue.sos` is sent only when the local client believes it cannot reach BossMod-safe ground in time.
+- `rescue.claim` asks the server for a short first-claim-wins lease so multiple healers do not respond at once.
+- `rescue.claimed`, `rescue.release`, and `rescue.resolved` update local advisory state.
+
+Rescue SOS is advisory by default. Automatic Rescue is allowed only behind the healer opt-in `PartyIntentAutoRescueEnabled`, after this client wins the server claim lease and revalidates local BossMod safety, visible target mapping, range, casting state, animation lock, cooldown, and job state. BossMod remains authoritative for safety; the server never decides whether a mechanic is unsafe or whether Rescue should be used.
 
 ## Combat Automation Safety
 
@@ -238,7 +276,7 @@ Examples:
 
 Direct commits to `main` are allowed for solo/agent work when appropriate; use pull requests when review or staging helps.
 
-Testing builds are published only by manually running `.github/workflows/publish-testing.yml`. Testing releases use the mutable `testing` tag and may only update central feed testing fields:
+Testing builds are published only by manually running `.github/workflows/publish-testing.yml`. Testing releases use unique prerelease tags like `vX.Y.Z-testing.N` and may only update central feed testing fields:
 
 - `TestingAssemblyVersion`
 - `TestingDalamudApiLevel`
