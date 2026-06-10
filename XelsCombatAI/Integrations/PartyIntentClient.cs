@@ -1312,12 +1312,6 @@ internal sealed class PartyIntentClient : IDisposable
             return false;
         }
 
-        if (CombatEngagementDetector.IsEffectivelyInCombat(services))
-        {
-            reason = "test triggers are only available out of combat";
-            return false;
-        }
-
         if (services.PartyList.Length <= 0)
         {
             reason = "join a party before sending test traffic";
