@@ -32,5 +32,6 @@ jobs:
       release_type: ${{ inputs.release_type }}
       dotnet_version: 10.0.x
       internal_name: XelsCombatAI
+      extra_build_properties: -p:XcaiNetworkTestControls=true
     secrets:
       feed_token: ${{ secrets.XELS_DALAMUD_FEED_TOKEN }}
