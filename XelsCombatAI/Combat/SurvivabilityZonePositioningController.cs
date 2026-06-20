@@ -32,16 +32,28 @@ internal sealed record SurvivabilityZonePositioningStatus(
 internal sealed record SurvivabilityZoneOverlaySnapshot(
     Vector3 ZoneCenter,
     Vector3 CasterPosition,
+    Vector3 PreferredEntryPosition,
     float Radius,
     bool Injected,
     bool PlayerInZone,
+    bool PlayerSatisfiesPlan,
+    bool TargetRangeConstrained,
     string ZoneName,
     string CasterName);
+
+internal enum DefensiveGroundZoneMoveMode
+{
+    None,
+    DamagePressure,
+    PhysicalRangedComfort
+}
 
 internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneContributor, IDisposable
 {
     private const float PreferredEntryRadius = 1.5f;
     private const float ZoneEntryMargin = 1.5f;
+    private const float TargetRangeSlack = 0.2f;
+    private const float CircleTolerance = 0.01f;
     private const float PreferredEntryScore = GoalZoneScorePolicy.StrongPreference;
     private const float InsideScore = GoalZoneScorePolicy.NormalPreference;
     private const float LowHealthThreshold = 0.60f;
@@ -59,6 +71,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
 
     private readonly Configuration config;
     private readonly DalamudServices services;
+    private readonly JobRangeProvider jobRangeProvider;
     private readonly Func<bool> automatedMovementSuppressed;
     private readonly Func<BossModMechanicPressure> mechanicPressure;
     private FieldInfo? goalZonesField;
@@ -82,11 +95,13 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
     public SurvivabilityZonePositioningController(
         Configuration config,
         DalamudServices services,
+        JobRangeProvider jobRangeProvider,
         Func<bool> automatedMovementSuppressed,
         Func<BossModMechanicPressure> mechanicPressure)
     {
         this.config = config;
         this.services = services;
+        this.jobRangeProvider = jobRangeProvider;
         this.automatedMovementSuppressed = automatedMovementSuppressed;
         this.mechanicPressure = mechanicPressure;
         ActionEffect.ActionEffectEvent += this.OnActionEffect;
@@ -178,9 +193,18 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         }
 
         var pressure = this.mechanicPressure();
-        if (!this.ShouldMoveForDefensiveGroundZone(player, pressure))
+        var moveMode = this.ResolveDefensiveGroundZoneMoveMode(player, pressure);
+        if (moveMode == DefensiveGroundZoneMoveMode.None)
         {
             this.SetInactive("no defensive damage pressure");
+            return;
+        }
+
+        TargetRangeConstraint? targetRangeConstraint = null;
+        if (moveMode == DefensiveGroundZoneMoveMode.PhysicalRangedComfort &&
+            !this.TryCreatePhysicalRangedTargetRangeConstraint(player, out targetRangeConstraint, out var targetRangeReason))
+        {
+            this.SetInactive(targetRangeReason);
             return;
         }
 
@@ -189,10 +213,12 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             return;
         }
 
-        var plan = this.FindBestPlan(player);
+        var plan = this.FindBestPlan(player, targetRangeConstraint);
         if (plan == null)
         {
-            this.SetInactive("no active survivability zones");
+            this.SetInactive(targetRangeConstraint.HasValue
+                ? "no active survivability zones within target range"
+                : "no active survivability zones");
             return;
         }
 
@@ -209,13 +235,15 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         this.lastDistanceToCenter = plan.DistanceToCenter;
         this.lastPlan = plan;
 
-        if (plan.PlayerInZone)
+        if (plan.PlayerSatisfiesPlan)
         {
             this.lastGoalDelegate = null;
             this.lastInjected = false;
             this.lastOverlay = plan.CreateOverlay(player.Position.Y, injected: false);
             this.nextOverlayRefresh = DateTime.UtcNow.Add(OverlayRefreshInterval);
-            this.lastReason = $"holding inside {plan.ZoneName}";
+            this.lastReason = targetRangeConstraint.HasValue
+                ? $"holding inside {plan.ZoneName} within target range"
+                : $"holding inside {plan.ZoneName}";
             return;
         }
 
@@ -224,11 +252,18 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             this.lastGoalDelegate = plan.CreateGoalDelegate(this.resolvedWPosType!, this.wposXField!, this.wposZField!);
         }
 
-        contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.DefensiveMechanic, "Defensive zone", plan.PreferredEntryPosition, MechanicWhisperConfidence.Confident));
+        contributions.Add(new(
+            this.lastGoalDelegate,
+            ResolveGoalPriority(moveMode),
+            "Defensive zone",
+            plan.PreferredEntryPosition,
+            ResolveGoalConfidence(moveMode)));
         this.lastInjected = true;
         this.lastOverlay = plan.CreateOverlay(player.Position.Y, injected: true);
         this.nextOverlayRefresh = DateTime.UtcNow.Add(OverlayRefreshInterval);
-        this.lastReason = $"goal injected toward {plan.ZoneName}";
+        this.lastReason = moveMode == DefensiveGroundZoneMoveMode.PhysicalRangedComfort
+            ? $"physical ranged comfort toward {plan.ZoneName}"
+            : $"goal injected toward {plan.ZoneName}";
     }
 
     public void RefreshOverlay()
@@ -255,7 +290,17 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             return;
         }
 
-        if (!this.ShouldMoveForDefensiveGroundZone(player, this.mechanicPressure()))
+        var moveMode = this.ResolveDefensiveGroundZoneMoveMode(player, this.mechanicPressure());
+        if (moveMode == DefensiveGroundZoneMoveMode.None)
+        {
+            this.lastOverlay = null;
+            this.nextOverlayRefresh = DateTime.MinValue;
+            return;
+        }
+
+        TargetRangeConstraint? targetRangeConstraint = null;
+        if (moveMode == DefensiveGroundZoneMoveMode.PhysicalRangedComfort &&
+            !this.TryCreatePhysicalRangedTargetRangeConstraint(player, out targetRangeConstraint, out _))
         {
             this.lastOverlay = null;
             this.nextOverlayRefresh = DateTime.MinValue;
@@ -269,7 +314,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         }
 
         this.nextOverlayRefresh = now.Add(OverlayRefreshInterval);
-        var plan = this.FindBestPlan(player);
+        var plan = this.FindBestPlan(player, targetRangeConstraint);
         if (plan == null)
         {
             this.lastOverlay = null;
@@ -341,7 +386,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         return string.Join(", ", missing);
     }
 
-    private SurvivabilityZoneGoalPlan? FindBestPlan(IBattleChara player)
+    private SurvivabilityZoneGoalPlan? FindBestPlan(IBattleChara player, TargetRangeConstraint? targetRangeConstraint = null)
     {
         var playerPos = new Vector2(player.Position.X, player.Position.Z);
         var partyAllies = PartyAllyProvider.EnumerateVisiblePartyAllies(services, player).ToList();
@@ -361,7 +406,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             {
                 matchedDirectObject = true;
                 matchedPlacedObject = true;
-                var plan = this.CreateObjectPlan(zone, obj, partyAllies, playerPos, diagnostics, "object");
+                var plan = this.CreateObjectPlan(zone, obj, partyAllies, playerPos, diagnostics, "object", targetRangeConstraint);
                 best = SelectBest(best, plan);
             }
 
@@ -370,7 +415,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
                 continue;
             }
 
-            if (this.TryGetCachedZonePlan(zone, friendlyActors, friendlyIds, playerPos, diagnostics, out var cachedPlan))
+            if (this.TryGetCachedZonePlan(zone, friendlyActors, friendlyIds, playerPos, diagnostics, targetRangeConstraint, out var cachedPlan))
             {
                 best = SelectBest(best, cachedPlan);
                 continue;
@@ -388,7 +433,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
                     var source = status.SourceObject;
                     if (source != null && IsPlacedZoneSource(source))
                     {
-                        var plan = this.CreateObjectPlan(zone, source, partyAllies, playerPos, diagnostics, $"status {status.StatusId} source");
+                        var plan = this.CreateObjectPlan(zone, source, partyAllies, playerPos, diagnostics, $"status {status.StatusId} source", targetRangeConstraint);
                         best = SelectBest(best, plan);
                     }
                     else
@@ -410,7 +455,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
 
                 var actorPos = new Vector2(actor.Position.X, actor.Position.Z);
                 var distanceToCenter = Vector2.Distance(playerPos, actorPos);
-                var plan = new SurvivabilityZoneGoalPlan(
+                var plan = SurvivabilityZoneGoalPlan.TryCreate(
                     zone.Name,
                     actor.Name.TextValue,
                     actorPos,
@@ -419,7 +464,8 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
                     zone.Radius,
                     playerPos,
                     distanceToCenter,
-                    distanceToCenter <= zone.Radius);
+                    distanceToCenter <= zone.Radius,
+                    targetRangeConstraint);
 
                 diagnostics.AddAuraMatch(zone, actor, distanceToCenter);
                 best = SelectBest(best, plan);
@@ -466,13 +512,14 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         }
     }
 
-    private SurvivabilityZoneGoalPlan CreateObjectPlan(
+    private SurvivabilityZoneGoalPlan? CreateObjectPlan(
         ZoneDefinition zone,
         IGameObject obj,
         IReadOnlyCollection<IBattleChara> partyAllies,
         Vector2 playerPos,
         ZoneDiagnostics diagnostics,
-        string matchKind)
+        string matchKind,
+        TargetRangeConstraint? targetRangeConstraint)
     {
         var center = new Vector2(obj.Position.X, obj.Position.Z);
         var caster = FindCaster(partyAllies, obj.OwnerId);
@@ -481,7 +528,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         var casterName = caster?.Name.TextValue ?? "<unknown>";
         var distanceToCenter = Vector2.Distance(playerPos, center);
         diagnostics.AddObjectMatch(zone, obj, distanceToCenter, matchKind);
-        return new SurvivabilityZoneGoalPlan(
+        return SurvivabilityZoneGoalPlan.TryCreate(
             zone.Name,
             casterName,
             center,
@@ -490,7 +537,8 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             zone.Radius,
             playerPos,
             distanceToCenter,
-            distanceToCenter <= zone.Radius);
+            distanceToCenter <= zone.Radius,
+            targetRangeConstraint);
     }
 
     private IEnumerable<IGameObject> FindZoneObjects(uint dataId)
@@ -510,6 +558,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         IReadOnlySet<ulong> friendlyIds,
         Vector2 playerPos,
         ZoneDiagnostics diagnostics,
+        TargetRangeConstraint? targetRangeConstraint,
         [NotNullWhen(true)] out SurvivabilityZoneGoalPlan? plan)
     {
         plan = null;
@@ -535,7 +584,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             var casterName = caster?.Name.TextValue ?? cached.SourceName;
             var distanceToCenter = Vector2.Distance(playerPos, center);
             diagnostics.AddCachedMatch(cached, distanceToCenter);
-            var candidate = new SurvivabilityZoneGoalPlan(
+            var candidate = SurvivabilityZoneGoalPlan.TryCreate(
                 zone.Name,
                 casterName,
                 center,
@@ -544,7 +593,8 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
                 zone.Radius,
                 playerPos,
                 distanceToCenter,
-                distanceToCenter <= zone.Radius);
+                distanceToCenter <= zone.Radius,
+                targetRangeConstraint);
             best = SelectBest(best, candidate);
         }
 
@@ -585,8 +635,13 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         this.cachedPlacedZones.RemoveAll(entry => entry.ExpiresAtUtc <= now);
     }
 
-    private static SurvivabilityZoneGoalPlan SelectBest(SurvivabilityZoneGoalPlan? current, SurvivabilityZoneGoalPlan candidate)
+    private static SurvivabilityZoneGoalPlan? SelectBest(SurvivabilityZoneGoalPlan? current, SurvivabilityZoneGoalPlan? candidate)
     {
+        if (candidate == null)
+        {
+            return current;
+        }
+
         return current == null || candidate.DistanceToCenter < current.DistanceToCenter ? candidate : current;
     }
 
@@ -595,19 +650,85 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         return JobRoles.IsTankJob(classJobId);
     }
 
-    private bool ShouldMoveForDefensiveGroundZone(IBattleChara player, BossModMechanicPressure pressure)
+    private DefensiveGroundZoneMoveMode ResolveDefensiveGroundZoneMoveMode(IBattleChara player, BossModMechanicPressure pressure)
     {
-        return ShouldMoveForDefensiveGroundZone(player, pressure, this.IsPlayerTargetedByHostile(player));
+        return ResolveDefensiveGroundZoneMoveMode(player.ClassJob.RowId, pressure, this.IsPlayerTargetedByHostile(player), IsLowHealth(player));
     }
 
     internal static bool ShouldMoveForDefensiveGroundZone(IBattleChara player, BossModMechanicPressure pressure, bool playerHasPersonalThreat)
+    {
+        return ResolveDefensiveGroundZoneMoveMode(player.ClassJob.RowId, pressure, playerHasPersonalThreat, IsLowHealth(player)) != DefensiveGroundZoneMoveMode.None;
+    }
+
+    internal static bool ShouldMoveForDefensiveGroundZone(uint classJobId, BossModMechanicPressure pressure, bool playerHasPersonalThreat, bool playerLowHealth)
+    {
+        return ResolveDefensiveGroundZoneMoveMode(classJobId, pressure, playerHasPersonalThreat, playerLowHealth) != DefensiveGroundZoneMoveMode.None;
+    }
+
+    internal static DefensiveGroundZoneMoveMode ResolveDefensiveGroundZoneMoveMode(uint classJobId, BossModMechanicPressure pressure, bool playerHasPersonalThreat, bool playerLowHealth)
+    {
+        if (HasDefensiveDamagePressure(pressure, playerHasPersonalThreat, playerLowHealth))
+        {
+            return DefensiveGroundZoneMoveMode.DamagePressure;
+        }
+
+        return JobRoles.GetRangeRole(classJobId) == RangeRole.PhysicalRanged
+            ? DefensiveGroundZoneMoveMode.PhysicalRangedComfort
+            : DefensiveGroundZoneMoveMode.None;
+    }
+
+    private static bool HasDefensiveDamagePressure(BossModMechanicPressure pressure, bool playerHasPersonalThreat, bool playerLowHealth)
     {
         var personalHeavyDamageSoon = pressure.TankbusterSoon ||
                                       (pressure.NextDamageType == BossModPredictedDamageType.Tankbuster && pressure.DamageSoon);
         return pressure.RaidwideSoon ||
                pressure.SharedDamageSoon ||
                (personalHeavyDamageSoon && playerHasPersonalThreat) ||
-               IsLowHealth(player);
+               playerLowHealth;
+    }
+
+    private static BossModGoalPriority ResolveGoalPriority(DefensiveGroundZoneMoveMode moveMode)
+    {
+        return moveMode == DefensiveGroundZoneMoveMode.PhysicalRangedComfort
+            ? BossModGoalPriority.PartyUtility
+            : BossModGoalPriority.DefensiveMechanic;
+    }
+
+    private static MechanicWhisperConfidence ResolveGoalConfidence(DefensiveGroundZoneMoveMode moveMode)
+    {
+        return moveMode == DefensiveGroundZoneMoveMode.PhysicalRangedComfort
+            ? MechanicWhisperConfidence.Routine
+            : MechanicWhisperConfidence.Confident;
+    }
+
+    private bool TryCreatePhysicalRangedTargetRangeConstraint(
+        IBattleChara player,
+        out TargetRangeConstraint? constraint,
+        out string reason)
+    {
+        constraint = null;
+        if (services.TargetManager.Target is not IBattleNpc target ||
+            target.BattleNpcKind != BattleNpcSubKind.Combatant ||
+            target.GameObjectId == 0 ||
+            target.IsDead ||
+            target.CurrentHp == 0 ||
+            !target.StatusFlags.HasFlag(StatusFlags.Hostile))
+        {
+            reason = "no attackable target for physical ranged defensive zone";
+            return false;
+        }
+
+        var range = jobRangeProvider.EngagementRange;
+        if (range <= 0f || range >= Configuration.InternalDisabledUptimeRange - 0.5f)
+        {
+            reason = "target range unavailable for physical ranged defensive zone";
+            return false;
+        }
+
+        var radius = target.HitboxRadius + player.HitboxRadius + range + TargetRangeSlack;
+        constraint = new TargetRangeConstraint(new Vector2(target.Position.X, target.Position.Z), radius);
+        reason = string.Empty;
+        return true;
     }
 
     private bool IsPlayerTargetedByHostile(IBattleChara player)
@@ -665,6 +786,14 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         string SourceName,
         DateTime CreatedAtUtc,
         DateTime ExpiresAtUtc);
+
+    private readonly record struct TargetRangeConstraint(Vector2 Center, float Radius)
+    {
+        public bool Contains(Vector2 point)
+        {
+            return Vector2.DistanceSquared(point, this.Center) <= this.Radius * this.Radius;
+        }
+    }
 
     private static class TimeSpanDefaults
     {
@@ -799,10 +928,45 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         private readonly Vector2 center;
         private readonly Vector2 casterPosition;
         private readonly Vector2 preferredEntryPosition;
+        private readonly TargetRangeConstraint? targetRangeConstraint;
         private readonly float radius;
         private readonly bool playerInZone;
+        private readonly bool playerSatisfiesPlan;
 
-        public SurvivabilityZoneGoalPlan(
+        private SurvivabilityZoneGoalPlan(
+            string zoneName,
+            string casterName,
+            Vector2 center,
+            Vector2 casterPosition,
+            ulong casterId,
+            float radius,
+            float distanceToCenter,
+            bool playerInZone,
+            bool playerSatisfiesPlan,
+            Vector2 preferredEntryPosition,
+            TargetRangeConstraint? targetRangeConstraint)
+        {
+            this.zoneName = zoneName;
+            this.casterName = casterName;
+            this.center = center;
+            this.casterPosition = casterPosition;
+            this.casterId = casterId;
+            this.radius = radius;
+            this.preferredEntryPosition = preferredEntryPosition;
+            this.targetRangeConstraint = targetRangeConstraint;
+            this.DistanceToCenter = distanceToCenter;
+            this.playerInZone = playerInZone;
+            this.playerSatisfiesPlan = playerSatisfiesPlan;
+        }
+
+        public string ZoneName => this.zoneName;
+        public string CasterName => this.casterName;
+        public float DistanceToCenter { get; }
+        public bool PlayerInZone => this.playerInZone;
+        public bool PlayerSatisfiesPlan => this.playerSatisfiesPlan;
+        public Vector2 PreferredEntryPosition => this.preferredEntryPosition;
+
+        public static SurvivabilityZoneGoalPlan? TryCreate(
             string zoneName,
             string casterName,
             Vector2 center,
@@ -811,24 +975,29 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             float radius,
             Vector2 playerPosition,
             float distanceToCenter,
-            bool playerInZone)
+            bool playerInZone,
+            TargetRangeConstraint? targetRangeConstraint)
         {
-            this.zoneName = zoneName;
-            this.casterName = casterName;
-            this.center = center;
-            this.casterPosition = casterPosition;
-            this.casterId = casterId;
-            this.radius = radius;
-            this.preferredEntryPosition = FindPreferredEntryPosition(center, playerPosition, radius, distanceToCenter, playerInZone);
-            this.DistanceToCenter = distanceToCenter;
-            this.playerInZone = playerInZone;
-        }
+            if (!TryFindPreferredEntryPosition(center, playerPosition, radius, distanceToCenter, playerInZone, targetRangeConstraint, out var preferredEntryPosition))
+            {
+                return null;
+            }
 
-        public string ZoneName => this.zoneName;
-        public string CasterName => this.casterName;
-        public float DistanceToCenter { get; }
-        public bool PlayerInZone => this.playerInZone;
-        public Vector2 PreferredEntryPosition => this.preferredEntryPosition;
+            var playerSatisfiesPlan = playerInZone &&
+                                      (!targetRangeConstraint.HasValue || targetRangeConstraint.Value.Contains(playerPosition));
+            return new(
+                zoneName,
+                casterName,
+                center,
+                casterPosition,
+                casterId,
+                radius,
+                distanceToCenter,
+                playerInZone,
+                playerSatisfiesPlan,
+                preferredEntryPosition,
+                targetRangeConstraint);
+        }
 
         public Vector3 MovementDestination(float y)
         {
@@ -839,9 +1008,10 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         {
             return this.casterId == other.casterId &&
                    string.Equals(this.zoneName, other.zoneName, StringComparison.Ordinal) &&
-                   this.playerInZone == other.playerInZone &&
+                   this.playerSatisfiesPlan == other.playerSatisfiesPlan &&
                    Vector2.DistanceSquared(this.center, other.center) <= 0.25f &&
-                   Vector2.DistanceSquared(this.preferredEntryPosition, other.preferredEntryPosition) <= 0.25f;
+                   Vector2.DistanceSquared(this.preferredEntryPosition, other.preferredEntryPosition) <= 0.25f &&
+                   SameTargetRangeConstraint(this.targetRangeConstraint, other.targetRangeConstraint);
         }
 
         public Delegate CreateGoalDelegate(Type wposType, FieldInfo xField, FieldInfo zField)
@@ -861,9 +1031,12 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             return new(
                 new Vector3(this.center.X, y, this.center.Y),
                 new Vector3(this.casterPosition.X, y, this.casterPosition.Y),
+                new Vector3(this.preferredEntryPosition.X, y, this.preferredEntryPosition.Y),
                 this.radius,
                 injected,
                 this.playerInZone,
+                this.playerSatisfiesPlan,
+                this.targetRangeConstraint.HasValue,
                 this.zoneName,
                 this.casterName);
         }
@@ -872,12 +1045,13 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
         {
             var point = new Vector2(x, z);
             var distance = Vector2.Distance(point, this.center);
-            if (distance > this.radius)
+            if (distance > this.radius ||
+                this.targetRangeConstraint.HasValue && !this.targetRangeConstraint.Value.Contains(point))
             {
                 return 0f;
             }
 
-            if (this.playerInZone)
+            if (this.playerSatisfiesPlan)
             {
                 return InsideScore;
             }
@@ -889,6 +1063,50 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
             }
 
             return GoalZoneScorePolicy.WeakPreference;
+        }
+
+        private static bool SameTargetRangeConstraint(TargetRangeConstraint? left, TargetRangeConstraint? right)
+        {
+            if (!left.HasValue || !right.HasValue)
+            {
+                return left.HasValue == right.HasValue;
+            }
+
+            return MathF.Abs(left.Value.Radius - right.Value.Radius) <= 0.1f &&
+                   Vector2.DistanceSquared(left.Value.Center, right.Value.Center) <= 0.25f;
+        }
+
+        private static bool TryFindPreferredEntryPosition(
+            Vector2 center,
+            Vector2 playerPosition,
+            float radius,
+            float distanceToCenter,
+            bool playerInZone,
+            TargetRangeConstraint? targetRangeConstraint,
+            out Vector2 preferredEntryPosition)
+        {
+            if (!targetRangeConstraint.HasValue)
+            {
+                preferredEntryPosition = FindPreferredEntryPosition(center, playerPosition, radius, distanceToCenter, playerInZone);
+                return true;
+            }
+
+            var constraint = targetRangeConstraint.Value;
+            if (playerInZone && constraint.Contains(playerPosition))
+            {
+                preferredEntryPosition = playerPosition;
+                return true;
+            }
+
+            var innerRadius = MathF.Max(0f, radius - ZoneEntryMargin);
+            if (TryFindClosestPointInCircleIntersection(playerPosition, center, innerRadius, constraint.Center, constraint.Radius, out preferredEntryPosition) ||
+                TryFindClosestPointInCircleIntersection(playerPosition, center, radius, constraint.Center, constraint.Radius, out preferredEntryPosition))
+            {
+                return true;
+            }
+
+            preferredEntryPosition = default;
+            return false;
         }
 
         private static Vector2 FindPreferredEntryPosition(Vector2 center, Vector2 playerPosition, float radius, float distanceToCenter, bool playerInZone)
@@ -905,6 +1123,96 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
 
             var directionFromCenter = Vector2.Normalize(playerPosition - center);
             return center + directionFromCenter * MathF.Max(0f, radius - ZoneEntryMargin);
+        }
+
+        private static bool TryFindClosestPointInCircleIntersection(
+            Vector2 origin,
+            Vector2 centerA,
+            float radiusA,
+            Vector2 centerB,
+            float radiusB,
+            out Vector2 best)
+        {
+            best = default;
+            var bestCandidate = default(Vector2);
+            var bestDistanceSquared = float.PositiveInfinity;
+            Consider(origin);
+            Consider(ProjectToCircle(origin, centerA, radiusA));
+            Consider(ProjectToCircle(origin, centerB, radiusB));
+            Consider(centerA);
+            Consider(centerB);
+
+            var delta = centerB - centerA;
+            var distanceSquared = delta.LengthSquared();
+            if (distanceSquared > 0.0001f)
+            {
+                var distance = MathF.Sqrt(distanceSquared);
+                if (distance <= radiusA + radiusB + CircleTolerance &&
+                    distance >= MathF.Abs(radiusA - radiusB) - CircleTolerance)
+                {
+                    var fromAToMid = ((radiusA * radiusA) - (radiusB * radiusB) + distanceSquared) / (2f * distance);
+                    var heightSquared = (radiusA * radiusA) - (fromAToMid * fromAToMid);
+                    if (heightSquared >= -CircleTolerance)
+                    {
+                        var height = MathF.Sqrt(MathF.Max(0f, heightSquared));
+                        var unit = delta / distance;
+                        var midpoint = centerA + (unit * fromAToMid);
+                        var perpendicular = new Vector2(-unit.Y, unit.X);
+                        Consider(midpoint + (perpendicular * height));
+                        if (height > CircleTolerance)
+                        {
+                            Consider(midpoint - (perpendicular * height));
+                        }
+                    }
+                }
+            }
+
+            best = bestCandidate;
+            return !float.IsPositiveInfinity(bestDistanceSquared);
+
+            void Consider(Vector2 candidate)
+            {
+                if (!IsInsideCircle(candidate, centerA, radiusA) ||
+                    !IsInsideCircle(candidate, centerB, radiusB))
+                {
+                    return;
+                }
+
+                var distanceToOriginSquared = Vector2.DistanceSquared(origin, candidate);
+                if (distanceToOriginSquared < bestDistanceSquared)
+                {
+                    bestCandidate = candidate;
+                    bestDistanceSquared = distanceToOriginSquared;
+                }
+            }
+        }
+
+        private static Vector2 ProjectToCircle(Vector2 point, Vector2 center, float radius)
+        {
+            if (radius <= 0f)
+            {
+                return center;
+            }
+
+            var offset = point - center;
+            var distanceSquared = offset.LengthSquared();
+            if (distanceSquared <= radius * radius)
+            {
+                return point;
+            }
+
+            if (distanceSquared <= 0.0001f)
+            {
+                return center + new Vector2(radius, 0f);
+            }
+
+            return center + (offset * (radius / MathF.Sqrt(distanceSquared)));
+        }
+
+        private static bool IsInsideCircle(Vector2 point, Vector2 center, float radius)
+        {
+            var effectiveRadius = radius + CircleTolerance;
+            return Vector2.DistanceSquared(point, center) <= effectiveRadius * effectiveRadius;
         }
     }
 }

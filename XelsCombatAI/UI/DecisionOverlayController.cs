@@ -15,6 +15,7 @@ internal sealed class DecisionOverlayController(
     HealerAoePositioningController healerAoePositioningController,
     PartyHealerRangePositioningController partyHealerRangePositioningController,
     SurvivabilityZonePositioningController survivabilityZonePositioningController,
+    BlackMageLeyLinesPositioningController blackMageLeyLinesPositioningController,
     PictomancerStarryMusePositioningController pictomancerStarryMusePositioningController,
     BossCenterAvoidanceController bossCenterAvoidanceController,
     TankBehaviorController tankBehaviorController,
@@ -28,9 +29,6 @@ internal sealed class DecisionOverlayController(
     Func<float> targetUptimeRange,
     Func<string> targetUptimeRangeSource,
     Func<string> targetUptimeRangeReason,
-    Func<bool?> leylinesBetweenTheLines,
-    Func<bool?> leylinesRetrace,
-    Func<bool?> leylinesGoal,
     RotationSolverActionReflection rotationSolverActions)
 {
 
@@ -612,6 +610,7 @@ internal sealed class DecisionOverlayController(
     private static bool IsHealerCoverageBlocked(string reason)
     {
         return reason.Contains("held during slidecast", StringComparison.OrdinalIgnoreCase) ||
+               reason.Contains("needs intent", StringComparison.OrdinalIgnoreCase) ||
                reason.Contains("too far", StringComparison.OrdinalIgnoreCase) ||
                reason.Contains("too late", StringComparison.OrdinalIgnoreCase) ||
                reason.Contains("forced mechanic movement", StringComparison.OrdinalIgnoreCase);
@@ -626,7 +625,8 @@ internal sealed class DecisionOverlayController(
 
         if (state == DecisionOverlayState.Rejected)
         {
-            return reason.Contains("held during slidecast", StringComparison.OrdinalIgnoreCase)
+            return reason.Contains("held during slidecast", StringComparison.OrdinalIgnoreCase) ||
+                   reason.Contains("needs intent", StringComparison.OrdinalIgnoreCase)
                 ? "Healer coverage held"
                 : "Healer coverage blocked";
         }
@@ -900,26 +900,37 @@ internal sealed class DecisionOverlayController(
         {
             var state = !config.Enabled || !config.ManageMovement || !config.ManageDefensiveGroundZonePositioning
                 ? DecisionOverlayState.Suppressed
-                : survZone.Injected
-                ? survZone.PlayerInZone ? DecisionOverlayState.Active : DecisionOverlayState.Candidate
-                : DecisionOverlayState.Future;
+                : survZone.PlayerSatisfiesPlan
+                    ? DecisionOverlayState.Active
+                    : survZone.Injected
+                        ? DecisionOverlayState.Candidate
+                        : DecisionOverlayState.Future;
             var reason = state == DecisionOverlayState.Suppressed
                 ? this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageDefensiveGroundZonePositioning, "Stand in defensive ground effects"))
                 : null;
-            var label = survZone.PlayerInZone ? $"{survZone.ZoneName}: inside" : survZone.ZoneName;
+            var label = survZone.PlayerSatisfiesPlan
+                ? $"{survZone.ZoneName}: inside"
+                : survZone.PlayerInZone && survZone.TargetRangeConstrained
+                    ? $"{survZone.ZoneName}: target range"
+                    : survZone.ZoneName;
+            var movementLabel = survZone.PlayerSatisfiesPlan
+                ? $"Stay in safe ground: {label}"
+                : survZone.PlayerInZone
+                    ? $"Adjust within safe ground: {label}"
+                    : $"Move into safe ground: {label}";
             yield return new(
                 DecisionOverlaySource.SurvivabilityZone,
                 state,
-                survZone.PlayerInZone ? $"Stay in safe ground: {label}" : $"Move into safe ground: {label}",
+                movementLabel,
                 reason ?? survZone.CasterName,
                 44,
                 [new(DecisionOverlayShapeKind.Circle, state, survZone.ZoneCenter, survZone.Radius, 0f, 0f, 0f, "defensive ground")],
-                survZone.PlayerInZone
+                survZone.PlayerSatisfiesPlan
                     ? []
-                    : [new DecisionOverlayLine(state, player.Position, survZone.ZoneCenter, "")],
+                    : [new DecisionOverlayLine(state, player.Position, survZone.PreferredEntryPosition, "")],
                 [
                     new DecisionOverlayMarker(DecisionOverlayState.Active, survZone.CasterPosition, 0.35f, survZone.ZoneName[..3]),
-                    new DecisionOverlayMarker(state, survZone.ZoneCenter, 0.25f, null)
+                    new DecisionOverlayMarker(state, survZone.PreferredEntryPosition, 0.25f, null)
                 ]);
         }
 
@@ -1177,72 +1188,36 @@ internal sealed class DecisionOverlayController(
 
     private DecisionOverlaySnapshot? BuildLeyLinesSnapshot(IBattleChara player)
     {
-        if (!config.Enabled ||
-            !config.ManageMovement ||
-            !config.ManageLeylines ||
-            !IsBlackMage(player))
+        blackMageLeyLinesPositioningController.RefreshOverlay();
+        var leyLines = blackMageLeyLinesPositioningController.Overlay;
+        if (leyLines == null)
         {
             return null;
         }
 
-        var inLeyLines = HasStatus(player, ActionUse.CircleOfPowerStatusId);
-        var hasLeyLines = HasStatus(player, ActionUse.LeyLinesStatusId);
-        var leyLinesObject = this.TryFindLeyLinesObject(player);
-        if (!inLeyLines && !hasLeyLines && leyLinesObject == null)
-        {
-            return null;
-        }
-
-        var btl = leylinesBetweenTheLines() == true;
-        var retrace = leylinesRetrace() == true;
-        var goal = leylinesGoal() == true;
-        var state = inLeyLines ? DecisionOverlayState.Active : DecisionOverlayState.Candidate;
-        var reason = BuildLeyLinesReason(btl, retrace, goal, leyLinesObject != null);
-        if (leyLinesObject == null)
-        {
-            return new(
-                DecisionOverlaySource.LeyLines,
-                state,
-                inLeyLines ? "In Ley Lines" : "Ley Lines active",
-                reason,
-                42,
-                [],
-                [],
-                []);
-        }
+        var state = !config.Enabled || !config.ManageMovement || !config.ManageLeylines
+            ? DecisionOverlayState.Suppressed
+            : leyLines.PlayerInZone
+                ? DecisionOverlayState.Active
+                : leyLines.Injected
+                    ? DecisionOverlayState.Candidate
+                    : DecisionOverlayState.Future;
+        var reason = state == DecisionOverlayState.Suppressed
+            ? this.DisabledReason((config.Enabled, "Enabled"), (config.ManageMovement, "Automate movement"), (config.ManageLeylines, "Stay in Ley Lines"))
+            : leyLines.Reason;
 
         return new(
             DecisionOverlaySource.LeyLines,
             state,
-            inLeyLines ? "Stay in Ley Lines" : "Return to Ley Lines",
+            leyLines.PlayerInZone ? "Stay in Ley Lines" : "Return to Ley Lines",
             reason,
             42,
-            [new(DecisionOverlayShapeKind.Circle, state, leyLinesObject.Position, 3f, 0f, 0f, 0f, "Ley Lines")],
-            inLeyLines
+            [new(DecisionOverlayShapeKind.Circle, state, leyLines.ZoneCenter, leyLines.Radius, 0f, 0f, 0f, "Ley Lines")],
+            leyLines.PlayerInZone
                 ? []
-                : [new DecisionOverlayLine(state, player.Position, leyLinesObject.Position, "")],
-            [new DecisionOverlayMarker(state, leyLinesObject.Position, 0.32f, null)]);
+                : [new DecisionOverlayLine(state, player.Position, leyLines.PreferredPosition, "")],
+            [new DecisionOverlayMarker(state, leyLines.PreferredPosition, 0.25f, null)]);
     }
-
-    private IGameObject? TryFindLeyLinesObject(IBattleChara player)
-    {
-        foreach (var obj in services.ObjectTable)
-        {
-            if (obj.BaseId == ActionUse.BlackMageLeyLinesObjectDataId &&
-                obj.OwnerId == player.GameObjectId)
-            {
-                return obj;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool IsBlackMage(IBattleChara player)
-        => player.ClassJob.RowId is 7 or 25;
-
-    private static bool HasStatus(IBattleChara player, uint statusId)
-        => player.StatusList.Any(status => status.StatusId == statusId && status.RemainingTime > 0f);
 
     private static string NormalizeRangeReason(string reason)
     {
@@ -1253,32 +1228,6 @@ internal sealed class DecisionOverlayController(
         }
 
         return reason;
-    }
-
-    private static string BuildLeyLinesReason(bool betweenTheLines, bool retrace, bool goal, bool objectVisible)
-    {
-        var parts = new List<string>(3);
-        if (betweenTheLines)
-        {
-            parts.Add("Between the Lines");
-        }
-
-        if (retrace)
-        {
-            parts.Add("Retrace");
-        }
-
-        if (goal)
-        {
-            parts.Add("walk back");
-        }
-
-        if (!objectVisible)
-        {
-            parts.Add("zone not visible");
-        }
-
-        return parts.Count == 0 ? "Ley Lines handling enabled" : string.Join(", ", parts);
     }
 
     private string? DisabledReason(params (bool Enabled, string Label)[] gates)

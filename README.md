@@ -24,7 +24,7 @@ While you are in combat, the plugin automatically:
 - **Can adjust tank behavior for persistent front cleaves** by ignoring BossMod cone movement and preferring tank spots that keep the cleave away from the visible party
 - **Keeps party members in healer range** by pre-positioning healers toward safe spots that preserve AoE heal coverage, and by moving DPS into a visible healer's AoE healing range before raidwide or shared raid damage. Tanks keep their tanking position.
 - **Avoids awkward boss-center positions** and small enemy hitboxes when choosing movement goals
-- **Prefers helpful defensive ground effects for non-tanks** such as Asylum, Sacred Soil, Earthly Star, and Collective Unconscious when raid damage, shared damage, heavy personal damage, or low health makes them useful. Tanks keep their tanking position instead of moving for healing zones
+- **Prefers helpful defensive ground effects for non-tanks** such as Asylum, Sacred Soil, Earthly Star, and Collective Unconscious when raid damage, shared damage, heavy personal damage, or low health makes them useful. Physical ranged jobs may also drift into them as a comfort preference when they can stay in target range. Tanks keep their tanking position instead of moving for healing zones
 - **Prefers Paladin Passage of Arms protection** by letting BossMod prefer the protected cone behind a party Paladin while the buff is active
 - **Avoids hugging the arena edge** as a weak preference when stronger movement goals do not matter
 - **Avoids pixel-perfect player stacks** by preferring a tiny safe offset from visible player party members, while staying out of intentional party clumps during mechanics
@@ -87,7 +87,7 @@ While you are casting, advisory movement goals are suppressed so comfort, uptime
 
 ### Job Specific tab
 
-**Black Mage** — Stay in existing Ley Lines and choose whether to use Between the Lines, Retrace, or walking to return to them.
+**Black Mage** — Stay in existing Ley Lines and choose whether to use Between the Lines, Retrace, or movement and slidecast returns.
 
 **Pictomancer** — Stay in your existing Starry Muse ground effect when safe. When Gap closers and the PCT dash allow-list are enabled, Smudge can be used as a return tool only when walking cannot reasonably get back within the current GCD, the fixed 15y landing ends inside the circle, BossMod accepts the dash as safe, and navigation confirms the landing is reachable.
 

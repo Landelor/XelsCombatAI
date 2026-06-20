@@ -58,6 +58,7 @@ var tests = new (string Name, Action Body)[]
     ("directional dash facing can pause BMR movement", DirectionalDashFacingCanPauseBmrMovement),
     ("caster immobility policy holds optional dashes", CasterImmobilityPolicyHoldsOptionalDashes),
     ("caster advisory movement holds near GCD ready", CasterAdvisoryMovementHoldsNearGcdReady),
+    ("black mage leylines movement policy", BlackMageLeyLinesMovementPolicy),
     ("gap closer follows RSR auto target", GapCloserFollowsRsrAutoTarget),
     ("ranged gap closers skip boss reengage", RangedGapClosersSkipBossReengage),
     ("phantom gap closers inherit base job reengage rules", PhantomGapClosersInheritBaseJobReengageRules),
@@ -69,7 +70,7 @@ var tests = new (string Name, Action Body)[]
     ("samurai escape holds dash for short BMR walk", SamuraiEscapeHoldsDashForShortBmrWalk),
     ("samurai trash escape holds yaten while safe", SamuraiTrashEscapeHoldsYatenWhileSafe),
     ("BMR advisory scoring combines enabled preferences", BmrAdvisoryScoringCombinesEnabledPreferences),
-    ("healer coverage restores single missing member", HealerCoverageRestoresSingleMissingMember),
+    ("healer coverage ignores single missing member drift", HealerCoverageIgnoresSingleMissingMemberDrift),
     ("healer coverage uses stable natural centers", HealerCoverageUsesStableNaturalCenters),
     ("healer coverage avoids boss-center candidates", HealerCoverageAvoidsBossCenterCandidates),
     ("healer coverage pre-positions for comfort", HealerCoveragePrepositionsForComfort),
@@ -1453,6 +1454,46 @@ static void CasterImmobilityPolicyHoldsOptionalDashes()
 
 static void CasterAdvisoryMovementHoldsNearGcdReady()
 {
+    AssertFalse(
+        CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
+            classJobId: 42,
+            playerCasting: true,
+            slidecastWindow: true,
+            moveDistance: 1.5f),
+        "magic DPS should allow small planned slidecast movement");
+
+    AssertTrue(
+        CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
+            classJobId: 42,
+            playerCasting: true,
+            slidecastWindow: true,
+            moveDistance: 4f),
+        "magic DPS should not use slidecast windows for larger advisory corrections");
+
+    AssertTrue(
+        CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
+            classJobId: 24,
+            playerCasting: true,
+            slidecastWindow: true,
+            moveDistance: 1f),
+        "healer advisory movement should not slidecast step");
+
+    AssertTrue(
+        CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
+            classJobId: 42,
+            playerCasting: true,
+            slidecastWindow: false,
+            moveDistance: 1f),
+        "magic DPS advisory movement should still hold outside the slidecast window");
+
+    AssertTrue(
+        CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
+            classJobId: 42,
+            playerCasting: true,
+            slidecastWindow: true,
+            moveDistance: null),
+        "slidecast advisory movement should need a bounded candidate distance");
+
     AssertTrue(
         CasterMovementPolicy.ShouldSuppressAdvisoryMovementForGcd(
             classJobId: 24,
@@ -1482,6 +1523,36 @@ static void CasterAdvisoryMovementHoldsNearGcdReady()
 
     AssertFalse(
         CasterMovementPolicy.ShouldSuppressAdvisoryMovementForGcd(
+            classJobId: 42,
+            gcdRemaining: 0.8f,
+            gcdElapsed: 1.7f,
+            gcdTotal: 2.5f,
+            gcdActionAhead: 0.35f,
+            moveDistance: 1f),
+        "small caster advisory moves should be allowed when they fit before the RSR action window");
+
+    AssertTrue(
+        CasterMovementPolicy.ShouldSuppressAdvisoryMovementForGcd(
+            classJobId: 42,
+            gcdRemaining: 1.2f,
+            gcdElapsed: 1.3f,
+            gcdTotal: 2.5f,
+            gcdActionAhead: 0.35f,
+            moveDistance: 5f),
+        "larger caster advisory moves should hold when walking would miss the next RSR action window");
+
+    AssertFalse(
+        CasterMovementPolicy.ShouldSuppressAdvisoryMovementForGcd(
+            classJobId: 42,
+            gcdRemaining: 1.2f,
+            gcdElapsed: 1.3f,
+            gcdTotal: 2.5f,
+            gcdActionAhead: 0.35f,
+            moveDistance: 2f),
+        "bounded caster advisory moves should remain available when walking fits the recast budget");
+
+    AssertFalse(
+        CasterMovementPolicy.ShouldSuppressAdvisoryMovementForGcd(
             classJobId: 31,
             gcdRemaining: 0.2f,
             gcdElapsed: 2.3f,
@@ -1497,6 +1568,71 @@ static void CasterAdvisoryMovementHoldsNearGcdReady()
             gcdTotal: -1f,
             gcdActionAhead: -1f),
         "unavailable timing should fall back to active-cast suppression only");
+}
+
+static void BlackMageLeyLinesMovementPolicy()
+{
+    AssertTrue(
+        BlackMageLeyLinesPositioningController.ShouldAllowNarrowSlidecastReturn(1.5f),
+        "narrow Ley Lines returns should be handled by movement/slidecast");
+
+    AssertFalse(
+        BlackMageLeyLinesPositioningController.ShouldAllowNarrowSlidecastReturn(2.5f),
+        "wider Ley Lines returns should not be treated as narrow slidecast corrections");
+
+    AssertTrue(
+        BlackMageLeyLinesPositioningController.ShouldHoldActionForReturnMovement(
+            returnMovementEnabled: true,
+            canWalkBack: false,
+            distanceToPreferred: 1.5f),
+        "narrow return movement should hold teleport actions when walking/slidecast return is enabled");
+
+    AssertFalse(
+        BlackMageLeyLinesPositioningController.ShouldHoldActionForReturnMovement(
+            returnMovementEnabled: false,
+            canWalkBack: true,
+            distanceToPreferred: 1.5f),
+        "disabled walking/slidecast return should not suppress configured teleport actions");
+
+    AssertFalse(
+        BlackMageLeyLinesPositioningController.ShouldUseBetweenTheLines(
+            enabled: true,
+            actionReady: true,
+            badForOptionalMovement: false,
+            distanceToPreferred: 1.5f),
+        "Between the Lines should not replace a narrow slidecast return");
+
+    AssertTrue(
+        BlackMageLeyLinesPositioningController.ShouldUseBetweenTheLines(
+            enabled: true,
+            actionReady: true,
+            badForOptionalMovement: false,
+            distanceToPreferred: 4f),
+        "Between the Lines should bridge wider Ley Lines returns");
+
+    AssertFalse(
+        BlackMageLeyLinesPositioningController.ShouldUseBetweenTheLines(
+            enabled: true,
+            actionReady: true,
+            badForOptionalMovement: true,
+            distanceToPreferred: 4f),
+        "Between the Lines should hold during optional-movement pressure");
+
+    AssertTrue(
+        BlackMageLeyLinesPositioningController.ShouldUseRetrace(
+            enabled: true,
+            actionReady: true,
+            badForOptionalMovement: false,
+            distanceToPreferred: 5f),
+        "Retrace should be available for larger Ley Lines corrections");
+
+    AssertFalse(
+        BlackMageLeyLinesPositioningController.ShouldUseRetrace(
+            enabled: true,
+            actionReady: true,
+            badForOptionalMovement: false,
+            distanceToPreferred: 2f),
+        "Retrace should not replace a short walk or slidecast return");
 }
 
 static void GapCloserFollowsRsrAutoTarget()
@@ -1972,31 +2108,38 @@ static void SamuraiEscapeHoldsDashForShortBmrWalk()
         "larger BMR safety movement may still use a dash");
 }
 
-static void HealerCoverageRestoresSingleMissingMember()
+static void HealerCoverageIgnoresSingleMissingMemberDrift()
 {
     AssertTrue(
-        HealerAoePositioningController.ShouldRestoreSingleMissingCoverage(
+        HealerAoePositioningController.IsSingleMissingCoverageRestore(
+            currentCoveredCount: 6,
+            bestCoveredCount: 7,
+            totalMembers: 7),
+        "single missing member should be recognized as drift, not movement intent");
+
+    AssertFalse(
+        HealerAoePositioningController.ShouldImproveCoverageComfort(
             currentCoveredCount: 6,
             bestCoveredCount: 7,
             totalMembers: 7,
-            distanceToCenter: 5.5f),
-        "short move to restore full healer coverage should be worthwhile");
+            currentCoverageComfortSlack: 4f,
+            bestCoverageComfortSlack: 4f,
+            distanceToCenter: 5.5f,
+            downtimeLikely: false,
+            mechanicPositioningActive: false),
+        "routine movement should not chase one party member who stepped out of healer range");
 
-    AssertFalse(
-        HealerAoePositioningController.ShouldRestoreSingleMissingCoverage(
-            currentCoveredCount: 5,
+    AssertTrue(
+        HealerAoePositioningController.ShouldImproveCoverageComfort(
+            currentCoveredCount: 4,
             bestCoveredCount: 6,
             totalMembers: 7,
-            distanceToCenter: 3f),
-        "single-member partial coverage gain should remain a convenience skip");
-
-    AssertFalse(
-        HealerAoePositioningController.ShouldRestoreSingleMissingCoverage(
-            currentCoveredCount: 6,
-            bestCoveredCount: 7,
-            totalMembers: 7,
-            distanceToCenter: 8f),
-        "full coverage restore should stay distance bounded");
+            currentCoverageComfortSlack: 4f,
+            bestCoverageComfortSlack: 4f,
+            distanceToCenter: 7.5f,
+            downtimeLikely: false,
+            mechanicPositioningActive: false),
+        "routine movement may still respond when multiple party members can be brought back into coverage");
 }
 
 static void BmrAdvisoryScoringCombinesEnabledPreferences()
@@ -2131,7 +2274,7 @@ static void HealerCoveragePrepositionsForComfort()
             mechanicPositioningActive: false),
         "routine comfort movement should stay tighter when uptime is active");
 
-    AssertTrue(
+    AssertFalse(
         HealerAoePositioningController.ShouldImproveCoverageComfort(
             currentCoveredCount: 5,
             bestCoveredCount: 6,
@@ -2141,7 +2284,19 @@ static void HealerCoveragePrepositionsForComfort()
             distanceToCenter: 7.5f,
             downtimeLikely: false,
             mechanicPositioningActive: false),
-        "short proactive coverage gains should not wait for a heal cast");
+        "routine one-person coverage gains should not cause healer drift");
+
+    AssertTrue(
+        HealerAoePositioningController.ShouldImproveCoverageComfort(
+            currentCoveredCount: 4,
+            bestCoveredCount: 6,
+            totalMembers: 7,
+            currentCoverageComfortSlack: 6f,
+            bestCoverageComfortSlack: 6f,
+            distanceToCenter: 7.5f,
+            downtimeLikely: false,
+            mechanicPositioningActive: false),
+        "routine coverage movement should require a meaningful multi-member gain");
 }
 
 static void HealerCoverageCatchesUpForPartySavingAoeHeals()
@@ -2376,7 +2531,7 @@ static void HealerCoverageRespectsCastTiming()
             out _),
         "BossMod safety movement should be allowed to take precedence over cast clipping concerns");
 
-    AssertFalse(
+    AssertTrue(
         HealerAoePositioningController.ShouldSkipCoverageMoveForGcdTiming(
             moveDistance: 7f,
             gcdRemaining: 0.2f,
@@ -2384,41 +2539,58 @@ static void HealerCoverageRespectsCastTiming()
             gcdTotal: 2.5f,
             slidecastWindow: true,
             bossModSafetyMovementActive: false,
-            out _),
-        "slidecast window should allow healer coverage movement even late in the GCD");
+            out var slideReason),
+        "slidecast window should hold healer coverage movement instead of stepping");
+    AssertContains("instant movement", slideReason, "slidecast healer coverage timing reason");
 
     AssertTrue(
-        HealerAoePositioningController.ShouldSuppressBossSlideWindowCoverage(
-            bossModuleContext: true,
-            slidecastWindow: true,
+        HealerAoePositioningController.ShouldSuppressSlideWindowCoverage(
+            slidecastWindow: true),
+        "routine healer coverage should not step just because a slidecast window opened");
+
+    AssertTrue(
+        HealerAoePositioningController.ShouldSuppressSlideWindowCoverage(
+            slidecastWindow: true),
+        "urgent healing coverage should wait for instant movement instead of slidecast stepping");
+
+    AssertTrue(
+        HealerAoePositioningController.ShouldSuppressSlideWindowCoverage(
+            slidecastWindow: true),
+        "trash and non-boss contexts should also require healer coverage intent before slide movement");
+
+    AssertTrue(
+        HealerAoePositioningController.ShouldSuppressSlideWindowCoverage(
+            slidecastWindow: true),
+        "many missing party members should still wait for instant movement instead of slidecast stepping");
+
+    AssertTrue(
+        HealerAoePositioningController.ShouldSuppressSlideWindowCoverage(
+            slidecastWindow: true),
+        "mechanic positioning without coverage intent should not allow slidecast stepping");
+
+    AssertTrue(
+        HealerAoePositioningController.ShouldAllowCoverageDashDuringBossModMovement(
             urgentHealingCoverage: false,
             partyAoeHealCatchUp: false,
             criticalCoverageCatchUp: false,
-            partyAoeHealPending: false,
-            tankbusterHealCoveragePending: false),
-        "routine boss healer coverage should not step during every slidecast window");
+            tankbusterHealCoveragePending: false,
+            mechanicPositioningActive: true,
+            bossCoverageMove: true,
+            proactiveCoverageComfort: false,
+            strongCoverageGain: false),
+        "mechanic coverage can use a validated dash while BossMod movement is active");
 
     AssertFalse(
-        HealerAoePositioningController.ShouldSuppressBossSlideWindowCoverage(
-            bossModuleContext: true,
-            slidecastWindow: true,
-            urgentHealingCoverage: true,
-            partyAoeHealCatchUp: false,
-            criticalCoverageCatchUp: false,
-            partyAoeHealPending: true,
-            tankbusterHealCoveragePending: false),
-        "urgent healing coverage should still be allowed during a boss slidecast window");
-
-    AssertFalse(
-        HealerAoePositioningController.ShouldSuppressBossSlideWindowCoverage(
-            bossModuleContext: false,
-            slidecastWindow: true,
+        HealerAoePositioningController.ShouldAllowCoverageDashDuringBossModMovement(
             urgentHealingCoverage: false,
             partyAoeHealCatchUp: false,
             criticalCoverageCatchUp: false,
-            partyAoeHealPending: false,
-            tankbusterHealCoveragePending: false),
-        "trash and non-boss contexts keep their normal slidecast movement behavior");
+            tankbusterHealCoveragePending: false,
+            mechanicPositioningActive: false,
+            bossCoverageMove: true,
+            proactiveCoverageComfort: false,
+            strongCoverageGain: false),
+        "routine boss coverage should not dash over active BossMod movement");
 
     AssertTrue(
         HealerAoePositioningController.IsBossModSafetyMovementActive(
@@ -2525,6 +2697,30 @@ static void DefensiveZoneMovementSkipsTanks()
     AssertFalse(
         SurvivabilityZonePositioningController.ShouldSkipDefensiveZoneMovementForRole(25),
         "non-tank DPS jobs may still use defensive ground zones");
+
+    AssertTrue(
+        SurvivabilityZonePositioningController.ResolveDefensiveGroundZoneMoveMode(
+            classJobId: 23,
+            pressure: BossModMechanicPressure.None,
+            playerHasPersonalThreat: false,
+            playerLowHealth: false) == DefensiveGroundZoneMoveMode.PhysicalRangedComfort,
+        "physical ranged jobs may use friendly defensive zones as a no-pressure comfort preference");
+
+    AssertTrue(
+        SurvivabilityZonePositioningController.ResolveDefensiveGroundZoneMoveMode(
+            classJobId: 25,
+            pressure: BossModMechanicPressure.None,
+            playerHasPersonalThreat: false,
+            playerLowHealth: false) == DefensiveGroundZoneMoveMode.None,
+        "magic ranged jobs should still need damage pressure or low health for defensive ground zones");
+
+    AssertTrue(
+        SurvivabilityZonePositioningController.ResolveDefensiveGroundZoneMoveMode(
+            classJobId: 23,
+            pressure: BossModMechanicPressure.None with { BMRRaidwideIn = 2f },
+            playerHasPersonalThreat: false,
+            playerLowHealth: false) == DefensiveGroundZoneMoveMode.DamagePressure,
+        "damage pressure should keep the stronger defensive movement mode even for physical ranged");
 }
 
 static void PackMovementCombinesWithIdleBossModForbiddenZones()

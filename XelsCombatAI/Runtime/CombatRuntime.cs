@@ -28,6 +28,7 @@ internal sealed class CombatRuntime(
     HealerAoePositioningController healerAoePositioningController,
     PartyHealerRangePositioningController partyHealerRangePositioningController,
     SurvivabilityZonePositioningController survivabilityZonePositioningController,
+    BlackMageLeyLinesPositioningController blackMageLeyLinesPositioningController,
     PictomancerStarryMusePositioningController pictomancerStarryMusePositioningController,
     ArenaEdgePositioningController arenaEdgePositioningController,
     TankBehaviorController tankBehaviorController,
@@ -240,6 +241,7 @@ internal sealed class CombatRuntime(
         healerAoePositioningController.Reset();
         partyHealerRangePositioningController.Reset();
         survivabilityZonePositioningController.Reset();
+        blackMageLeyLinesPositioningController.Reset();
         pictomancerStarryMusePositioningController.Reset();
         tankBehaviorController.Reset();
         redMageMeleeComboController.Reset();

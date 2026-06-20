@@ -712,10 +712,7 @@ internal sealed class BossModGoalZoneHook : IDisposable
             this.TryAddMechanicEscapeMarginGoal(contributions);
 
             var allContributions = contributions.ToArray();
-            var castingSuppressed = this.ShouldSuppressAdvisoryMovementForCasting();
-            var activeContributions = castingSuppressed
-                ? SuppressAdvisoryMovementForCasting(allContributions)
-                : allContributions;
+            var activeContributions = this.FilterAdvisoryMovementForCasterTiming(allContributions, out var casterTimingSuppressed);
             var mechanicSafetyIsolated = this.ShouldIsolateMechanicSafetyGoals();
             if (mechanicSafetyIsolated)
             {
@@ -735,10 +732,10 @@ internal sealed class BossModGoalZoneHook : IDisposable
             if (activeContributions.Length == 0)
             {
                 this.mechanicWhisperStates.Clear();
-                this.lastGoalPriority = $"{FormatGoalPrioritySummary(allContributions)} (casting suppressed)";
-                this.lastGoalSources = "casting; advisory movement suppressed";
+                this.lastGoalPriority = $"{FormatGoalPrioritySummary(allContributions)} (caster timing suppressed)";
+                this.lastGoalSources = "caster timing; advisory movement suppressed";
                 this.lastMechanicWhisperStatus = "<none>";
-                this.lastCandidatePathGuardStatus = "not checked: casting suppressed";
+                this.lastCandidatePathGuardStatus = "not checked: caster timing suppressed";
                 return;
             }
 
@@ -777,7 +774,7 @@ internal sealed class BossModGoalZoneHook : IDisposable
             var prioritySummary = FormatGoalPrioritySummary(activeContributions);
             this.lastGoalPriority = prioritySummary + FormatContributionStateSuffix(
                 mechanicWhisperGuardActive,
-                castingSuppressed,
+                casterTimingSuppressed,
                 mechanicSafetyIsolated);
             this.lastGoalSources = string.Join(", ", activeContributions.Select(c => c.Label).Distinct(StringComparer.Ordinal));
 
@@ -874,29 +871,61 @@ internal sealed class BossModGoalZoneHook : IDisposable
                 .ToArray();
         }
 
-        private bool ShouldSuppressAdvisoryMovementForCasting()
+        private BossModGoalContribution[] FilterAdvisoryMovementForCasterTiming(BossModGoalContribution[] contributions, out bool suppressed)
         {
+            suppressed = false;
             var player = this.services.ObjectTable.LocalPlayer;
-            if (CasterMovementPolicy.ShouldSuppressAdvisoryMovement(player))
+            if (player == null)
             {
-                return true;
+                return contributions;
             }
 
-            return player != null &&
-                   this.rotationSolverActions.TryGetUpcomingGcdTiming(out var timing, out _) &&
-                   CasterMovementPolicy.ShouldSuppressAdvisoryMovementForGcd(
-                       player.ClassJob.RowId,
-                       timing.GcdRemaining,
-                       timing.GcdElapsed,
-                       timing.GcdTotal,
-                       timing.GcdActionAhead);
-        }
+            var playerPosition = new Vector2(player.Position.X, player.Position.Z);
+            var slidecastWindow = player.IsCasting && CasterMovementPolicy.IsCasterSlidecastWindow(player);
+            var hasGcdTiming = this.rotationSolverActions.TryGetUpcomingGcdTiming(out var timing, out _);
+            var filtered = new List<BossModGoalContribution>(contributions.Length);
+            foreach (var contribution in contributions)
+            {
+                if (contribution.ScoreMode == BossModGoalScoreMode.Raw)
+                {
+                    filtered.Add(contribution);
+                    continue;
+                }
 
-        private static BossModGoalContribution[] SuppressAdvisoryMovementForCasting(IReadOnlyList<BossModGoalContribution> contributions)
-        {
-            return contributions
-                .Where(c => c.ScoreMode == BossModGoalScoreMode.Raw)
-                .ToArray();
+                float? candidateDistance = null;
+                if (contribution.Candidate.HasValue)
+                {
+                    candidateDistance = Vector2.Distance(playerPosition, contribution.Candidate.Value);
+                }
+
+                var suppress = CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
+                    player.ClassJob.RowId,
+                    player.IsCasting,
+                    slidecastWindow,
+                    candidateDistance);
+                if (!suppress && hasGcdTiming && timing != null)
+                {
+                    suppress = CasterMovementPolicy.ShouldSuppressAdvisoryMovementForGcd(
+                        player.ClassJob.RowId,
+                        timing.GcdRemaining,
+                        timing.GcdElapsed,
+                        timing.GcdTotal,
+                        timing.GcdActionAhead,
+                        candidateDistance);
+                }
+
+                if (suppress)
+                {
+                    suppressed = true;
+                    continue;
+                }
+
+                filtered.Add(contribution);
+            }
+
+            return suppressed
+                ? filtered.ToArray()
+                : contributions;
         }
 
         private static BossModGoalContribution[] SelectRawGoalContributions(IReadOnlyList<BossModGoalContribution> contributions)
@@ -949,7 +978,7 @@ internal sealed class BossModGoalZoneHook : IDisposable
             return min == max ? min.ToString() : $"{min}-{max}";
         }
 
-        private static string FormatContributionStateSuffix(bool mechanicWhisperGuardActive, bool castingSuppressed, bool mechanicSafetyIsolated)
+        private static string FormatContributionStateSuffix(bool mechanicWhisperGuardActive, bool casterTimingSuppressed, bool mechanicSafetyIsolated)
         {
             var states = new List<string>(3);
             if (mechanicWhisperGuardActive)
@@ -957,9 +986,9 @@ internal sealed class BossModGoalZoneHook : IDisposable
                 states.Add("guarded");
             }
 
-            if (castingSuppressed)
+            if (casterTimingSuppressed)
             {
-                states.Add("casting suppressed");
+                states.Add("caster timing suppressed");
             }
 
             if (mechanicSafetyIsolated)

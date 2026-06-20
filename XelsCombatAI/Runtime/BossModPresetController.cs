@@ -15,6 +15,7 @@ internal sealed class BossModPresetController(
     GapCloserController gapCloserController,
     EscapeGapCloserController escapeGapCloserController,
     RedMageMeleeComboController redMageMeleeComboController,
+    BlackMageLeyLinesPositioningController blackMageLeyLinesPositioningController,
     PictomancerStarryMusePositioningController pictomancerStarryMusePositioningController,
     FacingController facingController,
     Func<BossModMechanicPressure> mechanicPressure,
@@ -148,10 +149,7 @@ internal sealed class BossModPresetController(
 
             this.SetMovement(config.ManageMovement && !suppressAutomatedMovement);
 
-            this.SetLeylines(
-                config.ManageLeylines && !suppressAutomatedMovement && config.UseBetweenTheLines,
-                config.ManageLeylines && !suppressAutomatedMovement && config.UseRetrace,
-                config.ManageLeylines && !suppressAutomatedMovement && config.ReturnToLeylines);
+            this.SetLeylines(false, false, false);
 
             this.SetGapClosers(suppressAutomatedMovement);
             this.SetMovementForPendingDashTurn(suppressAutomatedMovement);
@@ -184,6 +182,7 @@ internal sealed class BossModPresetController(
         gapCloserController.Reset();
         escapeGapCloserController.Reset();
         redMageMeleeComboController.Reset();
+        blackMageLeyLinesPositioningController.Reset();
         bossModSafety.Reset();
     }
 
@@ -511,6 +510,11 @@ internal sealed class BossModPresetController(
 
         if (!config.UseGapCloser)
         {
+            if (blackMageLeyLinesPositioningController.TryUseLeyLinesAction())
+            {
+                return;
+            }
+
             if (this.ShouldHoldOptionalDashForMechanicPressure())
             {
                 return;
@@ -525,6 +529,11 @@ internal sealed class BossModPresetController(
         }
 
         if (escapeGapCloserController.TryUseEscapeGapCloser())
+        {
+            return;
+        }
+
+        if (blackMageLeyLinesPositioningController.TryUseLeyLinesAction())
         {
             return;
         }

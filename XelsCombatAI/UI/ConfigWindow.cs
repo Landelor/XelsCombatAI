@@ -270,7 +270,7 @@ internal sealed class ConfigWindow : Window, IDisposable
             this.config.ManageDefensiveGroundZonePositioning,
             this.defaultConfig.ManageDefensiveGroundZonePositioning,
             v => this.config.ManageDefensiveGroundZonePositioning = v,
-            "Non-tanks only: stands in friendly ground effects when safe, such as Asylum or Sacred Soil.\nOnly moves for incoming raid damage, shared damage, heavy personal damage, or low health.\nTanks keep their tanking position instead of moving for healing zones.",
+            "Non-tanks only: stands in friendly ground effects when safe, such as Asylum or Sacred Soil.\nMoves for incoming raid damage, shared damage, heavy personal damage, or low health.\nPhysical ranged may also drift into one while staying in target range.\nTanks keep their tanking position instead of moving for healing zones.",
             movementDisabledTooltip);
         changed |= this.Checkbox(
             "Stand behind Passage of Arms",
@@ -356,7 +356,7 @@ internal sealed class ConfigWindow : Window, IDisposable
             ImGui.BeginDisabled();
         changed |= this.Checkbox("Use Between the Lines", this.config.UseBetweenTheLines, this.defaultConfig.UseBetweenTheLines, v => this.config.UseBetweenTheLines = v, disabledTooltip: leylinesDisabledTooltip);
         changed |= this.Checkbox("Use Retrace", this.config.UseRetrace, this.defaultConfig.UseRetrace, v => this.config.UseRetrace = v, disabledTooltip: leylinesDisabledTooltip);
-        changed |= this.Checkbox("Walk back to Ley Lines", this.config.ReturnToLeylines, this.defaultConfig.ReturnToLeylines, v => this.config.ReturnToLeylines = v, "Walks back to Ley Lines when teleport skills are not used or unavailable.", leylinesDisabledTooltip);
+        changed |= this.Checkbox("Walk back to Ley Lines", this.config.ReturnToLeylines, this.defaultConfig.ReturnToLeylines, v => this.config.ReturnToLeylines = v, "Moves back to Ley Lines when teleport skills are not used or unavailable.\nSmall edge corrections may happen during slidecast.", leylinesDisabledTooltip);
         if (!this.config.ManageLeylines)
             ImGui.EndDisabled();
         ImGui.Unindent(8f);
