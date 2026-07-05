@@ -233,9 +233,22 @@ internal sealed class BlackMageLeyLinesPositioningController(
             return false;
         }
 
+        var betweenTheLinesReady = ActionUse.CanUseAction(ActionUse.BlackMageBetweenTheLinesActionId);
+        var retraceReady = ActionUse.CanUseAction(ActionUse.BlackMageRetraceActionId);
+        if (ShouldUseRetraceForBlockedReturn(
+                config.UseRetrace,
+                retraceReady,
+                config.ReturnToLeylines,
+                canWalkBack,
+                plan.DistanceToPreferred) &&
+            this.TryUseRetrace(player!, plan, "used Retrace to keep Ley Lines after blocked return"))
+        {
+            return true;
+        }
+
         if (ShouldUseBetweenTheLines(
                 config.UseBetweenTheLines,
-                ActionUse.CanUseAction(ActionUse.BlackMageBetweenTheLinesActionId),
+                betweenTheLinesReady,
                 pressure.BadForOptionalMovement,
                 plan.DistanceToPreferred) &&
             this.TryUseBetweenTheLines(player!, plan))
@@ -245,11 +258,11 @@ internal sealed class BlackMageLeyLinesPositioningController(
 
         if (ShouldUseRetrace(
                 config.UseRetrace,
-                ActionUse.CanUseAction(ActionUse.BlackMageRetraceActionId),
+                retraceReady,
                 pressure.BadForOptionalMovement,
                 plan.DistanceToPreferred))
         {
-            return this.TryUseRetrace(player!, plan);
+            return this.TryUseRetrace(player!, plan, "used Retrace for Ley Lines");
         }
 
         return false;
@@ -338,6 +351,21 @@ internal sealed class BlackMageLeyLinesPositioningController(
                distanceToPreferred >= MinimumRetraceDistance;
     }
 
+    internal static bool ShouldUseRetraceForBlockedReturn(
+        bool enabled,
+        bool actionReady,
+        bool returnMovementEnabled,
+        bool canWalkBack,
+        float distanceToPreferred)
+    {
+        return enabled &&
+               actionReady &&
+               returnMovementEnabled &&
+               !canWalkBack &&
+               !ShouldAllowNarrowSlidecastReturn(distanceToPreferred) &&
+               distanceToPreferred >= MinimumRetraceDistance;
+    }
+
     private bool TryUseBetweenTheLines(IBattleChara player, LeyLinesGoalPlan plan)
     {
         var destination = new Vector3(plan.CenterPosition.X, player.Position.Y, plan.CenterPosition.Y);
@@ -370,7 +398,7 @@ internal sealed class BlackMageLeyLinesPositioningController(
         }
     }
 
-    private bool TryUseRetrace(IBattleChara player, LeyLinesGoalPlan plan)
+    private bool TryUseRetrace(IBattleChara player, LeyLinesGoalPlan plan, string successReason)
     {
         if (!bossModSafety.TryIsPositionSafe(player.Position, out var safe, out var safetyReason) || !safe)
         {
@@ -400,7 +428,7 @@ internal sealed class BlackMageLeyLinesPositioningController(
                 "not checked",
                 used ? "action used" : "action failed");
             mobilityEvaluator.RecordActionResult(decision, used, used ? "action used" : "action failed");
-            this.lastReason = used ? "used Retrace for Ley Lines" : "failed to use Retrace";
+            this.lastReason = used ? successReason : "failed to use Retrace";
             return used;
         }
     }

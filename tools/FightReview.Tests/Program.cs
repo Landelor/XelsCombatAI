@@ -1762,6 +1762,33 @@ static void BlackMageLeyLinesMovementPolicy()
             badForOptionalMovement: false,
             distanceToPreferred: 2f),
         "Retrace should not replace a short walk or slidecast return");
+
+    AssertTrue(
+        BlackMageLeyLinesPositioningController.ShouldUseRetraceForBlockedReturn(
+            enabled: true,
+            actionReady: true,
+            returnMovementEnabled: true,
+            canWalkBack: false,
+            distanceToPreferred: 5f),
+        "Retrace should move Ley Lines to the player when walking back will miss the GCD window");
+
+    AssertFalse(
+        BlackMageLeyLinesPositioningController.ShouldUseRetraceForBlockedReturn(
+            enabled: true,
+            actionReady: true,
+            returnMovementEnabled: true,
+            canWalkBack: false,
+            distanceToPreferred: 1.5f),
+        "blocked-return Retrace should not replace a narrow slidecast return");
+
+    AssertFalse(
+        BlackMageLeyLinesPositioningController.ShouldUseRetraceForBlockedReturn(
+            enabled: true,
+            actionReady: true,
+            returnMovementEnabled: false,
+            canWalkBack: false,
+            distanceToPreferred: 5f),
+        "blocked-return Retrace should only apply when walking return is enabled");
 }
 
 static void GapCloserFollowsRsrAutoTarget()
