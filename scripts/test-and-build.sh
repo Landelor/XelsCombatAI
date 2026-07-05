@@ -2,10 +2,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORKSPACE_DIR="${XELS_WORKSPACE_DIR:-$ROOT/..}"
 PLUGIN_PROJECT="$ROOT/XelsCombatAI/XelsCombatAI.csproj"
 TOOL_PROJECT="$ROOT/tools/FightReview/FightReview.csproj"
 TOOL_TEST_PROJECT="$ROOT/tools/FightReview.Tests/FightReview.Tests.csproj"
-FEED_REPO_DIR="${XELS_DALAMUD_REPO_DIR:-$ROOT/../XelsDalamudRepo}"
+FEED_REPO_DIR="${XELS_DALAMUD_REPO_DIR:-$WORKSPACE_DIR/XelsDalamudRepo}"
+REFERENCES_DIR="${XCAI_REFERENCES_DIR:-$WORKSPACE_DIR/XelsCombatAIReferences}"
 PACKAGE_SCRIPT="$FEED_REPO_DIR/scripts/package-plugin.py"
 PACKAGE_OUT="$ROOT/artifacts"
 
@@ -99,13 +101,13 @@ if [[ "$RUN_TOOLS" -eq 1 && "$RUN_TOOL_TESTS" -eq 1 ]]; then
 fi
 
 if [[ "$NEEDS_PLUGIN_PROJECT" -eq 1 ]]; then
-  ECOMMONS_PROJECT="$ROOT/third_party/ECommons/ECommons/ECommons.csproj"
-  [[ -f "$ECOMMONS_PROJECT" ]] || fail "ECommons was not found at '$ECOMMONS_PROJECT'. Run git submodule update --init --recursive."
+  ECOMMONS_PROJECT="$REFERENCES_DIR/ECommons/ECommons/ECommons.csproj"
+  [[ -f "$ECOMMONS_PROJECT" ]] || fail "ECommons was not found at '$ECOMMONS_PROJECT'. Run scripts/update-build-dependencies.sh, set XCAI_REFERENCES_DIR, or set XELS_WORKSPACE_DIR."
 fi
 
 if [[ "$RUN_TOOLS" -eq 1 ]]; then
-  BMR_PROJECT="$ROOT/third_party/BossmodReborn/BossMod/BossModReborn.csproj"
-  [[ -f "$BMR_PROJECT" ]] || fail "BossMod Reborn checkout was not found at '$BMR_PROJECT'. Run git submodule update --init --recursive or use --skip-tools."
+  BMR_PROJECT="$REFERENCES_DIR/BossmodReborn/BossMod/BossModReborn.csproj"
+  [[ -f "$BMR_PROJECT" ]] || fail "BossMod Reborn checkout was not found at '$BMR_PROJECT'. Run scripts/update-build-dependencies.sh, set XCAI_REFERENCES_DIR, set XELS_WORKSPACE_DIR, or use --skip-tools."
 
   if [[ "$RUN_TOOL_TESTS" -eq 1 ]]; then
     DEFAULT_FFXIV_GAME_PATH="$HOME/Games/steam/debian-installation/steamapps/common/FINAL FANTASY XIV Online"
@@ -148,7 +150,7 @@ if [[ "$RUN_FORMAT" -eq 1 ]]; then
 fi
 
 if [[ "$RUN_PACKAGE" -eq 1 ]]; then
-  [[ -f "$PACKAGE_SCRIPT" ]] || fail "Reusable package script was not found at '$PACKAGE_SCRIPT'. Clone XelsDalamudRepo beside this repo or set XELS_DALAMUD_REPO_DIR."
+  [[ -f "$PACKAGE_SCRIPT" ]] || fail "Reusable package script was not found at '$PACKAGE_SCRIPT'. Clone XelsDalamudRepo in the workspace, set XELS_DALAMUD_REPO_DIR, or set XELS_WORKSPACE_DIR."
   rm -rf "$PACKAGE_OUT"
   run python "$PACKAGE_SCRIPT" \
     --project "$PLUGIN_PROJECT" \

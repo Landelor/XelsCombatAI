@@ -4071,7 +4071,7 @@ static void HealthOutlierBossContextDetector()
 
 static void DataminingTrialDutyBossContextDetector()
 {
-    if (!File.Exists(Path.Combine("external", "FfxivDatamining", "csv", "en", "ContentFinderCondition.csv")))
+    if (!HasFfxivDataminingCheckout())
     {
         throw new SkipTestException("FfxivDatamining checkout unavailable.");
     }
@@ -4088,6 +4088,49 @@ static void DataminingTrialDutyBossContextDetector()
 
     AssertHasIncident(IncidentDetector.Detect(Log(frame)), "arena-edge");
 }
+
+static bool HasFfxivDataminingCheckout()
+{
+    var configured = Environment.GetEnvironmentVariable("FFXIV_DATAMINING_PATH");
+    if (!string.IsNullOrWhiteSpace(configured) && HasContentFinderCondition(configured))
+    {
+        return true;
+    }
+
+    var referencesDir = Environment.GetEnvironmentVariable("XCAI_REFERENCES_DIR");
+    if (!string.IsNullOrWhiteSpace(referencesDir) &&
+        HasContentFinderCondition(Path.Combine(referencesDir, "FfxivDatamining")))
+    {
+        return true;
+    }
+
+    var workspaceDir = Environment.GetEnvironmentVariable("XELS_WORKSPACE_DIR");
+    if (!string.IsNullOrWhiteSpace(workspaceDir) &&
+        HasContentFinderCondition(Path.Combine(workspaceDir, "XelsCombatAIReferences", "FfxivDatamining")))
+    {
+        return true;
+    }
+
+    foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+    {
+        var directory = new DirectoryInfo(start);
+        while (directory != null)
+        {
+            if (HasContentFinderCondition(Path.Combine(directory.FullName, "..", "XelsCombatAIReferences", "FfxivDatamining")))
+            {
+                return true;
+            }
+
+            directory = directory.Parent;
+        }
+    }
+
+    return false;
+}
+
+static bool HasContentFinderCondition(string path)
+    => File.Exists(Path.Combine(path, "csv", "en", "ContentFinderCondition.csv")) ||
+       File.Exists(Path.Combine(path, "ContentFinderCondition.csv"));
 
 static void InferredBossMovementHintIsNotBmrPressure()
 {

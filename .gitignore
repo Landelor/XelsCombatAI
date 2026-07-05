@@ -6,7 +6,3 @@ artifacts/
 .vs/
 .claude/
 .codex/
-external/*
-!external/AGENTS.md
-!external/sources.json
-!external/fetch-sources.sh

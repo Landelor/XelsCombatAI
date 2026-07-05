@@ -2,10 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BMR_PATH="$ROOT/third_party/BossmodReborn"
-ECOMMONS_PATH="$ROOT/third_party/ECommons"
+WORKSPACE_DIR="${XELS_WORKSPACE_DIR:-$ROOT/..}"
+REFERENCES_DIR="${XCAI_REFERENCES_DIR:-$WORKSPACE_DIR/XelsCombatAIReferences}"
+BMR_PATH="$REFERENCES_DIR/BossmodReborn"
+ECOMMONS_PATH="$REFERENCES_DIR/ECommons"
 BMR_REPO="FFXIV-CombatReborn/BossmodReborn"
 BMR_URL="https://github.com/$BMR_REPO.git"
+ECOMMONS_URL="https://github.com/NightmareXIV/ECommons.git"
 ECOMMONS_BRANCH="master"
 
 fail() {
@@ -20,14 +23,21 @@ run() {
   "$@"
 }
 
-ensure_clean_submodule() {
+ensure_clone() {
   local path="$1"
   local name="$2"
+  local url="$3"
 
-  [[ -d "$path/.git" || -f "$path/.git" ]] || fail "$name was not found at '$path'. Run git submodule update --init --recursive."
+  if [[ ! -d "$path/.git" && ! -f "$path/.git" ]]; then
+    rm -rf "$path"
+    mkdir -p "$(dirname "$path")"
+    run git clone "$url" "$path"
+  else
+    run git -C "$path" remote set-url origin "$url"
+  fi
 
   if [[ -n "$(git -C "$path" status --porcelain)" ]]; then
-    fail "$name has local changes. Commit, stash, or discard them before updating the dependency pointer."
+    fail "$name has local changes. Commit, stash, or discard them before updating the reference checkout."
   fi
 }
 
@@ -71,9 +81,8 @@ latest_bossmod_release_tag() {
 
 cd "$ROOT"
 
-run git submodule update --init --recursive third_party/BossmodReborn third_party/ECommons
-ensure_clean_submodule "$BMR_PATH" "BossMod Reborn"
-ensure_clean_submodule "$ECOMMONS_PATH" "ECommons"
+ensure_clone "$BMR_PATH" "BossMod Reborn" "$BMR_URL"
+ensure_clone "$ECOMMONS_PATH" "ECommons" "$ECOMMONS_URL"
 
 bmr_tag="$(latest_bossmod_release_tag)"
 [[ -n "$bmr_tag" ]] || fail "could not resolve the latest BossMod Reborn release tag."
@@ -92,4 +101,6 @@ ecommons_commit="$(git -C "$ECOMMONS_PATH" rev-parse FETCH_HEAD)"
 run git -C "$ECOMMONS_PATH" checkout --detach "$ecommons_commit"
 
 echo
-git diff --submodule=short -- third_party/BossmodReborn third_party/ECommons
+echo "Reference checkouts refreshed in $REFERENCES_DIR:"
+printf '  BossMod Reborn: %s\n' "$(git -C "$BMR_PATH" rev-parse HEAD)"
+printf '  ECommons: %s\n' "$(git -C "$ECOMMONS_PATH" rev-parse HEAD)"

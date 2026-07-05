@@ -34,7 +34,7 @@ Root repository instructions still apply here unless this file says otherwise. I
 - If a recurring behavior or pattern needs a new user-facing config option because no current option covers it cleanly, call that out separately and ask the user before implementing the option. Do not silently add config surface as part of an analyzer-driven fix.
 - Keep schema support focused on v3. Do not add schema v2 compatibility unless explicitly requested.
 - Keep reports redacted by default. Raw IDs/OIDs can remain in normalized machine data for matching.
-- Treat `third_party/BossmodReborn` as read-only. Use BMR public types such as `ReplayParserLog.Parse(...)` instead of copying upstream code.
+- Treat `$XCAI_REFERENCES_DIR/BossmodReborn`, defaulting to `$XELS_WORKSPACE_DIR/XelsCombatAIReferences/BossmodReborn`, as read-only. Use BMR public types such as `ReplayParserLog.Parse(...)` instead of copying upstream code.
 - Keep analyzer logic out of `XelsCombatAI/Plugin.cs` and out of the runtime combat update path.
 - Write generated review output outside the repo or under an ignored scratch path unless a fixture is intentionally being added.
 

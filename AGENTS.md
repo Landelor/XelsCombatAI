@@ -12,7 +12,7 @@ Codex instruction discovery for this repository should be treated as:
 - Later files in the root-to-working-directory chain override earlier guidance when they conflict.
 - Keep the combined instruction set small enough for Codex to load; the default project instruction cap is 32 KiB.
 
-Xel's Combat AI is a C# Dalamud plugin for Final Fantasy XIV. It manages a dedicated BossMod Reborn preset during combat, using BossMod IPC for movement/range/positioning strategies, RotationSolver Reborn action prediction for primary positional intent, Avarice shared data as a positional fallback, and optional RotationSolver Reborn IPC for True North behavior.
+Xel's Combat AI is a C# Dalamud plugin for Final Fantasy XIV. It manages a dedicated BossMod Reborn preset during combat, using BossMod IPC for movement/range/positioning strategies, RotationSolver Reborn action prediction for primary positional intent, and optional RotationSolver Reborn IPC for True North behavior.
 
 ## Agent Instruction Standards
 
@@ -81,7 +81,7 @@ A change is not aligned if it primarily:
 - `XelsCombatAI/Runtime/` - framework update orchestration, BossMod preset lifecycle, runtime cache, and status reporting.
 - `XelsCombatAI/Combat/` - combat policy controllers for range, positionals, gap closers, and escape movement.
 - `XelsCombatAI/Game/` - low-level game helpers, job role mapping, action IDs, constants, and geometry utilities.
-- `XelsCombatAI/Integrations/` - BossMod, Avarice, RotationSolver, reflection, IPC, and dependency wrappers.
+- `XelsCombatAI/Integrations/` - BossMod, RotationSolver, vnavmesh, reflection, IPC, and dependency wrappers.
 - `XelsCombatAI/Services/` - injected Dalamud service container/wrappers.
 - `XelsCombatAI/Models/` - small shared enums and simple types.
 - `XelsCombatAI/GlobalUsings.cs` - global imports for internal XCAI namespaces.
@@ -90,8 +90,9 @@ A change is not aligned if it primarily:
 - `.github/workflows/publish-testing.yml` - thin wrapper calling reusable manual testing publication from `XelsPlugins/XelsDalamudRepo`.
 - `.github/workflows/release.yml` - thin wrapper calling reusable manual stable release automation from `XelsPlugins/XelsDalamudRepo`.
 - The active plugin feed lives in `XelsPlugins/XelsDalamudRepo`; do not add a local `pluginmaster.json` to this repository.
-- `third_party/` - pinned git submodules used as compile-time dependencies. See `third_party/AGENTS.md`.
-- `external/` - refreshable external reference workspace for API, IPC, and integration discovery. See `external/AGENTS.md`; its instructions override this file inside that directory.
+- `../XelsCombatAI.code-workspace` - workspace file that opens this repo with sibling references.
+- `../XelsCombatAIReferences/` - default sibling folder for build and API reference clones. Set `XCAI_REFERENCES_DIR` to use a different location.
+- `../XelsDalamudRepo/` - default sibling checkout for package/feed tooling. Set `XELS_DALAMUD_REPO_DIR` to use a different location.
 
 ## Build And Validation
 
@@ -109,10 +110,10 @@ Notes:
 
 - The project targets `net10.0-windows8.0` through `Dalamud.NET.Sdk/15.0.0`.
 - On Linux, set `DALAMUD_HOME` to a directory containing Dalamud dev assemblies before building.
-- Builds reference ECommons at `third_party/ECommons/ECommons/ECommons.csproj`.
-- `tools/FightReview` builds against BossMod Reborn at `third_party/BossmodReborn/BossMod/BossModReborn.csproj`.
-- Run `git submodule update --init --recursive` after cloning or when the pinned build dependencies change.
-- GitHub Actions should initialize submodules before validation.
+- The default workspace root is the parent folder of this repo. Set `XELS_WORKSPACE_DIR` if this repo is not cloned beside `XelsCombatAIReferences` and `XelsDalamudRepo`.
+- Builds reference ECommons at `$XCAI_REFERENCES_DIR/ECommons/ECommons/ECommons.csproj`, defaulting to `$XELS_WORKSPACE_DIR/XelsCombatAIReferences/ECommons/ECommons/ECommons.csproj`.
+- `tools/FightReview` builds against BossMod Reborn at `$XCAI_REFERENCES_DIR/BossmodReborn/BossMod/BossModReborn.csproj`, defaulting to `$XELS_WORKSPACE_DIR/XelsCombatAIReferences/BossmodReborn/BossMod/BossModReborn.csproj`.
+- Run `scripts/update-build-dependencies.sh` after cloning or when build reference checkouts are missing. Set `XCAI_REFERENCES_DIR` first if references should live somewhere other than `$XELS_WORKSPACE_DIR/XelsCombatAIReferences`.
 - `tools/FightReview.Tests` is a custom executable test harness, not a `dotnet test` project. The reusable validation workflow skips it; run `scripts/test-and-build.sh` when tool or review-log behavior changes.
 - Run `dotnet restore` when dependency, SDK, target framework, or project-file changes could affect restore output.
 - Run `scripts/test-and-build.sh --skip-tools --package` for release/package changes or when packaging behavior may have changed. This requires `XelsDalamudRepo` cloned beside this repo, or `XELS_DALAMUD_REPO_DIR` set to that checkout.
@@ -148,9 +149,10 @@ Do not guess Dalamud APIs. Before using a Dalamud service, method, event, or typ
 
 - Prefer existing usage in this repository.
 - Prefer installed package metadata, IDE completion, generated bindings, or build errors over memory.
-- Use `external/` and `third_party/` as read-only API references before guessing. Start with `external/Dalamud/` for framework services and generated bindings, `external/SamplePlugin/` for official plugin lifecycle patterns, `external/DalamudPackager/` for packaging behavior, and `external/DalamudPluginsD17/` for public repo metadata examples.
-- For game data or native structures behind Dalamud services, inspect `external/FFXIVClientStructs/`, `external/Lumina/`, and `external/FfxivDatamining/` as applicable.
-- If a checkout is missing or stale and the answer depends on current upstream behavior, run `external/fetch-sources.sh` before drawing conclusions.
+- Use the sibling workspace checkouts as read-only API references before guessing. Resolve them from `$XCAI_REFERENCES_DIR`, or from `$XELS_WORKSPACE_DIR/XelsCombatAIReferences` when `XCAI_REFERENCES_DIR` is unset.
+- Start with `Dalamud/` for framework services and generated bindings, `BossmodReborn/` for BossMod contracts, `ECommons/` for ECommons APIs, `RotationSolverReborn/` for RSR behavior, and `VNavmesh/` for vnavmesh IPC.
+- For game data or native structures behind Dalamud services, inspect `FFXIVClientStructs/`, `Lumina/`, and `FfxivDatamining/` under the reference checkout as applicable.
+- If a checkout is missing or stale and the answer depends on current upstream behavior, run `scripts/update-build-dependencies.sh` before drawing conclusions.
 - If unsure, inspect the current API in the installed package or say that the API needs verification.
 
 ## XelsDevBridge Runtime Inspection
@@ -208,8 +210,8 @@ Follow these Dalamud plugin conventions:
 ## Integration Safety
 
 - Keep plugin behavior conservative. The code runs during combat and writes BossMod transient strategies, so avoid broad refactors or timing changes unless the task requires them.
-- Preserve IPC names, track names, option strings, preset payload module names, and BossMod preset name unless you have verified the upstream contract in `external/` or the relevant upstream project.
-- BossMod Reborn is the required runtime dependency. Avarice is an optional positional fallback while RSR/local positional parity is proven. Do not remove remaining Avarice fallback behavior unless parity evidence shows it is unused.
+- Preserve IPC names, track names, option strings, preset payload module names, and BossMod preset name unless you have verified the upstream contract in the sibling reference checkout or the relevant upstream project.
+- BossMod Reborn is the required runtime dependency.
 - RotationSolver Reborn is optional and only required for `Manage True North`. Do not loosen this behavior unless explicitly requested.
 - Do not introduce network calls or background tasks in the combat update path.
 - Log recoverable integration failures with `IPluginLog.Verbose` where the plugin should keep running.
@@ -239,7 +241,7 @@ After larger changes, include in the final response:
 - Why the design was chosen.
 - What was validated.
 - What must be manually tested in-game.
-- Any assumptions about Dalamud, BossMod Reborn, Avarice, RotationSolver Reborn, or game APIs.
+- Any assumptions about Dalamud, BossMod Reborn, ECommons, RotationSolver Reborn, vnavmesh, or game APIs.
 
 ## Commit Message Standards
 
@@ -289,9 +291,9 @@ The reusable release workflow uses `XelsPlugins/XelsDalamudRepo/scripts/package-
 
 ## External References And Generated Files
 
-- Do not edit files under third-party submodules or ignored external checkouts, including `third_party/BossmodReborn/`, `third_party/ECommons/`, `external/Avarice/`, or `external/RotationSolverReborn/`.
+- Do not edit files under sibling reference checkouts, including `$XELS_WORKSPACE_DIR/XelsCombatAIReferences/BossmodReborn/`, `$XELS_WORKSPACE_DIR/XelsCombatAIReferences/ECommons/`, `$XELS_WORKSPACE_DIR/XelsCombatAIReferences/RotationSolverReborn/`, or `$XELS_WORKSPACE_DIR/XelsCombatAIReferences/VNavmesh/`.
 - Do not commit or package external plugin source.
-- Keep external reference URLs and tracked branches in `external/sources.json`.
-- External references should track the latest remote branch heads, not pinned commits. Compile-time dependencies in `third_party/` are pinned as git submodules.
-- Use `external/fetch-sources.sh` to clone or refresh ignored reference checkouts.
+- Build references are cloned and refreshed by `scripts/update-build-dependencies.sh`.
+- Reference checkouts should track the latest remote branch heads unless a task explicitly needs a release tag or historical commit.
+- Agents may search sibling workspace folders for context, but should treat them as separate read-only repositories unless the user explicitly asks to change them.
 - Do not hand-edit generated build output under `artifacts/`, `bin/`, or `obj/`.

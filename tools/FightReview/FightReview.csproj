@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\third_party\BossmodReborn\BossMod\BossModReborn.csproj" AdditionalProperties="EnableWindowsTargeting=true" />
+    <ProjectReference Include="$(XcaiReferencesDir)\BossmodReborn\BossMod\BossModReborn.csproj" AdditionalProperties="EnableWindowsTargeting=true" />
     <Reference Include="Lumina" Condition="'$(DALAMUD_HOME)' != ''">
       <HintPath>$(DALAMUD_HOME)\Lumina.dll</HintPath>
     </Reference>

@@ -2,4 +2,11 @@
   <PropertyGroup Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux)))'">
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
+
+  <PropertyGroup>
+    <XelsWorkspaceDir Condition="'$(XelsWorkspaceDir)' == '' And '$(XELS_WORKSPACE_DIR)' != ''">$(XELS_WORKSPACE_DIR)</XelsWorkspaceDir>
+    <XelsWorkspaceDir Condition="'$(XelsWorkspaceDir)' == ''">$(MSBuildThisFileDirectory)..</XelsWorkspaceDir>
+    <XcaiReferencesDir Condition="'$(XcaiReferencesDir)' == '' And '$(XCAI_REFERENCES_DIR)' != ''">$(XCAI_REFERENCES_DIR)</XcaiReferencesDir>
+    <XcaiReferencesDir Condition="'$(XcaiReferencesDir)' == ''">$(XelsWorkspaceDir)\XelsCombatAIReferences</XcaiReferencesDir>
+  </PropertyGroup>
 </Project>

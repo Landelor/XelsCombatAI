@@ -35,8 +35,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\third_party\ECommons\ECommons\ECommons.csproj" Condition="Exists('..\third_party\ECommons\ECommons\ECommons.csproj')" />
-    <ProjectReference Include="..\external\ECommons\ECommons\ECommons.csproj" Condition="!Exists('..\third_party\ECommons\ECommons\ECommons.csproj') And Exists('..\external\ECommons\ECommons\ECommons.csproj')" />
+    <ProjectReference Include="$(XcaiReferencesDir)\ECommons\ECommons\ECommons.csproj" Condition="Exists('$(XcaiReferencesDir)\ECommons\ECommons\ECommons.csproj')" />
     <Reference Include="Dalamud.Common">
       <HintPath>$(DalamudLibPath)Dalamud.Common.dll</HintPath>
     </Reference>

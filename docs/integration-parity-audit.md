@@ -11,7 +11,7 @@ Status meanings:
 
 ## BossMod Reborn
 
-Current BMR checkout inspected: `third_party/BossmodReborn` commit `ae39a1e40d9900d094f3799f9ea7499a665f8461`.
+Current BMR checkout inspected: sibling reference checkout `BossmodReborn` commit `ae39a1e40d9900d094f3799f9ea7499a665f8461`.
 
 | Decision area | Current XCAI primary source | Remaining fallback | Status | Evidence / next step |
 | --- | --- | --- | --- | --- |

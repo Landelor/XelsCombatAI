@@ -110,15 +110,30 @@ internal static class DutyContentLookup
             }
         }
 
+        foreach (var referenceRoot in ReferenceRoots())
+        {
+            var referenceCsv = Path.Combine(referenceRoot, "FfxivDatamining", "csv", "en");
+            if (IsCsvDirectory(referenceCsv))
+            {
+                return referenceCsv;
+            }
+        }
+
         foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
         {
             var directory = new DirectoryInfo(start);
             while (directory != null)
             {
-                var externalCsv = Path.Combine(directory.FullName, "external", "FfxivDatamining", "csv", "en");
-                if (IsCsvDirectory(externalCsv))
+                var siblingReferenceCsv = Path.GetFullPath(Path.Combine(
+                    directory.FullName,
+                    "..",
+                    "XelsCombatAIReferences",
+                    "FfxivDatamining",
+                    "csv",
+                    "en"));
+                if (IsCsvDirectory(siblingReferenceCsv))
                 {
-                    return externalCsv;
+                    return siblingReferenceCsv;
                 }
 
                 var directCsv = Path.Combine(directory.FullName, "csv", "en");
@@ -132,6 +147,21 @@ internal static class DutyContentLookup
         }
 
         return null;
+    }
+
+    private static IEnumerable<string> ReferenceRoots()
+    {
+        var referencesDir = Environment.GetEnvironmentVariable("XCAI_REFERENCES_DIR");
+        if (!string.IsNullOrWhiteSpace(referencesDir))
+        {
+            yield return referencesDir;
+        }
+
+        var workspaceDir = Environment.GetEnvironmentVariable("XELS_WORKSPACE_DIR");
+        if (!string.IsNullOrWhiteSpace(workspaceDir))
+        {
+            yield return Path.Combine(workspaceDir, "XelsCombatAIReferences");
+        }
     }
 
     private static string? NormalizeCsvDirectory(string path)

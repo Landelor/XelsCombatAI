@@ -1,4 +1,4 @@
-name: Update Build Dependencies
+name: Validate Build References
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     - cron: "23 6 * * *"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: update-build-dependencies
@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DALAMUD_HOME: /tmp/dalamud
+      XELS_WORKSPACE_DIR: ${{ github.workspace }}/..
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout plugin
@@ -24,7 +25,6 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          submodules: recursive
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -38,31 +38,8 @@ jobs:
           curl -fsSL "https://goatcorp.github.io/dalamud-distrib/latest.zip" -o /tmp/dalamud.zip
           unzip -q -o /tmp/dalamud.zip -d "$DALAMUD_HOME"
 
-      - name: Update dependency pointers
+      - name: Refresh reference checkouts
         run: scripts/update-build-dependencies.sh
 
-      - name: Detect dependency changes
-        id: changes
-        shell: bash
-        run: |
-          if git diff --quiet --exit-code -- third_party/BossmodReborn third_party/ECommons; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No dependency updates were found."
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            git diff --submodule=log -- third_party/BossmodReborn third_party/ECommons
-          fi
-
-      - name: Validate updated dependencies
-        if: steps.changes.outputs.changed == 'true'
+      - name: Validate refreshed references
         run: scripts/test-and-build.sh
-
-      - name: Commit dependency pointers
-        if: steps.changes.outputs.changed == 'true'
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add third_party/BossmodReborn third_party/ECommons
-          git commit -m "chore: update build dependencies"
-          git push origin HEAD:main
