@@ -149,7 +149,12 @@ internal sealed class EscapeGapCloserController(
             35 when config.GapCloserRDM => this.TryUseTargetBackstepEscapeGapCloser(ActionUse.RedMageDisplacementActionId, "Displacement", 5f, CombatConstants.FixedForwardGapCloserRange, safeMovementDestination),
             40 when config.GapCloserSGE => this.TryUseFriendlyEscapeGapCloser(ActionUse.SageIcarusActionId, "Icarus", 25f, safeMovementDestination),
             41 when config.GapCloserVPR => this.TryUseFriendlyEscapeGapCloser(ActionUse.ViperSlitherActionId, "Slither", CombatConstants.GapCloserMaxRange, safeMovementDestination) || this.TryUseGreedyTargetEscapeGapCloser(ActionUse.ViperSlitherActionId, "Slither", safeMovementDestination),
-            38 when config.GapCloserDNC => this.TryUseForwardEscapeGapCloser(ActionUse.DancerEnAvantActionId, "En Avant", safeMovementDestination),
+            38 when config.GapCloserDNC => this.TryUseForwardEscapeGapCloser(
+                ActionUse.DancerEnAvantActionId,
+                "En Avant",
+                safeMovementDestination,
+                CombatConstants.DancerEnAvantRange,
+                allowUnsafeChainedLanding: true),
             42 when config.GapCloserPCT => this.TryUseForwardEscapeGapCloser(ActionUse.PictomancerSmudgeActionId, "Smudge", safeMovementDestination),
             _ => false
         };
@@ -270,6 +275,31 @@ internal sealed class EscapeGapCloserController(
         return dangerElapsedMilliseconds > CombatConstants.EscapeGapCloserDangerWindowMilliseconds &&
                currentSafe &&
                !canAssistSafeMovement;
+    }
+
+    internal static bool ShouldAllowUnsafeChainedForwardEscapeDash(float safeMovementDistance, uint currentCharges, float dashDistance, out string reason)
+    {
+        if (!float.IsFinite(safeMovementDistance) || !float.IsFinite(dashDistance) || dashDistance <= 0f)
+        {
+            reason = "invalid chained dash distance";
+            return false;
+        }
+
+        if (currentCharges <= 1)
+        {
+            reason = "needs a spare En Avant charge";
+            return false;
+        }
+
+        var chainedDistance = currentCharges * dashDistance;
+        if (safeMovementDistance > chainedDistance + 0.5f)
+        {
+            reason = $"safe movement target {safeMovementDistance:0.0}y exceeds chained En Avant reach {chainedDistance:0.0}y";
+            return false;
+        }
+
+        reason = $"chained En Avant can cover {safeMovementDistance:0.0}y with {currentCharges} charges";
+        return true;
     }
 
     private unsafe bool TryUseFriendlyEscapeGapCloser(uint actionId, string actionName, float maxRange, Vector3 safeMovementDestination)
@@ -646,7 +676,12 @@ internal sealed class EscapeGapCloserController(
         return false;
     }
 
-    private unsafe bool TryUseForwardEscapeGapCloser(uint actionId, string actionName, Vector3 safeMovementDestination)
+    private unsafe bool TryUseForwardEscapeGapCloser(
+        uint actionId,
+        string actionName,
+        Vector3 safeMovementDestination,
+        float dashDistance = CombatConstants.FixedForwardGapCloserRange,
+        bool allowUnsafeChainedLanding = false)
     {
         var player = services.ObjectTable.LocalPlayer;
         if (player == null)
@@ -660,7 +695,7 @@ internal sealed class EscapeGapCloserController(
             return false;
         }
 
-        var destination = player.Position + Geometry.RotationToDirection(player.Rotation) * CombatConstants.FixedForwardGapCloserRange;
+        var destination = player.Position + Geometry.RotationToDirection(player.Rotation) * dashDistance;
         if (!mobilityEvaluator.TryValidateFixedDashDestination(
             player,
             destination,
@@ -673,11 +708,17 @@ internal sealed class EscapeGapCloserController(
             requireSafetyProgress: true,
             requireUptimeProgress: false,
             requireVnavReachable: true,
-            fixedDashRange: CombatConstants.FixedForwardGapCloserRange,
+            fixedDashRange: dashDistance,
             fixedDashBackwards: false,
             out var decision))
         {
-            if (this.TryRequestFixedEscapeDashFacing(player, actionId, actionName, CombatConstants.FixedForwardGapCloserRange, safeMovementDestination, backward: false))
+            if (this.TryRequestFixedEscapeDashFacing(player, actionId, actionName, dashDistance, safeMovementDestination, backward: false))
+            {
+                return true;
+            }
+
+            if (allowUnsafeChainedLanding &&
+                this.TryUseUnsafeChainedForwardEscapeGapCloser(player, actionId, actionName, safeMovementDestination, dashDistance, decision.RiskReason))
             {
                 return true;
             }
@@ -702,6 +743,146 @@ internal sealed class EscapeGapCloserController(
         }
 
         this.lastEscapeGapCloserSafety = used ? $"used {actionName} ({decision.IntentLabel})" : $"failed to use {actionName} ({decision.IntentLabel})";
+        return used;
+    }
+
+    private unsafe bool TryUseUnsafeChainedForwardEscapeGapCloser(
+        IBattleChara player,
+        uint actionId,
+        string actionName,
+        Vector3 safeMovementDestination,
+        float dashDistance,
+        string normalRejectionReason)
+    {
+        if (!this.GreedyUnsafeEscapeDashesEnabled())
+        {
+            return false;
+        }
+
+        var currentCharges = ActionUse.GetCurrentCharges(actionId);
+        var safeMovementDistance = Geometry.Distance2D(player.Position, safeMovementDestination);
+        if (!ShouldAllowUnsafeChainedForwardEscapeDash(safeMovementDistance, currentCharges, dashDistance, out var chainReason))
+        {
+            this.lastEscapeGapCloserSafety = chainReason;
+            return false;
+        }
+
+        var pressure = mechanicPressure();
+        if (pressure.BadForGreedyDash && !pressure.KnockbackRecoveryActive)
+        {
+            this.lastEscapeGapCloserSafety = pressure.FormatOptionalMovementHoldReason();
+            mobilityEvaluator.RecordIdle(MobilityIntent.Safety, actionName, this.lastEscapeGapCloserSafety);
+            return false;
+        }
+
+        var destination = player.Position + Geometry.RotationToDirection(player.Rotation) * dashDistance;
+        if (this.TryValidateUnsafeChainedForwardEscapeDestination(
+                player,
+                actionId,
+                actionName,
+                destination,
+                safeMovementDestination,
+                out var decision))
+        {
+            return this.TryUseForwardEscapeAction(actionId, actionName, destination, decision, "chained fixed escape");
+        }
+
+        if (this.TryRequestUnsafeChainedFixedEscapeDashFacing(player, actionId, actionName, dashDistance, safeMovementDestination))
+        {
+            return true;
+        }
+
+        this.lastEscapeGapCloserSafety = decision.RiskReason == "landing is safe; normal escape validation required"
+            ? normalRejectionReason
+            : decision.RiskReason;
+        return false;
+    }
+
+    private bool TryValidateUnsafeChainedForwardEscapeDestination(
+        IBattleChara player,
+        uint actionId,
+        string actionName,
+        Vector3 destination,
+        Vector3 safeMovementDestination,
+        out MobilityDecisionDiagnostics decision)
+        => mobilityEvaluator.TryValidateGreedyUnsafeEscapeDashDestination(
+            player,
+            destination,
+            services.TargetManager.Target as IBattleChara,
+            safeMovementDestination,
+            actionName,
+            actionId,
+            0f,
+            out decision);
+
+    private bool TryRequestUnsafeChainedFixedEscapeDashFacing(
+        IBattleChara player,
+        uint actionId,
+        string actionName,
+        float dashDistance,
+        Vector3 safeMovementDestination)
+    {
+        var movementDirection = safeMovementDestination - player.Position;
+        movementDirection.Y = 0f;
+        if (movementDirection.LengthSquared() <= 0.0001f)
+        {
+            return false;
+        }
+
+        movementDirection = Vector3.Normalize(movementDirection);
+        var desiredRotation = Geometry.DirectionToRotation(movementDirection);
+        if (Geometry.AbsAngleDelta(player.Rotation, desiredRotation) <= FacingController.DirectionalDashToleranceRadians)
+        {
+            return false;
+        }
+
+        var destination = player.Position + movementDirection * dashDistance;
+        if (!this.TryValidateUnsafeChainedForwardEscapeDestination(
+                player,
+                actionId,
+                actionName,
+                destination,
+                safeMovementDestination,
+                out var decision))
+        {
+            this.lastEscapeGapCloserSafety = decision.RiskReason;
+            return false;
+        }
+
+        facingController.RequestFacing(FacingController.CreateDirectionalDashRequest(
+            desiredRotation,
+            destination,
+            $"turn for chained {actionName}",
+            FacingBossModPolicy.AssistBmrMovementDash));
+        this.lastSafeEscapeDestination = destination;
+        this.lastEscapeGapCloserSafety = $"turning for chained {actionName} ({decision.IntentLabel}, directional dash)";
+        return true;
+    }
+
+    private unsafe bool TryUseForwardEscapeAction(
+        uint actionId,
+        string actionName,
+        Vector3 destination,
+        MobilityDecisionDiagnostics decision,
+        string? styleReason)
+    {
+        var player = services.ObjectTable.LocalPlayer;
+        if (player == null)
+        {
+            return false;
+        }
+
+        this.lastSafeEscapeDestination = destination;
+        var used = ActionManager.Instance()->UseAction(ActionType.Action, actionId, player.GameObjectId);
+        mobilityEvaluator.RecordActionResult(decision, used, used ? "action used" : "action failed");
+        if (used)
+        {
+            this.RecordEscapeActionUsed(actionId, actionName, styleReason);
+        }
+
+        this.lastEscapeGapCloserSafety = used && styleReason != null
+            ? $"used {actionName} ({decision.IntentLabel}, {styleReason})"
+            : used ? $"used {actionName} ({decision.IntentLabel})" : $"failed to use {actionName} ({decision.IntentLabel})";
         return used;
     }
 

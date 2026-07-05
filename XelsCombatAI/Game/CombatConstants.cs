@@ -9,6 +9,7 @@ internal static class CombatConstants
     public const float GapCloserDestinationMeleeRange = 2.6f;
     public const double EscapeGapCloserDangerWindowMilliseconds = 750d;
     public const float FixedForwardGapCloserRange = 15f;
+    public const float DancerEnAvantRange = 10f;
     public const float PositionalDotThreshold = 0.7071068f;
     public static readonly float[] EscapeLocationRadii = [8f, 12f, 16f, 20f];
 }

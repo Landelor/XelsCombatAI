@@ -905,7 +905,8 @@ internal static class GapCloserDecisionPolicy
         return classJobId switch
         {
             25 or 40 => 25f,
-            24 or 38 or 39 or 42 => CombatConstants.FixedForwardGapCloserRange,
+            38 => CombatConstants.DancerEnAvantRange,
+            24 or 39 or 42 => CombatConstants.FixedForwardGapCloserRange,
             _ => CombatConstants.GapCloserMaxRange
         };
     }

@@ -56,6 +56,7 @@ var tests = new (string Name, Action Body)[]
     ("knockback recovery direction rejects sideways dashes", KnockbackRecoveryDirectionRejectsSidewaysDashes),
     ("manual suppression allows safety gap closer only", ManualSuppressionAllowsSafetyGapCloserOnly),
     ("fixed direction pressure suppresses optional directional dashes", FixedDirectionPressureSuppressesOptionalDirectionalDashes),
+    ("dancer en avant uses native dash distance", DancerEnAvantUsesNativeDashDistance),
     ("directional dash facing can pause BMR movement", DirectionalDashFacingCanPauseBmrMovement),
     ("caster immobility policy holds optional dashes", CasterImmobilityPolicyHoldsOptionalDashes),
     ("caster advisory movement holds near GCD ready", CasterAdvisoryMovementHoldsNearGcdReady),
@@ -1986,6 +1987,50 @@ static void BmrSafetyDashRequiresDestinationProgress()
             new Vector3(4f, 0f, 0f),
             out _),
         "BMR safety dash should scale down the required gain when already close to the destination");
+}
+
+static void DancerEnAvantUsesNativeDashDistance()
+{
+    AssertEqual(10f, CombatConstants.DancerEnAvantRange, "DNC En Avant distance");
+    AssertEqual(
+        CombatConstants.DancerEnAvantRange,
+        GapCloserDecisionPolicy.ResolveConservativeTrashGapCloserRange(38),
+        "DNC conservative dash range");
+    AssertEqual(
+        CombatConstants.DancerEnAvantRange - 2.5f,
+        GapCloserDecisionPolicy.ResolveConservativeTrashGapCloserUseThreshold(38),
+        "DNC conservative dash use threshold");
+    AssertEqual(
+        CombatConstants.FixedForwardGapCloserRange,
+        GapCloserDecisionPolicy.ResolveConservativeTrashGapCloserRange(42),
+        "PCT fixed-forward dash range");
+
+    AssertTrue(
+        EscapeGapCloserController.ShouldAllowUnsafeChainedForwardEscapeDash(
+            safeMovementDistance: 18f,
+            currentCharges: 2,
+            dashDistance: CombatConstants.DancerEnAvantRange,
+            out var chainReason),
+        "DNC should allow a two-charge unsafe chain when the BMR target is reachable");
+    AssertContains("2 charges", chainReason, "DNC chained dash reason");
+
+    AssertFalse(
+        EscapeGapCloserController.ShouldAllowUnsafeChainedForwardEscapeDash(
+            safeMovementDistance: 18f,
+            currentCharges: 1,
+            dashDistance: CombatConstants.DancerEnAvantRange,
+            out var singleChargeReason),
+        "DNC should not intentionally land unsafe with only one charge");
+    AssertContains("spare", singleChargeReason, "DNC single-charge chain rejection");
+
+    AssertFalse(
+        EscapeGapCloserController.ShouldAllowUnsafeChainedForwardEscapeDash(
+            safeMovementDistance: 25f,
+            currentCharges: 2,
+            dashDistance: CombatConstants.DancerEnAvantRange,
+            out var outOfReachReason),
+        "DNC should not start an unsafe chain when charges cannot cover the BMR target");
+    AssertContains("exceeds", outOfReachReason, "DNC out-of-reach chain rejection");
 }
 
 static void FriendlyEscapeAnchorConservesLowValueAllyDashes()
