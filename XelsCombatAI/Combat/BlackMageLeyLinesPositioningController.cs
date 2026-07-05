@@ -38,6 +38,8 @@ internal sealed class BlackMageLeyLinesPositioningController(
     Func<BossModMechanicPressure> mechanicPressure)
     : IBossModGoalZoneContributor
 {
+    internal const string GoalLabel = "Ley Lines";
+
     private const uint BlackMageJobId = 25;
     private const float LeyLinesRadius = 3f;
     private const float PreferredEntryRadius = 0.75f;
@@ -189,7 +191,7 @@ internal sealed class BlackMageLeyLinesPositioningController(
         var reason = plan.DistanceToPreferred <= MaxNarrowSlidecastReturnDistance
             ? "narrow Ley Lines return"
             : "Ley Lines return";
-        contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.Uptime, "Ley Lines", plan.PreferredEntryPosition, MechanicWhisperConfidence.Routine));
+        contributions.Add(new(this.lastGoalDelegate, BossModGoalPriority.Uptime, GoalLabel, plan.PreferredEntryPosition, MechanicWhisperConfidence.Routine));
         this.lastInjected = true;
         this.lastOverlay = plan.CreateOverlay(player!.Position.Y, injected: true, reason);
         this.nextOverlayRefresh = DateTime.UtcNow.Add(OverlayRefreshInterval);

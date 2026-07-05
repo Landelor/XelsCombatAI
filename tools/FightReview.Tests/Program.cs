@@ -482,6 +482,23 @@ static void PositionalsSuppressOnAoePacks()
 
 static void BossCenterAvoidanceStaysActiveForPositionalGoals()
 {
+    var leyLinesContribution = new BossModGoalContribution(
+        new Func<int, float>(_ => 0f),
+        BossModGoalPriority.Uptime,
+        BlackMageLeyLinesPositioningController.GoalLabel);
+    var positionalContribution = new BossModGoalContribution(
+        new Func<int, float>(_ => 0f),
+        BossModGoalPriority.Uptime,
+        "Positional landing");
+
+    AssertTrue(
+        BossCenterAvoidanceController.HasActiveLeyLinesGoal([leyLinesContribution]),
+        "Ley Lines movement should suppress boss center comfort avoidance");
+
+    AssertFalse(
+        BossCenterAvoidanceController.HasActiveLeyLinesGoal([positionalContribution]),
+        "normal positional goals should keep boss center comfort avoidance available");
+
     AssertTrue(
         BossCenterAvoidanceController.ShouldSuppressForBossModGoalZone(goalZoneActive: true, recommendedPositionalActive: false),
         "non-positional BossMod goal zones should suppress center comfort movement");

@@ -123,6 +123,14 @@ internal sealed class BossCenterAvoidanceController(
             return;
         }
 
+        if (HasActiveLeyLinesGoal(contributions))
+        {
+            this.insideCenterSince = DateTime.MinValue;
+            this.lastReason = "Ley Lines positioning active";
+            this.lastOverlay = null;
+            return;
+        }
+
         if (HasHigherPriorityUtilityGoal(contributions))
         {
             this.insideCenterSince = DateTime.MinValue;
@@ -291,6 +299,21 @@ internal sealed class BossCenterAvoidanceController(
     internal static bool ShouldSuppressForBossModGoalZone(bool goalZoneActive, bool recommendedPositionalActive)
     {
         return goalZoneActive && !recommendedPositionalActive;
+    }
+
+    internal static bool HasActiveLeyLinesGoal(IEnumerable<BossModGoalContribution> contributions)
+    {
+        foreach (var contribution in contributions)
+        {
+            if (contribution.ScoreMode == BossModGoalScoreMode.Advisory &&
+                contribution.Priority >= BossModGoalPriority.Uptime &&
+                contribution.Label.Equals(BlackMageLeyLinesPositioningController.GoalLabel, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool HasActiveRecommendedPositional(object hints)
