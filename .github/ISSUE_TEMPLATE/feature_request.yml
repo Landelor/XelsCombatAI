@@ -1,0 +1,99 @@
+name: Feature request
+description: Suggest a new movement, positioning, targeting, UI, or debugging improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement.
+
+        Xel's Combat AI keeps BossMod Reborn authoritative for encounter safety. Feature requests are easiest to evaluate when they describe the player-like behavior you want, when it should apply, and what should bound it so it does not become overly aggressive or mechanical.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or missed behavior
+      description: What currently feels awkward, unsafe, robotic, or missing?
+      placeholder: |
+        Example: On melee jobs during this mechanic, the character returns to the boss too early and clips a follow-up danger zone instead of waiting for the safe pocket.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the behavior you want in practical terms.
+      placeholder: |
+        Example: Prefer waiting at the current safe spot until BossMod shows a safe path back, then return only if the next GCD would otherwise be missed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Jobs, roles, content, or situations
+      description: Where should this apply? Be specific about jobs, roles, duties, bosses, trash pulls, mechanics, or rotation states.
+      placeholder: |
+        Jobs/roles:
+        Duty/encounter:
+        Boss/trash/mechanic:
+        Rotation/action state:
+        Party context:
+    validations:
+      required: true
+
+  - type: textarea
+    id: safety-boundaries
+    attributes:
+      label: Safety and control boundaries
+      description: What should prevent this behavior from activating?
+      placeholder: |
+        Should yield to BossMod mechanic movement when:
+        Should stop during manual input when:
+        Should avoid using dashes/actions when:
+        Should not affect these jobs/content:
+    validations:
+      required: true
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Configuration and UI expectations
+      description: Should this use an existing setting, need a new setting, appear in the decision overlay, or be off by default?
+      placeholder: |
+        Existing setting:
+        New setting:
+        Suggested tab:
+        Default on/off:
+        Decision overlay info:
+    validations:
+      required: false
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples, logs, or references
+      description: Add clips, run-review logs, BossMod replays, screenshots, or examples from similar behavior.
+      placeholder: |
+        Video:
+        Run-review log:
+        BossMod replay/log:
+        Similar feature or reference:
+    validations:
+      required: false
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Impact
+      description: How much does this affect normal use?
+      options:
+        - Nice to have
+        - Noticeable quality-of-life improvement
+        - Frequently affects combat movement or uptime
+        - Blocks use of a feature/job/content
+    validations:
+      required: true
