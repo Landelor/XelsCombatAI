@@ -1,0 +1,145 @@
+name: Bug report
+description: Report a runtime, movement, targeting, UI, or integration problem.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem.
+
+        Please include enough version and runtime context to reproduce the issue. If the report involves movement, targeting, casts, dashes, BossMod safety, or RotationSolver behavior, a short clip plus a run-review log is usually the fastest way to diagnose it.
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Xel's Combat AI version
+      description: Copy the installed version from Dalamud's plugin installer or the plugin list.
+      placeholder: "Example: v2.19.11 or v2.19.11-testing.18"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build-channel
+    attributes:
+      label: Build channel
+      options:
+        - Stable release
+        - Testing release
+        - Local/debug build
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependency-versions
+    attributes:
+      label: BossMod and RotationSolver versions
+      description: Include BossMod Reborn and RotationSolver Reborn versions when they are installed or involved in the behavior.
+      placeholder: |
+        BossMod Reborn:
+        RotationSolver Reborn:
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Game and encounter context
+      description: Tell us where this happened and what you were playing.
+      placeholder: |
+        Job:
+        Level:
+        Duty/zone/encounter:
+        Target or pull:
+        Party type: solo, duty finder, trust, premade, etc.
+        Combat state: boss, trash pull, downtime, opener, mechanic, death/revive, etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the problem and the behavior you expected instead.
+      placeholder: |
+        Actual behavior:
+        Expected behavior:
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include the smallest sequence that makes the issue happen.
+      placeholder: |
+        1. Enable these relevant options:
+        2. Enter this content or start this pull/mechanic:
+        3. Let this job/action/rotation state happen:
+        4. Observe:
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant settings or debug snapshot
+      description: Use the Troubleshooting tab's debug snapshot when possible. Otherwise list changed settings, especially movement timing, AoE/trash, positionals, job-specific, dashes, overlay, and run-review logging.
+      placeholder: |
+        Paste debug snapshot or relevant settings here.
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and evidence
+      description: Attach or link useful evidence. Redact private names, tokens, and chat if needed.
+      placeholder: |
+        Run-review log: enable Troubleshooting -> Write run-review logs, then attach the JSONL from XelsCombatAI/combat-logs.
+        BossMod replay/log:
+        Dalamud log excerpt:
+        Screenshot or short video:
+        Exact timestamp in the clip/log:
+    validations:
+      required: false
+
+  - type: textarea
+    id: safety
+    attributes:
+      label: Movement or safety details
+      description: Fill this out for movement, positioning, dash, cast interruption, range, target, or BossMod safety issues.
+      placeholder: |
+        Was BossMod auto-movement active?
+        Were you moving manually?
+        Were you casting or animation locked?
+        Was the target inside hitbox/melee/ranged range?
+        Were forbidden zones, knockbacks, stack/spread, arena edges, or pathfinding involved?
+        Did the decision overlay show a destination or reason?
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Anything else that might affect reproduction or diagnosis.
+      placeholder: "Recent updates, config changes, plugin reloads, disabled dependencies, intermittent behavior, etc."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I checked that the issue still happens on the latest available build for my channel.
+          required: true
+        - label: I included the Xel's Combat AI version and build channel.
+          required: true
+        - label: I included BossMod Reborn and RotationSolver Reborn versions when they are involved.
+          required: true
+        - label: I attached logs, a run-review log, a replay, or a video if the issue depends on combat movement/timing.
+          required: false
