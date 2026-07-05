@@ -34,11 +34,36 @@ internal sealed class TargetUptimePlanner(
             return Configuration.InternalDisabledUptimeRange;
         }
 
-        var classJobId = services.ObjectTable.LocalPlayer?.ClassJob.RowId ?? 0;
+        var player = services.ObjectTable.LocalPlayer;
+        var classJobId = player?.ClassJob.RowId ?? 0;
         var rangeRole = JobRoles.GetRangeRole(classJobId);
         if (rotationSolverActions.TryGetUpcomingGcd(requirePreview: false, out var action, out _) &&
             (!action.IsFriendly || IsDancerDanceRangeAction(classJobId, action.ActionId, action.AdjustedActionId)))
         {
+            if (player != null &&
+                services.TargetManager.Target is IBattleChara target &&
+                IsMeleeRangedCastAction(classJobId, action.ActionId, action.AdjustedActionId))
+            {
+                var distanceToHitbox = Geometry.DistanceToHitbox(player.Position, player.HitboxRadius, target.Position, target.HitboxRadius);
+                var timing = new RsrGcdActionTimingSnapshot(
+                    action.ActionId,
+                    action.AdjustedActionId,
+                    action.ActionName,
+                    action.Source,
+                    action.PrimaryTargetId,
+                    action.GcdRemaining,
+                    action.GcdElapsed,
+                    action.GcdTotal,
+                    action.GcdActionAhead);
+                if (ShouldUseMeleeRangedCastFallback(distanceToHitbox, jobRangeProvider.EngagementRange, timing, out var fallbackReason))
+                {
+                    var fallbackRange = ResolveActionRange(action.Range, jobRangeProvider.EngagementRange);
+                    this.LastTargetUptimeRangeSource = action.Source;
+                    this.LastTargetUptimeRangeReason = $"next GCD {action.ActionName} action range {action.Range:0.0}y -> ranged fallback {fallbackRange:0.0}y; {fallbackReason}";
+                    return fallbackRange;
+                }
+            }
+
             var range = ResolveTargetUptimeRange(rangeRole, jobRangeProvider.EngagementRange, action.Range, classJobId, action.ActionId, action.AdjustedActionId);
             this.LastTargetUptimeRangeSource = action.Source;
             this.LastTargetUptimeRangeReason = $"next GCD {action.ActionName} action range {action.Range:0.0}y -> uptime range {range:0.0}y";
@@ -57,13 +82,32 @@ internal sealed class TargetUptimePlanner(
             return DancerDanceUptimeRange;
         }
 
-        var usableActionRange = actionRange > 0f
-            ? Math.Clamp(actionRange, CombatConstants.MeleeActionRange, Configuration.InternalDisabledUptimeRange)
-            : jobEngagementRange;
+        var usableActionRange = ResolveActionRange(actionRange, jobEngagementRange);
 
         return rangeRole == RangeRole.Melee
             ? MathF.Min(jobEngagementRange, usableActionRange)
             : usableActionRange;
+    }
+
+    internal static bool ShouldUseMeleeRangedCastFallback(float distanceToHitbox, float engagementRange, RsrGcdActionTimingSnapshot action, out string reason)
+        => !GapCloserDecisionPolicy.CanWalkToRangeBeforeGcd(distanceToHitbox, engagementRange, action, out reason);
+
+    private static float ResolveActionRange(float actionRange, float jobEngagementRange)
+    {
+        return actionRange > 0f
+            ? Math.Clamp(actionRange, CombatConstants.MeleeActionRange, Configuration.InternalDisabledUptimeRange)
+            : jobEngagementRange;
+    }
+
+    private static bool IsMeleeRangedCastAction(uint classJobId, uint actionId, uint adjustedActionId)
+    {
+        if (classJobId != 39)
+        {
+            return false;
+        }
+
+        return actionId == ActionUse.ReaperHarpeActionId ||
+               adjustedActionId == ActionUse.ReaperHarpeActionId;
     }
 
     private static bool IsDancerDanceRangeAction(uint classJobId, uint actionId, uint adjustedActionId)

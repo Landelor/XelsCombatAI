@@ -424,6 +424,30 @@ static void TargetUptimeRangeFollowsNextGcd()
         "melee jobs should still close to melee range even when the next action has long range");
 
     AssertEqual(
+        Configuration.InternalMeleeUptimeRange,
+        TargetUptimePlanner.ResolveTargetUptimeRange(RangeRole.Melee, Configuration.InternalMeleeUptimeRange, 25f, 39, ActionUse.ReaperHarpeActionId, ActionUse.ReaperHarpeActionId),
+        "Reaper Harpe should still prefer melee range when uptime is attainable");
+
+    var lateHarpe = new RsrGcdActionTimingSnapshot(
+        ActionUse.ReaperHarpeActionId,
+        ActionUse.ReaperHarpeActionId,
+        "Harpe",
+        "test",
+        0,
+        GcdRemaining: 0.5f,
+        GcdElapsed: 2f,
+        GcdTotal: 2.5f,
+        GcdActionAhead: 0.35f);
+    AssertTrue(
+        TargetUptimePlanner.ShouldUseMeleeRangedCastFallback(20f, Configuration.InternalMeleeUptimeRange, lateHarpe, out _),
+        "Reaper Harpe should use ranged fallback when walking to melee would miss the action window");
+
+    var walkableHarpe = lateHarpe with { GcdRemaining = 2.5f, GcdElapsed = 0f };
+    AssertFalse(
+        TargetUptimePlanner.ShouldUseMeleeRangedCastFallback(3f, Configuration.InternalMeleeUptimeRange, walkableHarpe, out _),
+        "Reaper Harpe should keep melee preference when walking to melee is still practical");
+
+    AssertEqual(
         25f,
         TargetUptimePlanner.ResolveTargetUptimeRange(RangeRole.MagicRanged, Configuration.InternalRangedUptimeRange, 25f),
         "ranged jobs should use the upcoming offensive GCD range");

@@ -47,6 +47,7 @@ internal static class ActionUse
     public const uint NinjaThreeMudraStatusId = 1317;
     public const uint SamuraiGyotenActionId = 7492;
     public const uint SamuraiYatenActionId = 7493;
+    public const uint ReaperHarpeActionId = 24386;
     public const uint ReaperHellsIngressActionId = 24401;
     public const uint ReaperHellsEgressActionId = 24402;
     public const uint ReaperRegressActionId = 24403;

@@ -119,6 +119,14 @@ internal sealed class BossModPresetController(
             var targetUptimeRange = targetUptimePlanner.CalculateTargetUptimeRange();
             this.LastTargetUptimeRangeSource = targetUptimePlanner.LastTargetUptimeRangeSource;
             this.LastTargetUptimeRangeReason = targetUptimePlanner.LastTargetUptimeRangeReason;
+            var suppressTargetUptimeRange = this.ShouldSuppressTargetUptimeRange(suppressAutomatedMovement, out var targetUptimeSuppressionReason);
+            if (suppressTargetUptimeRange)
+            {
+                targetUptimeRange = Configuration.InternalDisabledUptimeRange;
+                this.LastTargetUptimeRangeSource = "local";
+                this.LastTargetUptimeRangeReason = $"{this.LastTargetUptimeRangeReason}; {targetUptimeSuppressionReason}";
+            }
+
             var suppressUptimeWalk = this.ShouldSuppressUptimeWalk(targetUptimeRange, bossModMovementDiagnostics(), out var uptimeSuppressionReason);
             if (suppressUptimeWalk)
             {
@@ -133,7 +141,7 @@ internal sealed class BossModPresetController(
                 ? MapForbiddenZoneCushion(config.PreferredForbiddenZoneDistance)
                 : "None");
 
-            this.SetMovementRangeStrategy(config.ManageMovement && !suppressUptimeWalk
+            this.SetMovementRangeStrategy(config.ManageMovement && !suppressTargetUptimeRange && !suppressUptimeWalk
                 ? MapCombatStyle(config.CombatStyle)
                 : "Any");
 
@@ -159,6 +167,33 @@ internal sealed class BossModPresetController(
             services.Log.Verbose(ex, "Could not update BossMod strategies yet.");
             this.InitializedPreset = false;
         }
+    }
+
+    private bool ShouldSuppressTargetUptimeRange(bool suppressAutomatedMovement, out string reason)
+    {
+        reason = string.Empty;
+        if (suppressAutomatedMovement)
+        {
+            reason = "target uptime range held during manual movement";
+            return true;
+        }
+
+        var player = services.ObjectTable.LocalPlayer;
+        if (player == null || !player.IsCasting)
+        {
+            return false;
+        }
+
+        var slidecastWindow = CasterMovementPolicy.IsCasterSlidecastWindow(player);
+        if (!CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(player.ClassJob.RowId, true, slidecastWindow, null))
+        {
+            return false;
+        }
+
+        reason = slidecastWindow
+            ? "target uptime range held during slidecast"
+            : "target uptime range held during active cast";
+        return true;
     }
 
     public void ResetCache()
@@ -311,9 +346,12 @@ internal sealed class BossModPresetController(
 
         if (!this.TryFindSafeBossRingPoint(player, target, targetUptimeRange, out var candidate, out var lineCheck, out var candidateReason))
         {
-            this.ClearUptimeWalkSuppression();
             reason = candidateReason;
-            return false;
+            this.suppressedUptimeTargetId = target.GameObjectId;
+            this.suppressUptimeWalkUntil = now.Add(UptimeWalkSuppressionLinger);
+            this.lastUptimeWalkSuppressionReason = $"uptime walk held: {candidateReason}";
+            reason = this.lastUptimeWalkSuppressionReason;
+            return true;
         }
 
         if (lineCheck == null || lineCheck.Clear)
