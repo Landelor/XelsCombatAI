@@ -424,13 +424,18 @@ static void TargetUptimeRangeFollowsNextGcd()
 
     AssertEqual(
         25f,
-        TargetUptimePlanner.ResolveTargetUptimeRange(RangeRole.MagicRanged, 24f, 25f),
+        TargetUptimePlanner.ResolveTargetUptimeRange(RangeRole.MagicRanged, Configuration.InternalRangedUptimeRange, 25f),
         "ranged jobs should use the upcoming offensive GCD range");
 
     AssertEqual(
         3f,
-        TargetUptimePlanner.ResolveTargetUptimeRange(RangeRole.PhysicalRanged, 24f, 1f),
+        TargetUptimePlanner.ResolveTargetUptimeRange(RangeRole.PhysicalRanged, Configuration.InternalRangedUptimeRange, 1f),
         "invalid tiny action ranges clamp to minimum action range");
+
+    AssertEqual(
+        15f,
+        TargetUptimePlanner.ResolveTargetUptimeRange(RangeRole.PhysicalRanged, Configuration.InternalRangedUptimeRange, 0f, 38, 15997, 15997),
+        "DNC dance setup should close to dance finish range instead of ranged fallback");
 }
 
 static void BossRingReengageProbesLocalSidestepsFirst()

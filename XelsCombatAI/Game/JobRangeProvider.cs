@@ -5,7 +5,7 @@ namespace XelsCombatAI.Game;
 
 internal sealed class JobRangeProvider(DalamudServices services) : IDisposable
 {
-    private const float RangedUptimeComfortRange = 24f;
+    private const float RangedUptimeComfortRange = Configuration.InternalRangedUptimeRange;
 
     public float EngagementRange { get; private set; } = Configuration.InternalMeleeUptimeRange;
     public float PackAoeRange { get; private set; } = Configuration.InternalMeleeUptimeRange;

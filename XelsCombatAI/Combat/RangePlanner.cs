@@ -11,6 +11,8 @@ internal sealed class TargetUptimePlanner(
     JobRangeProvider jobRangeProvider,
     RotationSolverActionReflection rotationSolverActions)
 {
+    private const float DancerDanceUptimeRange = 15f;
+
     public Func<float?> TargetUptimeRangeOverride { get; set; } = () => null;
     public string LastTargetUptimeRangeSource { get; private set; } = "none";
     public string LastTargetUptimeRangeReason { get; private set; } = "not checked";
@@ -32,11 +34,12 @@ internal sealed class TargetUptimePlanner(
             return Configuration.InternalDisabledUptimeRange;
         }
 
-        var rangeRole = JobRoles.GetRangeRole(services.ObjectTable.LocalPlayer);
+        var classJobId = services.ObjectTable.LocalPlayer?.ClassJob.RowId ?? 0;
+        var rangeRole = JobRoles.GetRangeRole(classJobId);
         if (rotationSolverActions.TryGetUpcomingGcd(requirePreview: false, out var action, out _) &&
-            !action.IsFriendly)
+            (!action.IsFriendly || IsDancerDanceRangeAction(classJobId, action.ActionId, action.AdjustedActionId)))
         {
-            var range = ResolveTargetUptimeRange(rangeRole, jobRangeProvider.EngagementRange, action.Range);
+            var range = ResolveTargetUptimeRange(rangeRole, jobRangeProvider.EngagementRange, action.Range, classJobId, action.ActionId, action.AdjustedActionId);
             this.LastTargetUptimeRangeSource = action.Source;
             this.LastTargetUptimeRangeReason = $"next GCD {action.ActionName} action range {action.Range:0.0}y -> uptime range {range:0.0}y";
             return range;
@@ -47,8 +50,13 @@ internal sealed class TargetUptimePlanner(
         return jobRangeProvider.EngagementRange;
     }
 
-    internal static float ResolveTargetUptimeRange(RangeRole rangeRole, float jobEngagementRange, float actionRange)
+    internal static float ResolveTargetUptimeRange(RangeRole rangeRole, float jobEngagementRange, float actionRange, uint classJobId = 0, uint actionId = 0, uint adjustedActionId = 0)
     {
+        if (IsDancerDanceRangeAction(classJobId, actionId, adjustedActionId))
+        {
+            return DancerDanceUptimeRange;
+        }
+
         var usableActionRange = actionRange > 0f
             ? Math.Clamp(actionRange, CombatConstants.MeleeActionRange, Configuration.InternalDisabledUptimeRange)
             : jobEngagementRange;
@@ -56,6 +64,42 @@ internal sealed class TargetUptimePlanner(
         return rangeRole == RangeRole.Melee
             ? MathF.Min(jobEngagementRange, usableActionRange)
             : usableActionRange;
+    }
+
+    private static bool IsDancerDanceRangeAction(uint classJobId, uint actionId, uint adjustedActionId)
+    {
+        if (classJobId != 38)
+        {
+            return false;
+        }
+
+        return IsDancerDanceRangeAction(actionId) ||
+               IsDancerDanceRangeAction(adjustedActionId);
+    }
+
+    private static bool IsDancerDanceRangeAction(uint actionId)
+    {
+        return actionId is
+            15997 or // Standard Step
+            15998 or // Technical Step
+            15999 or // Emboite
+            16000 or // Entrechat
+            16001 or // Jete
+            16002 or // Pirouette
+            16003 or // Standard Finish
+            16004 or // Technical Finish
+            16191 or // Single Standard Finish
+            16192 or // Double Standard Finish
+            16193 or // Single Technical Finish
+            16194 or // Double Technical Finish
+            16195 or // Triple Technical Finish
+            16196 or // Quadruple Technical Finish
+            25790 or // Tillana
+            33215 or // Single Technical Finish II
+            33216 or // Double Technical Finish II
+            33217 or // Triple Technical Finish II
+            33218 or // Quadruple Technical Finish II
+            36984;   // Finishing Move
     }
 
     public bool CurrentTargetHasBossModule()
