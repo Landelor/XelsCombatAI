@@ -11,6 +11,8 @@ body:
 
         Please include enough version and runtime context to reproduce the issue. If the report involves movement, targeting, casts, dashes, BossMod safety, or RotationSolver behavior, a short clip plus a run-review log is usually the fastest way to diagnose it.
 
+        Run-review logs are Xel's Combat AI `.jsonl` files. Enable them before reproducing with `/xcai logs on` or `Troubleshooting -> Write run-review logs`, then use `/xcai logs status` to print the exact folder.
+
   - type: input
     id: plugin-version
     attributes:
@@ -96,13 +98,27 @@ body:
     id: logs
     attributes:
       label: Logs and evidence
-      description: Attach or link useful evidence. Redact private names, tokens, and chat if needed.
+      description: Attach the newest Xel's Combat AI run-review JSONL after reproducing movement, timing, cast, targeting, dash, BossMod safety, or RotationSolver issues. Redact private chat or unrelated details if needed.
       placeholder: |
-        Run-review log: enable Troubleshooting -> Write run-review logs, then attach the JSONL from XelsCombatAI/combat-logs.
-        BossMod replay/log:
-        Dalamud log excerpt:
-        Screenshot or short video:
+        Run-review JSONL:
+
+        How to enable:
+        1. Open Xel's Combat AI config -> Troubleshooting.
+        2. Enable Write run-review logs.
+        3. Reproduce the issue.
+
+        Chat commands:
+        /xcai logs on
+        /xcai logs status
+
+        Common folders:
+        Windows: %APPDATA%\XIVLauncher\pluginConfigs\XelsCombatAI\combat-logs
+        Linux / Steam Deck: ~/.xlcore/pluginConfigs/XelsCombatAI/combat-logs
+        macOS / XIV on Mac: File -> Open Install Folder, then pluginConfigs/XelsCombatAI/combat-logs
+
+        Short video or screenshots:
         Exact timestamp in the clip/log:
+        Dalamud log excerpt, if there was an error:
     validations:
       required: false
 
@@ -141,5 +157,5 @@ body:
           required: true
         - label: I included BossMod Reborn and RotationSolver Reborn versions when they are involved.
           required: true
-        - label: I attached logs, a run-review log, a replay, or a video if the issue depends on combat movement/timing.
+        - label: I attached a run-review JSONL, a video, or explained why I could not capture one if the issue depends on combat movement/timing.
           required: false
