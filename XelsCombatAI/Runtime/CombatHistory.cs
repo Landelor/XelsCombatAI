@@ -326,7 +326,7 @@ internal sealed class CombatHistory
         return sb.ToString();
     }
 
-    public string BuildJsonLines(Configuration config)
+    public string BuildJsonLines(Configuration config, CombatLogSettingsSnapshot? settingsSnapshot = null)
     {
         var sb = new StringBuilder();
 
@@ -350,6 +350,7 @@ internal sealed class CombatHistory
                     BossModActiveModule: "<none>",
                     BossModActiveZoneModule: "<none>",
                     Config: CombatHistoryConfigSnapshot.From(config),
+                    SettingsSnapshot: settingsSnapshot,
                     RsrSnapshotMode: this.lastSeenRsrSnapshotMode.ToString(),
                     SourceSummary: CombatHistorySourceSummary.Empty),
                 JsonOptions));
@@ -376,6 +377,7 @@ internal sealed class CombatHistory
                 BossModActiveModule: this.BossModActiveModule,
                 BossModActiveZoneModule: this.BossModActiveZoneModule,
                 Config: CombatHistoryConfigSnapshot.From(config),
+                SettingsSnapshot: settingsSnapshot,
                 RsrSnapshotMode: this.lastSeenRsrSnapshotMode.ToString(),
                 SourceSummary: sourceSummary),
             JsonOptions));
@@ -720,6 +722,7 @@ internal sealed class CombatHistory
         string BossModActiveModule,
         string BossModActiveZoneModule,
         CombatHistoryConfigSnapshot Config,
+        CombatLogSettingsSnapshot? SettingsSnapshot,
         string RsrSnapshotMode,
         CombatHistorySourceSummary SourceSummary);
 

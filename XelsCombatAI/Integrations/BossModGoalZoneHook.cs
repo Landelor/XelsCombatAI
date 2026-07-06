@@ -881,7 +881,8 @@ internal sealed class BossModGoalZoneHook : IDisposable
             }
 
             var playerPosition = new Vector2(player.Position.X, player.Position.Z);
-            var slidecastWindow = player.IsCasting && CasterMovementPolicy.IsCasterSlidecastWindow(player);
+            var hasActiveCastTime = CasterMovementPolicy.HasActiveCastTime(player);
+            var slidecastWindow = hasActiveCastTime && CasterMovementPolicy.IsCasterSlidecastWindow(player);
             var hasGcdTiming = this.rotationSolverActions.TryGetUpcomingGcdTiming(out var timing, out _);
             var filtered = new List<BossModGoalContribution>(contributions.Length);
             foreach (var contribution in contributions)
@@ -900,7 +901,7 @@ internal sealed class BossModGoalZoneHook : IDisposable
 
                 var suppress = CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
                     player.ClassJob.RowId,
-                    player.IsCasting,
+                    hasActiveCastTime,
                     slidecastWindow,
                     candidateDistance);
                 if (!suppress && hasGcdTiming && timing != null)

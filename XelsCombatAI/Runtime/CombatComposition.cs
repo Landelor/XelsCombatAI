@@ -99,7 +99,7 @@ internal sealed class CombatComposition : IDisposable
             () => aoeGoalHook.MovementDiagnostics,
             () => aoePackPositioningController.Status.TrashPull,
             () => mechanicPressure.Current);
-        var combatLogWriter = new CombatLogWriter(Path.Combine(configDirectory, "combat-logs"), log);
+        var combatLogWriter = new CombatLogWriter(Path.Combine(configDirectory, "combat-logs"), configDirectory, log);
         presetController = new BossModPresetController(
             config,
             services,

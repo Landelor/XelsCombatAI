@@ -32,6 +32,7 @@ var tests = new (string Name, Action Body)[]
     ("header metadata falls back to frames", HeaderMetadataFallsBackToFrames),
     ("schema v2 rejection", SchemaV2Rejected),
     ("configuration logging defaults/reset", ConfigurationLoggingDefaultsAndReset),
+    ("run-review settings snapshot captures plugin configs", RunReviewSettingsSnapshotCapturesPluginConfigs),
     ("legacy gap closer distance config loads", LegacyGapCloserDistanceConfigLoads),
     ("target uptime range follows next GCD", TargetUptimeRangeFollowsNextGcd),
     ("boss ring reengage probes local sidesteps first", BossRingReengageProbesLocalSidestepsFirst),
@@ -60,6 +61,7 @@ var tests = new (string Name, Action Body)[]
     ("directional dash facing can pause BMR movement", DirectionalDashFacingCanPauseBmrMovement),
     ("caster immobility policy holds optional dashes", CasterImmobilityPolicyHoldsOptionalDashes),
     ("caster advisory movement holds near GCD ready", CasterAdvisoryMovementHoldsNearGcdReady),
+    ("safe cast movement policy holds low priority movement", SafeCastMovementPolicyHoldsLowPriorityMovement),
     ("black mage leylines movement policy", BlackMageLeyLinesMovementPolicy),
     ("gap closer follows RSR auto target", GapCloserFollowsRsrAutoTarget),
     ("ranged gap closers skip boss reengage", RangedGapClosersSkipBossReengage),
@@ -397,6 +399,71 @@ static void ConfigurationLoggingDefaultsAndReset()
     AssertFalse(oldLoggingConfig.FightReviewLoggingEnabled, "migration disables logging");
     AssertTrue(oldLoggingConfig.ManageSocialTurning, "migration enables social turning");
     AssertTrue(oldLoggingConfig.ManageSocialSpacing, "migration enables social spacing");
+}
+
+static void RunReviewSettingsSnapshotCapturesPluginConfigs()
+{
+    using var temp = TempDirectory.Create();
+    var xcaiConfigDirectory = Path.Combine(temp.Path, "XelsCombatAI");
+    Directory.CreateDirectory(xcaiConfigDirectory);
+    File.WriteAllText(Path.Combine(temp.Path, "XelsCombatAI.json"), """{"Version":28,"AvoidArenaEdge":true}""");
+    File.WriteAllText(Path.Combine(temp.Path, "BossModReborn.json"), """{"MovementProfile":"Standard"}""");
+    Directory.CreateDirectory(Path.Combine(temp.Path, "BossModReborn", "autorot"));
+    File.WriteAllText(Path.Combine(temp.Path, "BossModReborn", "autorot", "presets.db.json"), """{"Presets":["XCAI"]}""");
+    Directory.CreateDirectory(Path.Combine(temp.Path, "BossModReborn", "replays"));
+    File.WriteAllText(Path.Combine(temp.Path, "BossModReborn", "replays", "ignored.json"), """{"Generated":true}""");
+    File.WriteAllText(Path.Combine(temp.Path, "RotationSolver.json"), """{"Rotation":"Auto"}""");
+    Directory.CreateDirectory(Path.Combine(temp.Path, "RotationSolver", "Images"));
+    File.WriteAllText(Path.Combine(temp.Path, "RotationSolver", "ActionHealRatio.json"), """{"Cure":1.0}""");
+    File.WriteAllText(Path.Combine(temp.Path, "RotationSolver", "Images", "ignored.json"), """{"Generated":true}""");
+
+    var config = new Configuration
+    {
+        AvoidArenaEdge = false,
+        PreferredForbiddenZoneDistance = 2.25f,
+        CombatStyle = CombatStyle.GreedGCD
+    };
+    var snapshot = CombatLogSettingsSnapshot.Capture(config, xcaiConfigDirectory, logError: null);
+    var json = new CombatHistory().BuildJsonLines(config, snapshot);
+
+    using var document = JsonDocument.Parse(json);
+    var root = document.RootElement;
+    AssertEqual("GreedGCD", root.GetProperty("Config").GetProperty("CombatStyle").GetString()!, "compat config combat style");
+    var settings = root.GetProperty("SettingsSnapshot");
+    var xcai = FindPlugin(settings, "XelsCombatAI");
+    AssertFalse(xcai.GetProperty("RuntimeConfig").GetProperty("AvoidArenaEdge").GetBoolean(), "runtime config captures full XCAI bool");
+    AssertEqual(2.25f, xcai.GetProperty("RuntimeConfig").GetProperty("PreferredForbiddenZoneDistance").GetSingle(), "runtime config captures full XCAI float");
+
+    var bmrFiles = FileNames(FindPlugin(settings, "BossModReborn"));
+    AssertTrue(bmrFiles.Contains("BossModReborn.json"), "BMR root config captured");
+    AssertTrue(bmrFiles.Contains(Path.Combine("BossModReborn", "autorot", "presets.db.json")), "BMR autorotation settings captured");
+    AssertFalse(bmrFiles.Any(path => path.Contains("replays", StringComparison.OrdinalIgnoreCase)), "BMR replays excluded");
+
+    var rsrFiles = FileNames(FindPlugin(settings, "RotationSolver"));
+    AssertTrue(rsrFiles.Contains("RotationSolver.json"), "RSR root config captured");
+    AssertTrue(rsrFiles.Contains(Path.Combine("RotationSolver", "ActionHealRatio.json")), "RSR JSON settings captured");
+    AssertFalse(rsrFiles.Any(path => path.Contains("Images", StringComparison.OrdinalIgnoreCase)), "RSR images excluded");
+
+    static JsonElement FindPlugin(JsonElement settings, string pluginName)
+    {
+        foreach (var plugin in settings.GetProperty("Plugins").EnumerateArray())
+        {
+            if (plugin.GetProperty("Plugin").GetString() == pluginName)
+            {
+                return plugin;
+            }
+        }
+
+        throw new InvalidOperationException($"Missing settings snapshot for {pluginName}.");
+    }
+
+    static HashSet<string> FileNames(JsonElement plugin)
+    {
+        return plugin.GetProperty("Files")
+            .EnumerateArray()
+            .Select(file => file.GetProperty("RelativePath").GetString()!)
+            .ToHashSet(StringComparer.Ordinal);
+    }
 }
 
 static void LegacyGapCloserDistanceConfigLoads()
@@ -1601,6 +1668,18 @@ static void CasterAdvisoryMovementHoldsNearGcdReady()
             currentCastTime: 2.3f),
         "stale cast timing should not be treated as an active slidecast window");
 
+    AssertFalse(
+        CasterMovementPolicy.HasActiveCastTime(
+            playerCasting: true,
+            totalCastTime: 0f),
+        "active casting without cast time should not be treated as movement-interruptible");
+
+    AssertTrue(
+        CasterMovementPolicy.HasActiveCastTime(
+            playerCasting: true,
+            totalCastTime: 1.5f),
+        "active casting with cast time should be treated as movement-interruptible");
+
     AssertTrue(
         CasterMovementPolicy.IsCasterSlidecastWindow(
             playerCasting: true,
@@ -1608,10 +1687,17 @@ static void CasterAdvisoryMovementHoldsNearGcdReady()
             currentCastTime: 2.3f),
         "active casts near completion should count as slidecast windows");
 
+    AssertTrue(
+        CasterMovementPolicy.IsCasterSlidecastWindow(
+            playerCasting: true,
+            totalCastTime: 1.5f,
+            currentCastTime: 1.2f),
+        "short non-caster hardcasts should still expose their slidecast window");
+
     AssertFalse(
         CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
             classJobId: 42,
-            playerCasting: true,
+            activeCastTime: true,
             slidecastWindow: true,
             moveDistance: 1.5f),
         "magic DPS should allow small planned slidecast movement");
@@ -1619,23 +1705,39 @@ static void CasterAdvisoryMovementHoldsNearGcdReady()
     AssertTrue(
         CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
             classJobId: 42,
-            playerCasting: true,
+            activeCastTime: true,
             slidecastWindow: true,
             moveDistance: 4f),
         "magic DPS should not use slidecast windows for larger advisory corrections");
 
-    AssertTrue(
+    AssertFalse(
         CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
             classJobId: 24,
-            playerCasting: true,
+            activeCastTime: true,
             slidecastWindow: true,
             moveDistance: 1f),
-        "healer advisory movement should not slidecast step");
+        "healer advisory movement should allow small planned slidecast movement");
+
+    AssertFalse(
+        CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
+            classJobId: 39,
+            activeCastTime: true,
+            slidecastWindow: true,
+            moveDistance: 1f),
+        "non-caster hardcasts should allow small planned slidecast movement");
+
+    AssertTrue(
+        CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
+            classJobId: 39,
+            activeCastTime: true,
+            slidecastWindow: true,
+            moveDistance: 4f),
+        "non-caster hardcasts should not use slidecast windows for larger advisory corrections");
 
     AssertTrue(
         CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
             classJobId: 42,
-            playerCasting: true,
+            activeCastTime: true,
             slidecastWindow: false,
             moveDistance: 1f),
         "magic DPS advisory movement should still hold outside the slidecast window");
@@ -1643,7 +1745,7 @@ static void CasterAdvisoryMovementHoldsNearGcdReady()
     AssertTrue(
         CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(
             classJobId: 42,
-            playerCasting: true,
+            activeCastTime: true,
             slidecastWindow: true,
             moveDistance: null),
         "slidecast advisory movement should need a bounded candidate distance");
@@ -1722,6 +1824,61 @@ static void CasterAdvisoryMovementHoldsNearGcdReady()
             gcdTotal: -1f,
             gcdActionAhead: -1f),
         "unavailable timing should fall back to active-cast suppression only");
+}
+
+static void SafeCastMovementPolicyHoldsLowPriorityMovement()
+{
+    AssertTrue(
+        BossModPresetController.ShouldSuppressSafeLowPriorityMovementForActiveCast(
+            activeNonSlidecastCast: true,
+            currentPositionSafe: true,
+            safeOutOfRangeCorrectionAvailable: false,
+            out var safeCastReason),
+        "active casts in safe positions should hold low-priority movement");
+    AssertContains("active cast", safeCastReason, "safe cast movement hold reason");
+    AssertContains("safe", safeCastReason, "safe cast movement hold reason");
+
+    AssertFalse(
+        BossModPresetController.ShouldSuppressSafeLowPriorityMovementForActiveCast(
+            activeNonSlidecastCast: true,
+            currentPositionSafe: false,
+            safeOutOfRangeCorrectionAvailable: false,
+            out _),
+        "unsafe current positions should leave BossMod safety movement available");
+
+    AssertFalse(
+        BossModPresetController.ShouldSuppressSafeLowPriorityMovementForActiveCast(
+            activeNonSlidecastCast: false,
+            currentPositionSafe: true,
+            safeOutOfRangeCorrectionAvailable: false,
+            out _),
+        "idle or slidecast windows should not hold low-priority movement");
+
+    AssertFalse(
+        BossModPresetController.ShouldSuppressSafeLowPriorityMovementForActiveCast(
+            activeNonSlidecastCast: true,
+            currentPositionSafe: true,
+            safeOutOfRangeCorrectionAvailable: true,
+            out _),
+        "out-of-range casts should allow a clear safe correction into range");
+
+    AssertTrue(
+        BossModPresetController.IsOutsideUptimeRange(
+            targetUptimeRange: 25f,
+            playerPosition: new Vector3(0f, 0f, 31f),
+            playerRadius: 0.5f,
+            targetPosition: Vector3.Zero,
+            targetRadius: 1f),
+        "casters outside planned uptime range should be eligible for correction");
+
+    AssertFalse(
+        BossModPresetController.IsOutsideUptimeRange(
+            targetUptimeRange: 25f,
+            playerPosition: new Vector3(0f, 0f, 26f),
+            playerRadius: 0.5f,
+            targetPosition: Vector3.Zero,
+            targetRadius: 1f),
+        "casters already inside planned uptime range should protect the active cast");
 }
 
 static void BlackMageLeyLinesMovementPolicy()

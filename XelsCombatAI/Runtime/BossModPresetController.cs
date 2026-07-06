@@ -117,9 +117,10 @@ internal sealed class BossModPresetController(
         try
         {
             var targetUptimeRange = targetUptimePlanner.CalculateTargetUptimeRange();
+            var plannedTargetUptimeRange = targetUptimeRange;
             this.LastTargetUptimeRangeSource = targetUptimePlanner.LastTargetUptimeRangeSource;
             this.LastTargetUptimeRangeReason = targetUptimePlanner.LastTargetUptimeRangeReason;
-            var suppressTargetUptimeRange = this.ShouldSuppressTargetUptimeRange(suppressAutomatedMovement, out var targetUptimeSuppressionReason);
+            var suppressTargetUptimeRange = this.ShouldSuppressTargetUptimeRange(suppressAutomatedMovement, plannedTargetUptimeRange, out var targetUptimeSuppressionReason);
             if (suppressTargetUptimeRange)
             {
                 targetUptimeRange = Configuration.InternalDisabledUptimeRange;
@@ -127,7 +128,8 @@ internal sealed class BossModPresetController(
                 this.LastTargetUptimeRangeReason = $"{this.LastTargetUptimeRangeReason}; {targetUptimeSuppressionReason}";
             }
 
-            var suppressUptimeWalk = this.ShouldSuppressUptimeWalk(targetUptimeRange, bossModMovementDiagnostics(), out var uptimeSuppressionReason);
+            var movementDiagnostics = bossModMovementDiagnostics();
+            var suppressUptimeWalk = this.ShouldSuppressUptimeWalk(targetUptimeRange, movementDiagnostics, out var uptimeSuppressionReason);
             if (suppressUptimeWalk)
             {
                 targetUptimeRange = Configuration.InternalDisabledUptimeRange;
@@ -135,16 +137,22 @@ internal sealed class BossModPresetController(
                 this.LastTargetUptimeRangeReason = $"{this.LastTargetUptimeRangeReason}; {uptimeSuppressionReason}";
             }
 
+            var suppressSafeLowPriorityMovement = this.ShouldSuppressSafeLowPriorityMovementForActiveCast(suppressAutomatedMovement, plannedTargetUptimeRange, out var lowPriorityMovementSuppressionReason);
+            if (suppressSafeLowPriorityMovement)
+            {
+                this.LastTargetUptimeRangeSource = "local";
+                this.LastTargetUptimeRangeReason = $"{this.LastTargetUptimeRangeReason}; {lowPriorityMovementSuppressionReason}";
+            }
+
             this.SetTargetUptimeRange(targetUptimeRange);
 
-            this.SetForbiddenZoneCushion(config.ManageForbiddenZoneDistance
+            this.SetForbiddenZoneCushion(config.ManageForbiddenZoneDistance && !suppressSafeLowPriorityMovement
                 ? MapForbiddenZoneCushion(config.PreferredForbiddenZoneDistance)
                 : "None");
 
-            this.SetMovementRangeStrategy(config.ManageMovement && !suppressTargetUptimeRange && !suppressUptimeWalk
+            this.SetMovementRangeStrategy(config.ManageMovement && !suppressTargetUptimeRange && !suppressUptimeWalk && !suppressSafeLowPriorityMovement
                 ? MapCombatStyle(config.CombatStyle)
                 : "Any");
-
 
             if (config.ManagePositionals)
             {
@@ -155,7 +163,7 @@ internal sealed class BossModPresetController(
                 this.SetPositional(Positional.Any);
             }
 
-            this.SetMovement(config.ManageMovement && !suppressAutomatedMovement);
+            this.SetMovement(config.ManageMovement && !suppressAutomatedMovement && !suppressSafeLowPriorityMovement);
 
             this.SetLeylines(false, false, false);
 
@@ -169,7 +177,7 @@ internal sealed class BossModPresetController(
         }
     }
 
-    private bool ShouldSuppressTargetUptimeRange(bool suppressAutomatedMovement, out string reason)
+    private bool ShouldSuppressTargetUptimeRange(bool suppressAutomatedMovement, float targetUptimeRange, out string reason)
     {
         reason = string.Empty;
         if (suppressAutomatedMovement)
@@ -179,13 +187,13 @@ internal sealed class BossModPresetController(
         }
 
         var player = services.ObjectTable.LocalPlayer;
-        if (player == null || !player.IsCasting)
+        if (player == null || !CasterMovementPolicy.HasActiveCastTime(player))
         {
             return false;
         }
 
         var slidecastWindow = CasterMovementPolicy.IsCasterSlidecastWindow(player);
-        if (!CasterMovementPolicy.ShouldSuppressAdvisoryMovementForActiveCast(player.ClassJob.RowId, true, slidecastWindow, null))
+        if (slidecastWindow || this.HasSafeOutOfRangeCorrection(player, targetUptimeRange))
         {
             return false;
         }
@@ -194,6 +202,90 @@ internal sealed class BossModPresetController(
             ? "target uptime range held during slidecast"
             : "target uptime range held during active cast";
         return true;
+    }
+
+    private bool ShouldSuppressSafeLowPriorityMovementForActiveCast(bool suppressAutomatedMovement, float targetUptimeRange, out string reason)
+    {
+        reason = string.Empty;
+        if (suppressAutomatedMovement || !config.ManageMovement)
+        {
+            return false;
+        }
+
+        var player = services.ObjectTable.LocalPlayer;
+        if (player == null ||
+            !CasterMovementPolicy.HasActiveCastTime(player) ||
+            CasterMovementPolicy.IsCasterSlidecastWindow(player))
+        {
+            return false;
+        }
+
+        if (!bossModSafety.TryIsPositionSafe(player.Position, out var currentPositionSafe, out _))
+        {
+            return false;
+        }
+
+        return ShouldSuppressSafeLowPriorityMovementForActiveCast(
+            activeNonSlidecastCast: true,
+            currentPositionSafe,
+            safeOutOfRangeCorrectionAvailable: this.HasSafeOutOfRangeCorrection(player, targetUptimeRange),
+            out reason);
+    }
+
+    internal static bool ShouldSuppressSafeLowPriorityMovementForActiveCast(
+        bool activeNonSlidecastCast,
+        bool currentPositionSafe,
+        bool safeOutOfRangeCorrectionAvailable,
+        out string reason)
+    {
+        reason = string.Empty;
+        if (!activeNonSlidecastCast || !currentPositionSafe || safeOutOfRangeCorrectionAvailable)
+        {
+            return false;
+        }
+
+        reason = "low priority movement held during active cast while current position is safe";
+        return true;
+    }
+
+    private bool HasSafeOutOfRangeCorrection(IBattleChara player, float targetUptimeRange)
+    {
+        if (targetUptimeRange <= 0f ||
+            services.TargetManager.Target is not IBattleChara target ||
+            target.IsDead ||
+            target.CurrentHp == 0)
+        {
+            return false;
+        }
+
+        if (!IsOutsideUptimeRange(
+                targetUptimeRange,
+                player.Position,
+                player.HitboxRadius,
+                target.Position,
+                target.HitboxRadius))
+        {
+            return false;
+        }
+
+        return this.TryFindSafeBossRingPoint(player, target, targetUptimeRange, out _, out var lineCheck, out _) &&
+               (lineCheck == null || lineCheck.Clear);
+    }
+
+    internal static bool IsOutsideUptimeRange(
+        float targetUptimeRange,
+        Vector3 playerPosition,
+        float playerRadius,
+        Vector3 targetPosition,
+        float targetRadius)
+    {
+        if (targetUptimeRange <= 0f)
+        {
+            return false;
+        }
+
+        var distanceToHitbox = Geometry.DistanceToHitbox(playerPosition, playerRadius, targetPosition, targetRadius);
+        return distanceToHitbox > targetUptimeRange + UptimeRangeSlack;
     }
 
     public void ResetCache()

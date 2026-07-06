@@ -13,11 +13,11 @@ internal static class CasterMovementPolicy
     private const float EstimatedCombatMoveSpeed = 6f;
     private const float MovementArrivalBufferSeconds = 0.2f;
     private const float FallbackActionAheadSeconds = 0.35f;
-    private const float MaxMagicRangedSlidecastMoveDistance = EstimatedCombatMoveSpeed * ConservativeSlidecastWindowSeconds;
+    private const float MaxSlidecastMoveDistance = EstimatedCombatMoveSpeed * ConservativeSlidecastWindowSeconds;
 
     public static bool ShouldSuppressAdvisoryMovement(IBattleChara? player)
     {
-        if (player == null || !player.IsCasting)
+        if (!HasActiveCastTime(player))
         {
             return false;
         }
@@ -74,18 +74,13 @@ internal static class CasterMovementPolicy
 
     public static bool ShouldSuppressAdvisoryMovementForActiveCast(
         uint classJobId,
-        bool playerCasting,
+        bool activeCastTime,
         bool slidecastWindow,
         float? moveDistance)
     {
-        if (!playerCasting)
+        if (!activeCastTime)
         {
             return false;
-        }
-
-        if (JobRoles.GetRangeRole(classJobId) is not RangeRole.MagicRanged)
-        {
-            return true;
         }
 
         if (!slidecastWindow)
@@ -96,12 +91,12 @@ internal static class CasterMovementPolicy
         return !moveDistance.HasValue ||
                !float.IsFinite(moveDistance.Value) ||
                moveDistance.Value < 0f ||
-               moveDistance.Value > MaxMagicRangedSlidecastMoveDistance;
+               moveDistance.Value > MaxSlidecastMoveDistance;
     }
 
-    public static bool IsCasterSlidecastWindow(IBattleChara player)
+    public static bool IsCasterSlidecastWindow(IBattleChara? player)
     {
-        if (!IsCasterLike(player))
+        if (player == null)
         {
             return false;
         }
@@ -109,15 +104,26 @@ internal static class CasterMovementPolicy
         return IsCasterSlidecastWindow(player.IsCasting, player.TotalCastTime, player.CurrentCastTime);
     }
 
+    public static bool HasActiveCastTime(IBattleChara? player)
+    {
+        return player != null && HasActiveCastTime(player.IsCasting, player.TotalCastTime);
+    }
+
+    internal static bool HasActiveCastTime(bool playerCasting, float totalCastTime)
+    {
+        return playerCasting &&
+               float.IsFinite(totalCastTime) &&
+               totalCastTime > 0f;
+    }
+
     internal static bool IsCasterSlidecastWindow(bool playerCasting, float totalCastTime, float currentCastTime)
     {
-        if (!playerCasting)
+        if (!HasActiveCastTime(playerCasting, totalCastTime))
         {
             return false;
         }
 
-        if (!float.IsFinite(totalCastTime) ||
-            !float.IsFinite(currentCastTime) ||
+        if (!float.IsFinite(currentCastTime) ||
             totalCastTime < MinimumCastTimeForSlidecastSeconds)
         {
             return false;
@@ -126,9 +132,6 @@ internal static class CasterMovementPolicy
         var remaining = totalCastTime - currentCastTime;
         return remaining >= 0f && remaining <= SlidecastWindowSeconds;
     }
-
-    private static bool IsCasterLike(IBattleChara? player)
-        => JobRoles.GetRangeRole(player) is RangeRole.MagicRanged or RangeRole.Healer;
 
     private static bool IsCasterLike(uint classJobId)
         => JobRoles.GetRangeRole(classJobId) is RangeRole.MagicRanged or RangeRole.Healer;

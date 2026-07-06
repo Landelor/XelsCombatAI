@@ -7,7 +7,7 @@ using Dalamud.Plugin.Services;
 
 namespace XelsCombatAI.Runtime;
 
-internal sealed class CombatLogWriter(string rootDirectory, IPluginLog log)
+internal sealed class CombatLogWriter(string rootDirectory, string configDirectory, IPluginLog log)
 {
     private const int MaxFightLogs = 100;
 
@@ -22,7 +22,8 @@ internal sealed class CombatLogWriter(string rootDirectory, IPluginLog log)
         {
             Directory.CreateDirectory(rootDirectory);
             var historyPath = this.CreateFightFilePath(history, reason);
-            File.WriteAllText(historyPath, history.BuildJsonLines(config), Encoding.UTF8);
+            var settingsSnapshot = CombatLogSettingsSnapshot.Capture(config, configDirectory, log);
+            File.WriteAllText(historyPath, history.BuildJsonLines(config, settingsSnapshot), Encoding.UTF8);
 
             log.Information(string.Create(
                 CultureInfo.InvariantCulture,
