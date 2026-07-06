@@ -184,7 +184,7 @@ internal sealed class BossModGoalZoneHook : IDisposable
             contributor.Reset();
         }
 
-        this.SetStatus("waiting for BMR");
+        this.DisposeDraw("waiting for BMR");
     }
 
     public void Reset()
@@ -229,13 +229,6 @@ internal sealed class BossModGoalZoneHook : IDisposable
 
     private void DisposeDraw(string newStatus)
     {
-        if (!this.bossModGate.IsOpen)
-        {
-            this.draw = null;
-            this.SetStatus(newStatus);
-            return;
-        }
-
         try
         {
             this.draw?.Dispose();
@@ -591,7 +584,7 @@ internal sealed class BossModGoalZoneHook : IDisposable
 
         public void Dispose()
         {
-            if (!this.installed || !this.bossModGate.IsOpen)
+            if (!this.installed)
             {
                 return;
             }

@@ -145,7 +145,7 @@ internal sealed class CombatRuntime(
             this.wasInCombat = true;
         }
 
-        var isDead = services.Condition[ConditionFlag.Unconscious];
+        var isDead = this.IsLocalPlayerDead();
         if (isDead)
         {
             if (!this.wasDead)
@@ -485,18 +485,25 @@ internal sealed class CombatRuntime(
     private void DeactivatePresetIfBossModAvailable(bool bossModAvailable)
     {
         this.SetBossModGate(bossModAvailable);
-        if (!presetController.InitializedPreset)
-        {
-            return;
-        }
-
         if (bossModAvailable)
         {
-            presetController.Deactivate();
+            if (presetController.InitializedPreset || presetController.IsActivePreset())
+            {
+                presetController.Deactivate();
+            }
+
             return;
         }
 
         presetController.MarkUninitialized();
+    }
+
+    private bool IsLocalPlayerDead()
+    {
+        var player = services.ObjectTable.LocalPlayer;
+        return services.Condition[ConditionFlag.Unconscious] ||
+               player?.IsDead == true ||
+               player?.CurrentHp == 0;
     }
 
     private void SetBossModGate(bool bossModAvailable)

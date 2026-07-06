@@ -112,6 +112,20 @@ internal sealed class BossModPresetController(
         }
     }
 
+    public bool IsActivePreset()
+    {
+        try
+        {
+            return bossMod.IsAvailable() &&
+                   bossMod.GetActive() == BossModIpc.DefaultPresetName;
+        }
+        catch (Exception ex)
+        {
+            services.Log.Verbose(ex, "Could not check active BossMod preset.");
+            return false;
+        }
+    }
+
     public void ApplyStrategies(bool suppressAutomatedMovement)
     {
         try
