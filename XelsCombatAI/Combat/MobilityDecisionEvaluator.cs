@@ -70,6 +70,7 @@ internal sealed class MobilityDecisionEvaluator(BossModReflectionSafety bossModS
     private const float GreedyUnsafeEscapeMaxOffMeshDistance = 1.25f;
     private const float GreedyUnsafeEscapeMaxVerticalDrop = 3f;
     private const float DirectionLengthEpsilon = 0.0001f;
+    private static readonly TimeSpan UsedDecisionVisibility = TimeSpan.FromMilliseconds(750);
 
     public MobilityDecisionDiagnostics LastDecision { get; private set; } = MobilityDecisionDiagnostics.Empty;
 
@@ -80,7 +81,7 @@ internal sealed class MobilityDecisionEvaluator(BossModReflectionSafety bossModS
 
     public void RecordIdle(MobilityIntent intent, string actionName, string reason)
     {
-        this.LastDecision = new(
+        var decision = new MobilityDecisionDiagnostics(
             DateTime.UtcNow,
             MobilityDecisionState.Idle,
             intent,
@@ -97,6 +98,7 @@ internal sealed class MobilityDecisionEvaluator(BossModReflectionSafety bossModS
             "idle",
             "idle",
             reason);
+        this.UpdateLastDecision(decision);
     }
 
     public MobilityDecisionDiagnostics RecordActionResult(MobilityDecisionDiagnostics decision, bool used, string reason)
@@ -107,7 +109,7 @@ internal sealed class MobilityDecisionEvaluator(BossModReflectionSafety bossModS
             State = used ? MobilityDecisionState.Used : MobilityDecisionState.Rejected,
             RiskReason = reason
         };
-        this.LastDecision = updated;
+        this.UpdateLastDecision(updated, preserveRecentUsed: !used);
         return updated;
     }
 
@@ -307,7 +309,7 @@ internal sealed class MobilityDecisionEvaluator(BossModReflectionSafety bossModS
             uptime.Reason,
             path.Reason,
             "landing accepted");
-        this.LastDecision = decision;
+        this.UpdateLastDecision(decision);
         return true;
     }
 
@@ -368,7 +370,7 @@ internal sealed class MobilityDecisionEvaluator(BossModReflectionSafety bossModS
             uptime.Reason,
             path.Reason,
             "unsafe emergency landing accepted");
-        this.LastDecision = decision;
+        this.UpdateLastDecision(decision);
         return true;
     }
 
@@ -452,7 +454,7 @@ internal sealed class MobilityDecisionEvaluator(BossModReflectionSafety bossModS
             "not evaluated",
             "not evaluated",
             reason);
-        this.LastDecision = decision;
+        this.UpdateLastDecision(decision);
         return false;
     }
 
@@ -499,8 +501,30 @@ internal sealed class MobilityDecisionEvaluator(BossModReflectionSafety bossModS
             uptime?.Reason ?? "not evaluated",
             path?.Reason ?? "not evaluated",
             reason);
-        this.LastDecision = decision;
+        this.UpdateLastDecision(decision);
         return false;
+    }
+
+    private void UpdateLastDecision(MobilityDecisionDiagnostics decision, bool preserveRecentUsed = true)
+    {
+        if (preserveRecentUsed && this.ShouldPreserveRecentUsedDecision(decision.TimestampUtc))
+        {
+            return;
+        }
+
+        this.LastDecision = decision;
+    }
+
+    private bool ShouldPreserveRecentUsedDecision(DateTime now)
+    {
+        if (this.LastDecision.State != MobilityDecisionState.Used ||
+            this.LastDecision.TimestampUtc == DateTime.MinValue)
+        {
+            return false;
+        }
+
+        var elapsed = now - this.LastDecision.TimestampUtc;
+        return elapsed >= TimeSpan.Zero && elapsed <= UsedDecisionVisibility;
     }
 
     private SafetyEvaluation EvaluateSafety(

@@ -171,9 +171,11 @@ internal sealed class CombatRuntime(
         }
 
         this.TryUseBossModCadenceSafetyGapCloser(now, manualMovementRequested);
+        _ = presetController.TryApplyImmediateActiveCastMovementHold(out _);
 
         if (now < this.nextRuntimeUpdate)
         {
+            this.UpdateFightReviewLogging(combatEngagement.EffectiveInCombat, "logging disabled");
             return;
         }
         this.nextRuntimeUpdate = now.AddMilliseconds(250);
@@ -693,12 +695,13 @@ internal sealed class CombatRuntime(
             this.combatHistoryActive = true;
         }
 
-        if (!this.combatHistory.ShouldRecord(effectiveInCombat))
+        var status = this.GetStatus();
+        if (!this.combatHistory.ShouldRecord(status, aoePackPositioningController.Status))
         {
             return;
         }
 
-        this.combatHistory.Record(this.GetStatus(), aoePackPositioningController.Status, this.BuildActorSnapshots());
+        this.combatHistory.Record(status, aoePackPositioningController.Status, this.BuildActorSnapshots());
     }
 
     private bool IsFightReviewRunActive(bool effectiveInCombat)

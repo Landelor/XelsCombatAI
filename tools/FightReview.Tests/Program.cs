@@ -67,6 +67,7 @@ var tests = new (string Name, Action Body)[]
     ("phantom gap closers inherit base job reengage rules", PhantomGapClosersInheritBaseJobReengageRules),
     ("knockback recovery allows timing bypass", KnockbackRecoveryAllowsTimingBypass),
     ("BMR safety dash requires destination progress", BmrSafetyDashRequiresDestinationProgress),
+    ("mobility used decisions survive idle overwrite", MobilityUsedDecisionsSurviveIdleOverwrite),
     ("friendly escape anchor conserves low-value ally dashes", FriendlyEscapeAnchorConservesLowValueAllyDashes),
     ("enemy movement tracker holds moving target dashes", EnemyMovementTrackerHoldsMovingTargetDashes),
     ("late safety dash continues while unsafe and far", LateSafetyDashContinuesWhileUnsafeAndFar),
@@ -1788,6 +1789,44 @@ static void CasterAdvisoryMovementHoldsNearGcdReady()
         "slidecast advisory movement should need a bounded candidate distance");
 
     AssertTrue(
+        CasterMovementPolicy.ShouldHoldAutomatedMovementForActiveCast(
+            activeCastTime: true,
+            slidecastWindow: false,
+            safetyKnown: true,
+            currentPositionSafe: true,
+            out var immediateCastHoldReason),
+        "non-caster hardcasts like Ogi Namikiri should immediately hold automated movement while safe");
+    AssertContains("active cast", immediateCastHoldReason, "immediate active cast movement hold reason");
+    AssertContains("safe", immediateCastHoldReason, "immediate active cast movement hold reason");
+
+    AssertFalse(
+        CasterMovementPolicy.ShouldHoldAutomatedMovementForActiveCast(
+            activeCastTime: true,
+            slidecastWindow: true,
+            safetyKnown: true,
+            currentPositionSafe: true,
+            out _),
+        "slidecast windows should remain available for bounded movement corrections");
+
+    AssertFalse(
+        CasterMovementPolicy.ShouldHoldAutomatedMovementForActiveCast(
+            activeCastTime: true,
+            slidecastWindow: false,
+            safetyKnown: true,
+            currentPositionSafe: false,
+            out _),
+        "unsafe positions should leave BossMod safety movement available");
+
+    AssertFalse(
+        CasterMovementPolicy.ShouldHoldAutomatedMovementForActiveCast(
+            activeCastTime: true,
+            slidecastWindow: false,
+            safetyKnown: false,
+            currentPositionSafe: false,
+            out _),
+        "unknown safety should not suppress BossMod movement");
+
+    AssertTrue(
         CasterMovementPolicy.ShouldSuppressAdvisoryMovementForGcd(
             classJobId: 24,
             gcdRemaining: 0.2f,
@@ -2207,6 +2246,46 @@ static void BmrSafetyDashRequiresDestinationProgress()
         "BMR safety dash should scale down the required gain when already close to the destination");
 }
 
+static void MobilityUsedDecisionsSurviveIdleOverwrite()
+{
+    var evaluator = new MobilityDecisionEvaluator(null!, null!, null!);
+    var yatenDecision = MobilityDecision("Yaten", ActionUse.SamuraiYatenActionId);
+
+    evaluator.RecordActionResult(yatenDecision, used: true, "action used");
+    AssertTrue(evaluator.LastDecision.State == MobilityDecisionState.Used, "Yaten should be recorded as used");
+    AssertEqual("Yaten", evaluator.LastDecision.ActionName, "used Yaten action name");
+
+    evaluator.RecordIdle(MobilityIntent.Safety, "Yaten", "SAM dash held; BMR safety move is a 0.5y walk");
+    AssertTrue(evaluator.LastDecision.State == MobilityDecisionState.Used, "recent used action should survive idle overwrite");
+    AssertEqual("Yaten", evaluator.LastDecision.ActionName, "recent used action should keep action name");
+    AssertEqual("action used", evaluator.LastDecision.RiskReason, "recent used action should keep action result reason");
+
+    evaluator.RecordActionResult(MobilityDecision("Gyoten", ActionUse.SamuraiGyotenActionId), used: true, "action used");
+    AssertTrue(evaluator.LastDecision.State == MobilityDecisionState.Used, "new used action should replace previous used action");
+    AssertEqual("Gyoten", evaluator.LastDecision.ActionName, "new used action name");
+}
+
+static MobilityDecisionDiagnostics MobilityDecision(string actionName, uint actionId)
+{
+    return new MobilityDecisionDiagnostics(
+        DateTime.UtcNow,
+        MobilityDecisionState.Candidate,
+        MobilityIntent.Safety,
+        MobilityDecisionEvaluator.FormatIntentLabel(MobilityIntent.Safety),
+        actionName,
+        actionId,
+        new Vector3(1f, 0f, 0f),
+        10f,
+        10f,
+        "BMR IPC",
+        0f,
+        10f,
+        "closer to BMR safe movement by 10.0y",
+        "inside target range",
+        "dash saves 10.0y toward BMR movement target",
+        "landing accepted");
+}
+
 static void DancerEnAvantUsesNativeDashDistance()
 {
     AssertEqual(10f, CombatConstants.DancerEnAvantRange, "DNC En Avant distance");
@@ -2225,6 +2304,7 @@ static void DancerEnAvantUsesNativeDashDistance()
 
     AssertTrue(
         EscapeGapCloserController.ShouldAllowUnsafeChainedForwardEscapeDash(
+            actionName: "En Avant",
             safeMovementDistance: 18f,
             currentCharges: 2,
             dashDistance: CombatConstants.DancerEnAvantRange,
@@ -2234,6 +2314,7 @@ static void DancerEnAvantUsesNativeDashDistance()
 
     AssertFalse(
         EscapeGapCloserController.ShouldAllowUnsafeChainedForwardEscapeDash(
+            actionName: "En Avant",
             safeMovementDistance: 18f,
             currentCharges: 1,
             dashDistance: CombatConstants.DancerEnAvantRange,
@@ -2243,6 +2324,7 @@ static void DancerEnAvantUsesNativeDashDistance()
 
     AssertFalse(
         EscapeGapCloserController.ShouldAllowUnsafeChainedForwardEscapeDash(
+            actionName: "En Avant",
             safeMovementDistance: 25f,
             currentCharges: 2,
             dashDistance: CombatConstants.DancerEnAvantRange,

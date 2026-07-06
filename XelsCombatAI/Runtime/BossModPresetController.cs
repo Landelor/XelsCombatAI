@@ -126,6 +126,37 @@ internal sealed class BossModPresetController(
         }
     }
 
+    public bool TryApplyImmediateActiveCastMovementHold(out string reason)
+    {
+        reason = string.Empty;
+        if (!config.ManageMovement || !this.InitializedPreset)
+        {
+            return false;
+        }
+
+        var player = services.ObjectTable.LocalPlayer;
+        if (player == null)
+        {
+            return false;
+        }
+
+        var activeCastTime = CasterMovementPolicy.HasActiveCastTime(player);
+        var slidecastWindow = activeCastTime && CasterMovementPolicy.IsCasterSlidecastWindow(player);
+        var safetyKnown = bossModSafety.TryIsPositionSafe(player.Position, out var currentPositionSafe, out _);
+        if (!CasterMovementPolicy.ShouldHoldAutomatedMovementForActiveCast(
+                activeCastTime,
+                slidecastWindow,
+                safetyKnown,
+                currentPositionSafe,
+                out reason))
+        {
+            return false;
+        }
+
+        this.SetMovement(false);
+        return true;
+    }
+
     public void ApplyStrategies(bool suppressAutomatedMovement)
     {
         try

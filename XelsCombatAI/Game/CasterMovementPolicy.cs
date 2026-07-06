@@ -94,6 +94,28 @@ internal static class CasterMovementPolicy
                moveDistance.Value > MaxSlidecastMoveDistance;
     }
 
+    public static bool ShouldHoldAutomatedMovementForActiveCast(
+        bool activeCastTime,
+        bool slidecastWindow,
+        bool safetyKnown,
+        bool currentPositionSafe,
+        out string reason)
+    {
+        reason = string.Empty;
+        if (!activeCastTime || slidecastWindow)
+        {
+            return false;
+        }
+
+        if (!safetyKnown || !currentPositionSafe)
+        {
+            return false;
+        }
+
+        reason = "movement held during active cast while current position is safe";
+        return true;
+    }
+
     public static bool IsCasterSlidecastWindow(IBattleChara? player)
     {
         if (player == null)

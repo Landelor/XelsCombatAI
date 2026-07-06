@@ -34,6 +34,7 @@ internal sealed class CombatHistory
     private int count;
     private DateTime combatStart = DateTime.MinValue;
     private DateTime lastRecordedAt = DateTime.MinValue;
+    private DateTime lastRecordedMobilityDecisionAt = DateTime.MinValue;
     private StateCommandType lastSeenRsrSnapshotMode;
     private string logScope = "instance-run";
 
@@ -49,17 +50,13 @@ internal sealed class CombatHistory
     public string BossModActiveModule => this.LastNonNone(frame => frame.BossModActiveModule);
     public string BossModActiveZoneModule => this.LastNonNone(frame => frame.BossModActiveZoneModule);
 
-    public bool ShouldRecord(bool inCombat)
-    {
-        return this.ShouldRecord(DateTime.UtcNow, inCombat);
-    }
-
     public void Reset(string logScope = "instance-run")
     {
         this.head = 0;
         this.count = 0;
         this.combatStart = DateTime.MinValue;
         this.lastRecordedAt = DateTime.MinValue;
+        this.lastRecordedMobilityDecisionAt = DateTime.MinValue;
         this.lastSeenRsrSnapshotMode = default;
         this.logScope = logScope;
     }
@@ -67,7 +64,7 @@ internal sealed class CombatHistory
     public void Record(RuntimeStatus status, AoePackPositioningStatus aoe, IReadOnlyList<CombatHistoryActorSnapshot> actors)
     {
         var now = DateTime.UtcNow;
-        if (!this.ShouldRecord(now, status.InCombat))
+        if (!this.ShouldRecord(now, status, aoe))
             return;
 
         if (this.combatStart == DateTime.MinValue)
@@ -78,6 +75,7 @@ internal sealed class CombatHistory
         if (aoe.RsrHenchedActive)
             this.lastSeenRsrSnapshotMode = aoe.RsrSnapshotMode;
 
+        var mobilityDecision = FreshMobilityDecision(now, status.MobilityDecision);
         var frame = new CombatHistoryFrame(
             TimestampUtc: now,
             T: (float)(now - this.combatStart).TotalSeconds,
@@ -114,7 +112,7 @@ internal sealed class CombatHistory
             EscapeLanding: status.LastEscapeLanding,
             GapCloser: status.GapCloser,
             NextGcd: status.NextGcd,
-            MobilityDecision: FreshMobilityDecision(now, status.MobilityDecision),
+            MobilityDecision: mobilityDecision,
             HealerCoverageReason: status.HealerCoveragePositioning.LastReason,
             HealerCoverageInjected: status.HealerCoveragePositioning.Injected,
             HealerCoverageMembers: status.HealerCoveragePositioning.PartyMembers,
@@ -175,12 +173,187 @@ internal sealed class CombatHistory
             this.count++;
         else
             this.head = (this.head + 1) % MaxFrames;
+
+        if (mobilityDecision.State == MobilityDecisionState.Used)
+            this.lastRecordedMobilityDecisionAt = mobilityDecision.TimestampUtc;
     }
 
-    private bool ShouldRecord(DateTime now, bool inCombat)
+    public bool ShouldRecord(RuntimeStatus status, AoePackPositioningStatus aoe)
     {
-        var recordInterval = inCombat ? CombatRecordInterval : DowntimeRecordInterval;
-        return now - this.lastRecordedAt >= recordInterval;
+        return this.ShouldRecord(DateTime.UtcNow, status, aoe);
+    }
+
+    private bool ShouldRecord(DateTime now, RuntimeStatus status, AoePackPositioningStatus aoe)
+    {
+        var recordInterval = status.InCombat ? CombatRecordInterval : DowntimeRecordInterval;
+        return now - this.lastRecordedAt >= recordInterval ||
+               this.ShouldRecordImmediateMobilityDecision(now, status.MobilityDecision) ||
+               this.ShouldRecordPluginEvent(status, aoe);
+    }
+
+    private bool ShouldRecordImmediateMobilityDecision(DateTime now, MobilityDecisionDiagnostics decision)
+    {
+        if (decision.State != MobilityDecisionState.Used ||
+            decision.TimestampUtc == DateTime.MinValue ||
+            decision.TimestampUtc == this.lastRecordedMobilityDecisionAt)
+        {
+            return false;
+        }
+
+        var age = now - decision.TimestampUtc;
+        return age >= TimeSpan.Zero && age <= MobilityDecisionFreshness;
+    }
+
+    private bool ShouldRecordPluginEvent(RuntimeStatus status, AoePackPositioningStatus aoe)
+    {
+        var previous = this.LastFrame;
+        if (previous == null)
+        {
+            return true;
+        }
+
+        return previous.InCombat != status.InCombat ||
+               previous.IsDead != status.IsDead ||
+               previous.PluginEnabled != status.Enabled ||
+               previous.TargetBaseId != status.TargetBaseId ||
+               previous.TargetObjectId != status.TargetObjectId ||
+               previous.Movement != status.LastMovement ||
+               previous.AutomatedMovementSuppressed != status.AutomatedMovementSuppressed ||
+               !StringEquals(previous.MovementRangeStrategy, status.LastMovementRangeStrategy) ||
+               !StringEquals(previous.SafetyBuffer, status.LastForbiddenZoneCushion) ||
+               !FloatEquals(previous.TargetUptimeRange, status.LastTargetUptimeRange) ||
+               !StringEquals(previous.TargetUptimeRangeSource, status.TargetUptimeRangeSource) ||
+               !StringEquals(previous.TargetUptimeRangeReason, status.TargetUptimeRangeReason) ||
+               !EqualityComparer<BossModMechanicPressure>.Default.Equals(previous.MechanicPressure, status.MechanicPressure) ||
+               previous.LastPositional != status.LastPositional ||
+               !StringEquals(previous.PositionalIntentSource, status.PositionalIntentSource) ||
+               !StringEquals(previous.PositionalIntentReason, status.PositionalIntentReason) ||
+               !StringEquals(previous.TrueNorthDecisionSource, status.TrueNorthDecisionSource) ||
+               !StringEquals(previous.TrueNorthDecisionReason, status.TrueNorthDecisionReason) ||
+               previous.TrueNorthActive != status.TrueNorthActive ||
+               previous.TrueNorthCharges != status.TrueNorthCharges ||
+               !StringEquals(previous.GapSafety, status.LastGapCloserSafety) ||
+               !StringEquals(previous.EscapeSafety, status.LastEscapeGapCloserSafety) ||
+               !VectorEquals(previous.EscapeLanding, status.LastEscapeLanding) ||
+               !GapCloserEquals(previous.GapCloser, status.GapCloser) ||
+               MobilityDecisionChanged(previous.MobilityDecision, FreshMobilityDecision(DateTime.UtcNow, status.MobilityDecision)) ||
+               !StringEquals(previous.HealerCoverageReason, status.HealerCoveragePositioning.LastReason) ||
+               previous.HealerCoverageInjected != status.HealerCoveragePositioning.Injected ||
+               !StringEquals(previous.SurvZoneReason, status.SurvivabilityZonePositioning.LastReason) ||
+               previous.SurvZoneInjected != status.SurvivabilityZonePositioning.Injected ||
+               !StringEquals(previous.PassageReason, status.PassageOfArmsPositioning.LastReason) ||
+               previous.PassageInjected != status.PassageOfArmsPositioning.Injected ||
+               !StringEquals(previous.ArenaEdgeReason, status.ArenaEdgeReason) ||
+               !StringEquals(previous.GoalPriority, status.AoeGoalPriority) ||
+               !StringEquals(previous.GoalSources, status.AoeGoalSources) ||
+               BossModMovementChanged(previous, status.BossModMovement) ||
+               !StringEquals(previous.ManualMovementInput, status.ManualMovementInput) ||
+               FacingChanged(previous.Facing, status.Facing) ||
+               RedMageMeleeChanged(previous.RedMageMeleeCombo, status.RedMageMeleeCombo) ||
+               AoeChanged(previous, aoe);
+    }
+
+    private static bool BossModMovementChanged(CombatHistoryFrame previous, BossModMovementDiagnostics current)
+    {
+        return !StringEquals(previous.BossModActiveModule, current.ActiveModule) ||
+               !StringEquals(previous.BossModActiveZoneModule, current.ActiveZoneModule) ||
+               !StringEquals(previous.BossModNavigationDestination, current.NavigationDestination) ||
+               !StringEquals(previous.BossModNavigationNextWaypoint, current.NavigationNextWaypoint) ||
+               !StringEquals(previous.BossModNavigationStats, current.NavigationStats) ||
+               !StringEquals(previous.BossModMovement.PlannerSteer, current.PlannerSteer) ||
+               !StringEquals(previous.BossModControllerTarget, current.ControllerTarget) ||
+               !StringEquals(previous.BossModMovementOverride, current.MovementOverride) ||
+               !StringEquals(previous.BossModHintSummary, current.HintSummary);
+    }
+
+    private static bool MobilityDecisionChanged(MobilityDecisionDiagnostics previous, MobilityDecisionDiagnostics current)
+    {
+        return previous.State != current.State ||
+               previous.Intent != current.Intent ||
+               !StringEquals(previous.ActionName, current.ActionName) ||
+               previous.ActionId != current.ActionId ||
+               !VectorEquals(previous.Destination, current.Destination) ||
+               !FloatEquals(previous.MoveDistance, current.MoveDistance) ||
+               !FloatEquals(previous.SafetyGain, current.SafetyGain) ||
+               !StringEquals(previous.SafetySource, current.SafetySource) ||
+               !FloatEquals(previous.UptimeGain, current.UptimeGain) ||
+               !FloatEquals(previous.PathGain, current.PathGain) ||
+               !StringEquals(previous.SafetyReason, current.SafetyReason) ||
+               !StringEquals(previous.UptimeReason, current.UptimeReason) ||
+               !StringEquals(previous.PathReason, current.PathReason) ||
+               !StringEquals(previous.RiskReason, current.RiskReason);
+    }
+
+    private static bool AoeChanged(CombatHistoryFrame previous, AoePackPositioningStatus current)
+    {
+        return !StringEquals(previous.Reason, current.LastReason) ||
+               previous.Henched != current.RsrHenchedActive ||
+               !StringEquals(previous.RsrStatus, current.RsrStatus) ||
+               !StringEquals(previous.RsrReflectionDiagnostics, current.RsrReflectionDiagnostics) ||
+               previous.RsrSnapshotMode != current.RsrSnapshotMode ||
+               !StringEquals(previous.RsrLastRestore, current.RsrLastRestoreStatus) ||
+               previous.Targets != current.PriorityTargetCount ||
+               previous.CurrentHits != current.CurrentHits ||
+               previous.BestHits != current.BestHits ||
+               previous.Injected != current.Injected ||
+               !StringEquals(previous.ActionName, current.ActionName) ||
+               !StringEquals(previous.ActionSource, current.ActionSource) ||
+               !StringEquals(previous.Shape, current.Shape) ||
+               !VectorEquals(previous.AoeCandidate, current.Candidate) ||
+               !VectorEquals(previous.AoePrimaryTarget, current.PrimaryTarget) ||
+               previous.AoeCandidateInjected != current.CandidateInjected;
+    }
+
+    private static bool FacingChanged(FacingStatus previous, FacingStatus current)
+    {
+        return previous.Source != current.Source ||
+               !StringEquals(previous.Reason, current.Reason) ||
+               previous.Applied != current.Applied ||
+               !StringEquals(previous.RejectionReason, current.RejectionReason) ||
+               !StringEquals(previous.SafetySource, current.SafetySource) ||
+               previous.ConsensusMembers != current.ConsensusMembers;
+    }
+
+    private static bool RedMageMeleeChanged(RedMageMeleeComboStatus previous, RedMageMeleeComboStatus current)
+    {
+        return previous.Enabled != current.Enabled ||
+               !StringEquals(previous.Mode, current.Mode) ||
+               !StringEquals(previous.LastReason, current.LastReason) ||
+               !StringEquals(previous.NextActionName, current.NextActionName) ||
+               !StringEquals(previous.NextActionSource, current.NextActionSource) ||
+               previous.NextActionId != current.NextActionId ||
+               previous.AffectedTargets != current.AffectedTargets ||
+               !VectorEquals(previous.CandidateDestination, current.CandidateDestination) ||
+               !VectorEquals(previous.LastJumpLanding, current.LastJumpLanding);
+    }
+
+    private static bool GapCloserEquals(GapCloserResourceSnapshot previous, GapCloserResourceSnapshot current)
+    {
+        return previous.Enabled == current.Enabled &&
+               previous.PrimaryActionId == current.PrimaryActionId &&
+               previous.PrimaryActionCharges == current.PrimaryActionCharges &&
+               StringEquals(previous.PrimaryActionName, current.PrimaryActionName);
+    }
+
+    private static bool StringEquals(string? previous, string? current)
+    {
+        return string.Equals(previous ?? string.Empty, current ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    private static bool FloatEquals(float previous, float current)
+    {
+        return MathF.Abs(previous - current) <= 0.01f;
+    }
+
+    private static bool VectorEquals(Vector3? previous, Vector3? current)
+    {
+        if (!previous.HasValue || !current.HasValue)
+        {
+            return previous.HasValue == current.HasValue;
+        }
+
+        return Geometry.Distance2D(previous.Value, current.Value) <= 0.05f &&
+               FloatEquals(previous.Value.Y, current.Value.Y);
     }
 
     public string Build(Configuration config)
