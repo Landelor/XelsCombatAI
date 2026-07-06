@@ -16,22 +16,10 @@ internal static class ProgramMain
             }
 
             var xcai = XcaiLogReader.Read(options.XcaiPath ?? throw new InvalidOperationException("--xcai is required."));
-            BmrReplayData bmr;
-            MatchResult match;
-            if (options.AutoMatch)
-            {
-                bmr = BmrReplayReader.AutoMatch(options.XcaiPath!, xcai, options.BmrDirectory ?? throw new InvalidOperationException("--bmr-dir is required with --auto-match."), out match);
-            }
-            else
-            {
-                bmr = BmrReplayReader.Read(options.BmrPath ?? throw new InvalidOperationException("--bmr is required unless --auto-match is used."));
-                match = BmrReplayReader.ScoreExplicitMatch(xcai, bmr);
-            }
-
             var incidents = IncidentDetector.Detect(xcai);
             var output = options.OutputDirectory ?? DefaultOutputDirectory(options.XcaiPath!);
-            ArtifactWriter.Write(new ReviewBundle(xcai, bmr.Summary, match, incidents), output);
-            Console.WriteLine($"Wrote fight review artifacts to: {Path.GetFullPath(output)}");
+            ArtifactWriter.Write(new ReviewBundle(xcai, incidents), output);
+            Console.WriteLine($"Wrote agent improvement packet to: {Path.Combine(Path.GetFullPath(output), "agent.improvement.json")}");
             Console.WriteLine($"Detected incidents: {incidents.Count}");
             return Task.FromResult(0);
         }
@@ -52,19 +40,13 @@ internal static class ProgramMain
 
     private sealed record Options(
         string? XcaiPath,
-        string? BmrPath,
-        string? BmrDirectory,
         string? OutputDirectory,
-        bool AutoMatch,
         bool Help)
     {
         public static Options Parse(string[] args)
         {
             string? xcai = null;
-            string? bmr = null;
-            string? bmrDirectory = null;
             string? output = null;
-            var autoMatch = false;
             var help = false;
 
             for (var i = 0; i < args.Length; i++)
@@ -74,17 +56,8 @@ internal static class ProgramMain
                     case "--xcai":
                         xcai = ReadValue(args, ref i, "--xcai");
                         break;
-                    case "--bmr":
-                        bmr = ReadValue(args, ref i, "--bmr");
-                        break;
-                    case "--bmr-dir":
-                        bmrDirectory = ReadValue(args, ref i, "--bmr-dir");
-                        break;
                     case "--out":
                         output = ReadValue(args, ref i, "--out");
-                        break;
-                    case "--auto-match":
-                        autoMatch = true;
                         break;
                     case "-h":
                     case "--help":
@@ -101,19 +74,9 @@ internal static class ProgramMain
                 {
                     throw new InvalidOperationException("--xcai is required.");
                 }
-
-                if (autoMatch && bmrDirectory == null)
-                {
-                    throw new InvalidOperationException("--bmr-dir is required with --auto-match.");
-                }
-
-                if (!autoMatch && bmr == null)
-                {
-                    throw new InvalidOperationException("--bmr is required unless --auto-match is used.");
-                }
             }
 
-            return new Options(xcai, bmr, bmrDirectory, output, autoMatch, help);
+            return new Options(xcai, output, help);
         }
 
         public static void PrintUsage()
@@ -122,14 +85,9 @@ internal static class ProgramMain
 XCAI Fight Review
 
 Usage:
-  dotnet run --project tools/FightReview -- --xcai <xcai.jsonl> --bmr <bmr.log> [--out <dir>]
-  dotnet run --project tools/FightReview -- --xcai <xcai.jsonl> --bmr-dir <dir> --auto-match [--out <dir>]
+  dotnet run --project tools/FightReview -- --xcai <xcai.jsonl> [--out <dir>]
 
 Outputs:
-  fight.normalized.jsonl
-  fight.report.md
-  fight.html
-  incidents/*.json
   agent.improvement.json
 """);
         }

@@ -11,12 +11,10 @@ using XelsCombatAI.Runtime;
 
 CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
 CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture;
-BossMod.Service.LogHandlerDebug = message => Console.Error.WriteLine("BMR: " + message);
 
 var skipGameData = args.Any(arg => arg.Equals("--skip-game-data", StringComparison.OrdinalIgnoreCase));
 var gameDataTests = new HashSet<string>(StringComparer.Ordinal)
 {
-    "BMR parser integration",
     "datamining trial duty boss context detector"
 };
 
@@ -33,6 +31,7 @@ var tests = new (string Name, Action Body)[]
     ("schema v2 rejection", SchemaV2Rejected),
     ("configuration logging defaults/reset", ConfigurationLoggingDefaultsAndReset),
     ("run-review settings snapshot captures plugin configs", RunReviewSettingsSnapshotCapturesPluginConfigs),
+    ("run-review privacy redacts identifiers", RunReviewPrivacyRedactsIdentifiers),
     ("legacy gap closer distance config loads", LegacyGapCloserDistanceConfigLoads),
     ("target uptime range follows next GCD", TargetUptimeRangeFollowsNextGcd),
     ("boss ring reengage probes local sidesteps first", BossRingReengageProbesLocalSidestepsFirst),
@@ -100,9 +99,6 @@ var tests = new (string Name, Action Body)[]
     ("multi-target large trash remains trash context", MultiTargetLargeTrashRemainsTrashContext),
     ("trash pull tracker phase transitions", TrashPullTrackerPhaseTransitions),
     ("trash pull tracker remote settled pack remains catch-up", TrashPullTrackerRemoteSettledPackRemainsCatchUp),
-    ("BMR parser integration", BmrParserIntegration),
-    ("explicit multi-encounter match scores nearest encounter", ExplicitMultiEncounterMatchScoresNearestEncounter),
-    ("low-confidence auto-match rejection", LowConfidenceAutoMatchRejected),
     ("destination churn detector", DestinationChurnDetector),
     ("indecisive oscillation detector", IndecisiveOscillationDetector),
     ("movement stuck detector", MovementStuckDetector),
@@ -118,7 +114,6 @@ var tests = new (string Name, Action Body)[]
     ("safety boundary stuck detector", SafetyBoundaryStuckDetector),
     ("BMR exit wall risk detector", BmrExitWallRiskDetector),
     ("Greed future danger safety linger is not blocked", GreedFutureDangerSafetyLingerIsNotBlocked),
-    ("HTML includes safety raster controls", HtmlIncludesSafetyRasterControls),
     ("slow pack follow detector", SlowPackFollowDetector),
     ("slow safe corridor pack follow detector", SlowSafeCorridorPackFollowDetector),
     ("target range single boss is not trash context", TargetRangeSingleBossIsNotTrashContext),
@@ -239,15 +234,6 @@ static void ArtifactWriterEmitsAgentImprovementPacket()
 {
     using var temp = TempDirectory.Create();
     var log = XcaiLogReader.Read(FixturePath("schema-v3-minimal.jsonl"));
-    var bmr = new BmrSummary(
-        "minimal-bmr.log",
-        log.Header.CombatStartUtc,
-        log.Header.CombatEndUtc,
-        0,
-        0,
-        [],
-        [],
-        []);
     var incident = new Incident(
         "destination-churn-1-00",
         "destination-churn",
@@ -260,14 +246,16 @@ static void ArtifactWriterEmitsAgentImprovementPacket()
         1);
     var review = new ReviewBundle(
         log,
-        bmr,
-        new MatchResult(bmr.Path, 0.9d, ["fixture match"]),
         [incident]);
 
     ArtifactWriter.Write(review, temp.Path);
 
     var path = Path.Combine(temp.Path, "agent.improvement.json");
     AssertTrue(File.Exists(path), "agent improvement packet exists");
+    AssertFalse(File.Exists(Path.Combine(temp.Path, "fight.normalized.jsonl")), "normalized artifact should not be written");
+    AssertFalse(File.Exists(Path.Combine(temp.Path, "fight.report.md")), "markdown report should not be written");
+    AssertFalse(File.Exists(Path.Combine(temp.Path, "fight.html")), "html report should not be written");
+    AssertFalse(Directory.Exists(Path.Combine(temp.Path, "incidents")), "incident slice directory should not be written");
     using var document = JsonDocument.Parse(File.ReadAllText(path));
     var root = document.RootElement;
     AssertEqual("agent.improvement", root.GetProperty("Type").GetString()!, "packet type");
@@ -278,7 +266,9 @@ static void ArtifactWriterEmitsAgentImprovementPacket()
     AssertTrue(root.GetProperty("PositiveSignals").GetArrayLength() > 0, "positive uptime signals");
     AssertTrue(root.GetProperty("Scores").GetProperty("Uptime").GetProperty("TargetWeightedUptimePercent").GetSingle() > 0, "uptime metrics emitted");
     AssertEqual("destination-churn", root.GetProperty("NegativeSignals")[0].GetProperty("Category").GetString()!, "negative signal category");
+    AssertTrue(root.GetProperty("NegativeSignals")[0].GetProperty("Frames").GetArrayLength() > 0, "negative signal embeds frame slice");
     AssertEqual("medium", root.GetProperty("ImprovementCandidates")[0].GetProperty("Priority").GetString()!, "candidate priority");
+    AssertTrue(root.GetProperty("ImprovementCandidates")[0].GetProperty("Evidence")[0].GetProperty("Frames").GetArrayLength() > 0, "candidate evidence embeds frame slice");
     AssertTrue(root.GetProperty("RouteSegments").GetArrayLength() > 0, "route segment summaries");
 }
 
@@ -407,7 +397,7 @@ static void RunReviewSettingsSnapshotCapturesPluginConfigs()
     var xcaiConfigDirectory = Path.Combine(temp.Path, "XelsCombatAI");
     Directory.CreateDirectory(xcaiConfigDirectory);
     File.WriteAllText(Path.Combine(temp.Path, "XelsCombatAI.json"), """{"Version":28,"AvoidArenaEdge":true}""");
-    File.WriteAllText(Path.Combine(temp.Path, "BossModReborn.json"), """{"MovementProfile":"Standard"}""");
+    File.WriteAllText(Path.Combine(temp.Path, "BossModReborn.json"), """{"MovementProfile":"Standard","DisplayName":"Alice Example","LogPath":"/home/alice/.xlcore/pluginConfigs/BossModReborn","ApiToken":"secret"}""");
     Directory.CreateDirectory(Path.Combine(temp.Path, "BossModReborn", "autorot"));
     File.WriteAllText(Path.Combine(temp.Path, "BossModReborn", "autorot", "presets.db.json"), """{"Presets":["XCAI"]}""");
     Directory.CreateDirectory(Path.Combine(temp.Path, "BossModReborn", "replays"));
@@ -438,6 +428,14 @@ static void RunReviewSettingsSnapshotCapturesPluginConfigs()
     AssertTrue(bmrFiles.Contains("BossModReborn.json"), "BMR root config captured");
     AssertTrue(bmrFiles.Contains(Path.Combine("BossModReborn", "autorot", "presets.db.json")), "BMR autorotation settings captured");
     AssertFalse(bmrFiles.Any(path => path.Contains("replays", StringComparison.OrdinalIgnoreCase)), "BMR replays excluded");
+    var bmrRootSettings = FindFile(FindPlugin(settings, "BossModReborn"), "BossModReborn.json").GetProperty("Settings");
+    AssertEqual("Standard", bmrRootSettings.GetProperty("MovementProfile").GetString()!, "non-identifying BMR setting retained");
+    AssertEqual("<redacted>", bmrRootSettings.GetProperty("DisplayName").GetString()!, "BMR display name redacted");
+    AssertEqual("<redacted>", bmrRootSettings.GetProperty("LogPath").GetString()!, "BMR path redacted");
+    AssertEqual("<redacted>", bmrRootSettings.GetProperty("ApiToken").GetString()!, "BMR token redacted");
+    AssertFalse(json.Contains("Alice Example", StringComparison.Ordinal), "settings snapshot should not include raw names");
+    AssertFalse(json.Contains("/home/alice", StringComparison.Ordinal), "settings snapshot should not include raw paths");
+    AssertFalse(json.Contains("secret", StringComparison.Ordinal), "settings snapshot should not include raw tokens");
 
     var rsrFiles = FileNames(FindPlugin(settings, "RotationSolver"));
     AssertTrue(rsrFiles.Contains("RotationSolver.json"), "RSR root config captured");
@@ -464,6 +462,45 @@ static void RunReviewSettingsSnapshotCapturesPluginConfigs()
             .Select(file => file.GetProperty("RelativePath").GetString()!)
             .ToHashSet(StringComparer.Ordinal);
     }
+
+    static JsonElement FindFile(JsonElement plugin, string relativePath)
+    {
+        foreach (var file in plugin.GetProperty("Files").EnumerateArray())
+        {
+            if (file.GetProperty("RelativePath").GetString() == relativePath)
+            {
+                return file;
+            }
+        }
+
+        throw new InvalidOperationException($"Missing settings file {relativePath}.");
+    }
+}
+
+static void RunReviewPrivacyRedactsIdentifiers()
+{
+    var anonymizer = new CombatLogAnonymizer();
+    var json = anonymizer.AnonymizeRecord(
+        """
+        {"Type":"frame","Frame":{"TargetObjectId":123456789,"TargetBaseId":19045,"ContentFinderConditionId":1064,"NextGcd":{"PrimaryTargetId":123456789,"ActionId":123,"AdjustedActionId":456},"TrashPull":{"TankObjectId":987654321,"DominantTargetIds":[123456789,987654321],"StragglerTargetIds":[555]},"Actors":[{"GameObjectId":123456789,"EntityId":777,"BaseId":19045,"TargetObjectId":987654321},{"GameObjectId":987654321,"EntityId":888,"BaseId":19046,"TargetObjectId":123456789}]}}
+        """);
+
+    using var document = JsonDocument.Parse(json);
+    var frame = document.RootElement.GetProperty("Frame");
+    AssertEqual((ulong)1, frame.GetProperty("TargetObjectId").GetUInt64(), "target object id aliased");
+    AssertEqual((uint)19045, frame.GetProperty("TargetBaseId").GetUInt32(), "target base id retained");
+    AssertEqual((uint)1064, frame.GetProperty("ContentFinderConditionId").GetUInt32(), "content id retained");
+    AssertEqual((ulong)1, frame.GetProperty("NextGcd").GetProperty("PrimaryTargetId").GetUInt64(), "next GCD target alias consistent");
+    AssertEqual((uint)123, frame.GetProperty("NextGcd").GetProperty("ActionId").GetUInt32(), "action id retained");
+    AssertEqual((ulong)2, frame.GetProperty("TrashPull").GetProperty("TankObjectId").GetUInt64(), "tank object id aliased");
+    AssertEqual((ulong)1, frame.GetProperty("TrashPull").GetProperty("DominantTargetIds")[0].GetUInt64(), "dominant target id alias consistent");
+    AssertEqual((ulong)2, frame.GetProperty("TrashPull").GetProperty("DominantTargetIds")[1].GetUInt64(), "second dominant target id alias consistent");
+    AssertEqual((ulong)3, frame.GetProperty("TrashPull").GetProperty("StragglerTargetIds")[0].GetUInt64(), "straggler target id aliased");
+    AssertEqual((ulong)1, frame.GetProperty("Actors")[0].GetProperty("GameObjectId").GetUInt64(), "actor object id alias consistent");
+    AssertEqual((ulong)4, frame.GetProperty("Actors")[0].GetProperty("EntityId").GetUInt64(), "actor entity id aliased");
+    AssertEqual((uint)19045, frame.GetProperty("Actors")[0].GetProperty("BaseId").GetUInt32(), "actor base id retained");
+    AssertFalse(json.Contains("123456789", StringComparison.Ordinal), "raw object id removed");
+    AssertFalse(json.Contains("987654321", StringComparison.Ordinal), "raw tank object id removed");
 }
 
 static void LegacyGapCloserDistanceConfigLoads()
@@ -3886,94 +3923,6 @@ static void TrashPullTrackerRemoteSettledPackRemainsCatchUp()
     AssertTrue(status.Phase == TrashPullPhase.Gathering, "remote settled pack stays in catch-up/gathering");
 }
 
-static void BmrParserIntegration()
-{
-    BmrReplayData replay;
-    try
-    {
-        replay = BmrReplayReader.Read(FixturePath("minimal-bmr.log"));
-    }
-    catch (InvalidOperationException ex) when (ex.Message.Contains("game data", StringComparison.OrdinalIgnoreCase))
-    {
-        throw new SkipTestException(ex.Message);
-    }
-
-    AssertTrue(replay.Summary.OperationCount > 0, "BMR operation count");
-    AssertTrue(replay.Summary.Start.HasValue, "BMR start timestamp");
-}
-
-static void LowConfidenceAutoMatchRejected()
-{
-    var bmr = new BmrReplayData(
-        "low-confidence.log",
-        new BossMod.Replay(),
-        new BmrSummary("low-confidence.log", null, null, 0, 0, [], [], []));
-    var match = new MatchResult(bmr.Path, 0.1d, ["fixture"]);
-
-    var ex = AssertThrows<InvalidOperationException>(() => BmrReplayReader.ValidateAutoMatchConfidence(bmr, match, "fixtures"));
-    AssertContains("confidence", ex.Message, "low confidence rejection");
-}
-
-static void ExplicitMultiEncounterMatchScoresNearestEncounter()
-{
-    var startUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
-    const ulong targetObjectId = 0xABCUL;
-    const uint targetOid = 15728;
-    var frames = new[]
-    {
-        Frame(0, activeModule: "A24Menphina", targetBaseId: targetOid, targetObjectId: targetObjectId)
-    };
-    var log = Log(frames);
-    log = log with
-    {
-        Header = log.Header with
-        {
-            CombatStartUtc = startUtc,
-            CombatEndUtc = startUtc.AddSeconds(60),
-            TerritoryType = 1118,
-            ContentFinderConditionId = 911,
-            BossModActiveModule = "A24Menphina"
-        }
-    };
-    var localStart = startUtc.ToLocalTime();
-    var bmr = new BmrReplayData(
-        "multi-encounter.log",
-        new BossMod.Replay(),
-        new BmrSummary(
-            "multi-encounter.log",
-            localStart.AddMinutes(-25),
-            localStart.AddMinutes(2),
-            0,
-            2,
-            [
-                Encounter(0, 0x111UL, 99999, 1118, localStart.AddMinutes(-20), localStart.AddMinutes(-17)),
-                Encounter(1, targetObjectId, targetOid, 1118, localStart.AddSeconds(-5), localStart.AddSeconds(70))
-            ],
-            [
-                new BmrParticipantSummary(
-                    targetObjectId,
-                    targetOid,
-                    "Enemy-15728",
-                    "Enemy",
-                    1118,
-                    911,
-                    localStart.AddSeconds(-5),
-                    localStart.AddSeconds(70),
-                    1f,
-                    12f,
-                    false,
-                    true,
-                    false,
-                    true,
-                    [])
-            ],
-            []));
-
-    var match = BmrReplayReader.ScoreExplicitMatch(log, bmr);
-    AssertTrue(match.Confidence >= 0.75d, $"expected high multi-encounter match confidence, got {match.Confidence:0.00}");
-    AssertContains("overlaps BMR encounter #1", string.Join('\n', match.Evidence), "nearest encounter evidence");
-}
-
 static void DestinationChurnDetector()
 {
     var frames = new[]
@@ -4167,23 +4116,6 @@ static void GreedFutureDangerSafetyLingerIsNotBlocked()
     };
 
     AssertNoIncident(IncidentDetector.Detect(LogWithCombatStyle("Greed", frames)), "safety-blocked-destination");
-}
-
-static void HtmlIncludesSafetyRasterControls()
-{
-    using var temp = TempDirectory.Create();
-    var log = Log(Frame(0, destination: new Vec3(8, 0, 0), chosenSource: "Target range", safetyRaster: Raster(destination: "blocked")));
-    var review = new ReviewBundle(
-        log,
-        new BmrSummary("none.log", null, null, 0, 0, [], [], []),
-        new MatchResult("none.log", 1, ["fixture"]),
-        IncidentDetector.Detect(log));
-
-    ArtifactWriter.Write(review, temp.Path);
-    var html = File.ReadAllText(Path.Combine(temp.Path, "fight.html"));
-    AssertContains("layerSafety", html, "safety layer control");
-    AssertContains("SafetyRaster", html, "safety raster payload");
-    AssertContains("drawSafetyRaster", html, "safety raster renderer");
 }
 
 static void SlowPackFollowDetector()
@@ -4912,22 +4844,6 @@ static XcaiLog LogWithCombatStyle(string combatStyle, params XcaiFrame[] frames)
             combatStyle,
             EmptyJson()),
         frames);
-}
-
-static BmrEncounterSummary Encounter(int index, ulong instanceId, uint oid, ushort zone, DateTime start, DateTime end)
-{
-    return new BmrEncounterSummary(
-        index,
-        instanceId,
-        oid,
-        zone,
-        start,
-        end,
-        0,
-        0,
-        [],
-        [],
-        [new BmrEncounterParticipantSummary(instanceId, oid, oid == 0 ? $"Actor-{instanceId:X}" : $"Enemy-{oid}", false)]);
 }
 
 static XcaiFrame Frame(

@@ -441,86 +441,6 @@ internal sealed record ActorSnapshot(
     ulong TargetObjectId,
     float DistanceToPlayer);
 
-internal sealed record BmrReplayData(string Path, BossMod.Replay Replay, BmrSummary Summary);
-
-internal sealed record BmrSummary(
-    string Path,
-    DateTime? Start,
-    DateTime? End,
-    int OperationCount,
-    int EncounterCount,
-    IReadOnlyList<BmrEncounterSummary> Encounters,
-    IReadOnlyList<BmrParticipantSummary> Participants,
-    IReadOnlyList<BmrEvent> Events);
-
-internal sealed record BmrEncounterSummary(
-    int Index,
-    ulong InstanceId,
-    uint Oid,
-    ushort Zone,
-    DateTime Start,
-    DateTime End,
-    int StateCount,
-    int PhaseCount,
-    IReadOnlyList<BmrEncounterStateSummary> States,
-    IReadOnlyList<BmrEncounterPhaseSummary> Phases,
-    IReadOnlyList<BmrEncounterParticipantSummary> Participants);
-
-internal sealed record BmrEncounterStateSummary(
-    uint Id,
-    string Name,
-    string Comment,
-    float ExpectedDuration,
-    DateTime Exit);
-
-internal sealed record BmrEncounterPhaseSummary(
-    int Id,
-    uint LastStateId,
-    DateTime Exit);
-
-internal sealed record BmrEncounterParticipantSummary(
-    ulong InstanceId,
-    uint Oid,
-    string Label,
-    bool WasAlly);
-
-internal sealed record BmrParticipantSummary(
-    ulong InstanceId,
-    uint Oid,
-    string Label,
-    string Type,
-    uint ZoneId,
-    uint Cfcid,
-    DateTime FirstSeen,
-    DateTime LastSeen,
-    float MinRadius,
-    float MaxRadius,
-    bool WasAlly,
-    bool HasAnyActions,
-    bool HasAnyStatuses,
-    bool IsTargetOfAnyActions,
-    IReadOnlyList<BmrPositionSample> Positions);
-
-internal sealed record BmrPositionSample(
-    DateTime Timestamp,
-    Vec3 Position,
-    float Rotation);
-
-internal sealed record BmrEvent(
-    string Type,
-    DateTime Timestamp,
-    ulong SourceId,
-    uint SourceOid,
-    ulong? TargetId,
-    uint? TargetOid,
-    ulong ActionRaw,
-    string Label);
-
-internal sealed record MatchResult(
-    string BmrPath,
-    double Confidence,
-    IReadOnlyList<string> Evidence);
-
 internal sealed record Incident(
     string Id,
     string Category,
@@ -534,6 +454,4 @@ internal sealed record Incident(
 
 internal sealed record ReviewBundle(
     XcaiLog Xcai,
-    BmrSummary Bmr,
-    MatchResult Match,
     IReadOnlyList<Incident> Incidents);

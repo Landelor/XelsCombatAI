@@ -329,10 +329,13 @@ internal sealed class CombatHistory
     public string BuildJsonLines(Configuration config, CombatLogSettingsSnapshot? settingsSnapshot = null)
     {
         var sb = new StringBuilder();
+        var emittedFrames = this.BuildAnonymizedFrameLines();
+        var emittedFrameCount = emittedFrames.Count;
+        var headerAnonymizer = new CombatLogAnonymizer();
 
         if (this.count == 0)
         {
-            sb.AppendLine(JsonSerializer.Serialize(
+            sb.AppendLine(headerAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
                 new CombatHistoryJsonHeader(
                     Type: "header",
                     SchemaVersion: 3,
@@ -343,7 +346,7 @@ internal sealed class CombatHistory
                     CombatStartUtc: this.combatStart,
                     CombatEndUtc: this.combatStart,
                     DurationSeconds: 0,
-                    FrameCount: 0,
+                    FrameCount: emittedFrameCount,
                     PlayerClassJobId: 0,
                     TerritoryType: 0,
                     ContentFinderConditionId: 0,
@@ -353,13 +356,13 @@ internal sealed class CombatHistory
                     SettingsSnapshot: settingsSnapshot,
                     RsrSnapshotMode: this.lastSeenRsrSnapshotMode.ToString(),
                     SourceSummary: CombatHistorySourceSummary.Empty),
-                JsonOptions));
+                JsonOptions)));
             return sb.ToString();
         }
 
         var sourceSummary = this.BuildSourceSummary();
         var last = this.frames[(this.head + this.count - 1) % MaxFrames]!;
-        sb.AppendLine(JsonSerializer.Serialize(
+        sb.AppendLine(headerAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
             new CombatHistoryJsonHeader(
                 Type: "header",
                 SchemaVersion: 3,
@@ -370,7 +373,7 @@ internal sealed class CombatHistory
                 CombatStartUtc: this.combatStart,
                 CombatEndUtc: last.TimestampUtc,
                 DurationSeconds: last.T,
-                FrameCount: this.count,
+                FrameCount: emittedFrameCount,
                 PlayerClassJobId: this.PlayerClassJobId,
                 TerritoryType: this.TerritoryType,
                 ContentFinderConditionId: this.ContentFinderConditionId,
@@ -380,22 +383,49 @@ internal sealed class CombatHistory
                 SettingsSnapshot: settingsSnapshot,
                 RsrSnapshotMode: this.lastSeenRsrSnapshotMode.ToString(),
                 SourceSummary: sourceSummary),
-            JsonOptions));
+            JsonOptions)));
 
-        CombatHistoryFrame? previous = null;
-        for (var i = 0; i < this.count; i++)
+        foreach (var emittedFrame in emittedFrames)
         {
-            var frame = this.frames[(this.head + i) % MaxFrames]!;
-            sb.AppendLine(JsonSerializer.Serialize(
-                new CombatHistoryJsonFrame(
-                    Type: "frame",
-                    Frame: frame,
-                    Motion: CombatHistoryMotionSnapshot.From(frame, previous)),
-                JsonOptions));
-            previous = frame;
+            sb.AppendLine(emittedFrame);
         }
 
         return sb.ToString();
+    }
+
+    private List<string> BuildAnonymizedFrameLines()
+    {
+        var result = new List<string>();
+        var outputAnonymizer = new CombatLogAnonymizer();
+        var signatureAnonymizer = new CombatLogAnonymizer();
+        CombatHistoryFrame? previous = null;
+        string? previousSignature = null;
+        for (var i = 0; i < this.count; i++)
+        {
+            var frame = this.frames[(this.head + i) % MaxFrames]!;
+            var motion = CombatHistoryMotionSnapshot.From(frame, previous);
+            var signatureFrame = frame with { TimestampUtc = DateTime.MinValue, T = 0f };
+            var signature = signatureAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
+                new CombatHistoryJsonFrame(
+                    Type: "frame",
+                    Frame: signatureFrame,
+                    Motion: motion),
+                JsonOptions));
+            if (previousSignature == null || !signature.Equals(previousSignature, StringComparison.Ordinal))
+            {
+                result.Add(outputAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
+                    new CombatHistoryJsonFrame(
+                        Type: "frame",
+                        Frame: frame,
+                        Motion: motion),
+                    JsonOptions)));
+                previousSignature = signature;
+            }
+
+            previous = frame;
+        }
+
+        return result;
     }
 
     private static void AppendIfChanged<T>(StringBuilder sb, string label, T current, T? previous) where T : struct

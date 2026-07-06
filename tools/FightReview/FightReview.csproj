@@ -9,17 +9,4 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="$(XcaiReferencesDir)\BossmodReborn\BossMod\BossModReborn.csproj" AdditionalProperties="EnableWindowsTargeting=true" />
-    <Reference Include="Lumina" Condition="'$(DALAMUD_HOME)' != ''">
-      <HintPath>$(DALAMUD_HOME)\Lumina.dll</HintPath>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="$(DALAMUD_HOME)\*.dll" Condition="'$(DALAMUD_HOME)' != ''">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <TargetPath>%(Filename)%(Extension)</TargetPath>
-    </Content>
-  </ItemGroup>
 </Project>

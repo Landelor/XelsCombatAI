@@ -12,7 +12,7 @@ internal static class UptimeScoring
     {
         var profile = UptimeJobProfile.For(log.Header.PlayerClassJobId);
         var frames = log.Frames;
-        var durations = EstimateFrameDurations(frames);
+        var durations = EstimateFrameDurations(log.Header, frames);
 
         var targetObservedSeconds = 0f;
         var anyUptimeSeconds = 0f;
@@ -477,7 +477,7 @@ internal static class UptimeScoring
         return combatStyle.StartsWith("Greed", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static float[] EstimateFrameDurations(IReadOnlyList<XcaiFrame> frames)
+    private static float[] EstimateFrameDurations(XcaiHeader header, IReadOnlyList<XcaiFrame> frames)
     {
         if (frames.Count == 0)
         {
@@ -487,10 +487,12 @@ internal static class UptimeScoring
         var durations = new float[frames.Count];
         for (var i = 0; i < frames.Count - 1; i++)
         {
-            durations[i] = Math.Clamp(frames[i + 1].T - frames[i].T, 0f, 2f);
+            durations[i] = Math.Max(0f, frames[i + 1].T - frames[i].T);
         }
 
-        durations[^1] = frames.Count > 1 ? durations[^2] : 0f;
+        durations[^1] = frames.Count > 1 && durations[^2] <= 2f
+            ? durations[^2]
+            : Math.Max(0f, header.DurationSeconds - frames[^1].T);
         return durations;
     }
 

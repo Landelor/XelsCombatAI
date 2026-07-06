@@ -54,7 +54,7 @@ internal sealed record CombatLogSettingsSnapshot(
         return new CombatLogPluginSettingsSnapshot(
             "XelsCombatAI",
             "captured",
-            JsonSerializer.SerializeToElement(config, JsonOptions),
+            CombatLogPrivacy.RedactSettings(JsonSerializer.SerializeToElement(config, JsonOptions)),
             files);
     }
 
@@ -137,7 +137,7 @@ internal sealed record CombatLogSettingsSnapshot(
                 "captured",
                 info.Length,
                 info.LastWriteTimeUtc,
-                document.RootElement.Clone(),
+                CombatLogPrivacy.RedactSettings(document.RootElement),
                 Error: null);
         }
         catch (Exception ex)
