@@ -170,6 +170,8 @@ internal sealed class CombatRuntime(
             aoeGoalHook.EnsureActive();
         }
 
+        this.TryUseBossModCadenceSafetyGapCloser(now, manualMovementRequested);
+
         if (now < this.nextRuntimeUpdate)
         {
             return;
@@ -372,6 +374,28 @@ internal sealed class CombatRuntime(
         return rotationSolverActions.TryGetUpcomingGcdTiming(out var timing, out _)
             ? timing
             : null;
+    }
+
+    private void TryUseBossModCadenceSafetyGapCloser(DateTime now, bool manualMovementRequested)
+    {
+        if (!config.UseGapCloser ||
+            !presetController.InitializedPreset)
+        {
+            return;
+        }
+
+        var suppressAutomatedMovement =
+            config.RespectManualMovement &&
+            (manualMovementRequested || now < this.manualMovementSuppressUntil);
+        if (suppressAutomatedMovement &&
+            !GapCloserDecisionPolicy.ShouldRunSafetyGapCloserDuringManualSuppression(
+                suppressAutomatedMovement,
+                config.UseGapCloser))
+        {
+            return;
+        }
+
+        escapeGapCloserController.TryUseBossModSafetyEscapeGapCloser();
     }
 
     private unsafe GapCloserResourceSnapshot BuildGapCloserResourceSnapshot(uint classJobId)

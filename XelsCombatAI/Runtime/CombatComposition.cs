@@ -90,6 +90,7 @@ internal sealed class CombatComposition : IDisposable
             config,
             services,
             bossModSafety,
+            bossMod,
             mobilityDecisionEvaluator,
             gapCloserController,
             enemyMovementTracker,

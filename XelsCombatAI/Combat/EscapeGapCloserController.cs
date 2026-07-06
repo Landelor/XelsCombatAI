@@ -12,6 +12,7 @@ internal sealed class EscapeGapCloserController(
     Configuration config,
     DalamudServices services,
     BossModReflectionSafety bossModSafety,
+    BossModIpc bossMod,
     MobilityDecisionEvaluator mobilityEvaluator,
     GapCloserController gapCloserController,
     EnemyMovementTracker enemyMovementTracker,
@@ -22,6 +23,7 @@ internal sealed class EscapeGapCloserController(
     Func<TrashPullDiagnostics> trashPullDiagnostics,
     Func<BossModMechanicPressure> mechanicPressure)
 {
+    private static readonly TimeSpan NormalAttemptInterval = TimeSpan.FromMilliseconds(250);
     private const float SamuraiWalkableSafetyDistance = 6f;
     private DateTime nextEscapeGapCloserAttempt = DateTime.MinValue;
     private DateTime escapeDangerDetectedAt = DateTime.MinValue;
@@ -41,13 +43,23 @@ internal sealed class EscapeGapCloserController(
     }
 
     public unsafe bool TryUseEscapeGapCloser()
+        => this.TryUseEscapeGapCloser(ignoreAttemptCooldown: false);
+
+    public unsafe bool TryUseBossModSafetyEscapeGapCloser()
+        => this.TryUseEscapeGapCloser(ignoreAttemptCooldown: true);
+
+    private unsafe bool TryUseEscapeGapCloser(bool ignoreAttemptCooldown)
     {
-        if (DateTime.UtcNow < this.nextEscapeGapCloserAttempt)
+        var now = DateTime.UtcNow;
+        if (!ignoreAttemptCooldown && now < this.nextEscapeGapCloserAttempt)
         {
             return false;
         }
 
-        this.nextEscapeGapCloserAttempt = DateTime.UtcNow.AddMilliseconds(250);
+        if (!ignoreAttemptCooldown)
+        {
+            this.nextEscapeGapCloserAttempt = now.Add(NormalAttemptInterval);
+        }
 
         var player = services.ObjectTable.LocalPlayer;
         if (player == null)
@@ -106,7 +118,7 @@ internal sealed class EscapeGapCloserController(
 
         var safeMovementDistance = Geometry.Distance2D(player.Position, safeMovementDestination);
         var safeAssistReason = string.Empty;
-        var canAssistSafeMovement = !currentSafe || this.ShouldAssistSafeBossModMovement(safeMovementDistance, out safeAssistReason);
+        var canAssistSafeMovement = !currentSafe || this.ShouldAssistSafeBossModMovement(safeMovementDistance, ignoreAttemptCooldown, out safeAssistReason);
         if (!canAssistSafeMovement)
         {
             this.escapeDangerDetectedAt = DateTime.MinValue;
@@ -116,7 +128,11 @@ internal sealed class EscapeGapCloserController(
             return false;
         }
 
-        var now = DateTime.UtcNow;
+        if (ignoreAttemptCooldown)
+        {
+            this.nextEscapeGapCloserAttempt = now.Add(NormalAttemptInterval);
+        }
+
         if (this.escapeDangerDetectedAt == DateTime.MinValue)
         {
             this.escapeDangerDetectedAt = now;
@@ -153,8 +169,7 @@ internal sealed class EscapeGapCloserController(
                 ActionUse.DancerEnAvantActionId,
                 "En Avant",
                 safeMovementDestination,
-                CombatConstants.DancerEnAvantRange,
-                allowUnsafeChainedLanding: true),
+                CombatConstants.DancerEnAvantRange),
             42 when config.GapCloserPCT => this.TryUseForwardEscapeGapCloser(ActionUse.PictomancerSmudgeActionId, "Smudge", safeMovementDestination),
             _ => false
         };
@@ -277,7 +292,7 @@ internal sealed class EscapeGapCloserController(
                !canAssistSafeMovement;
     }
 
-    internal static bool ShouldAllowUnsafeChainedForwardEscapeDash(float safeMovementDistance, uint currentCharges, float dashDistance, out string reason)
+    internal static bool ShouldAllowUnsafeChainedForwardEscapeDash(string actionName, float safeMovementDistance, uint currentCharges, float dashDistance, out string reason)
     {
         if (!float.IsFinite(safeMovementDistance) || !float.IsFinite(dashDistance) || dashDistance <= 0f)
         {
@@ -287,18 +302,18 @@ internal sealed class EscapeGapCloserController(
 
         if (currentCharges <= 1)
         {
-            reason = "needs a spare En Avant charge";
+            reason = $"needs a spare {actionName} charge";
             return false;
         }
 
         var chainedDistance = currentCharges * dashDistance;
         if (safeMovementDistance > chainedDistance + 0.5f)
         {
-            reason = $"safe movement target {safeMovementDistance:0.0}y exceeds chained En Avant reach {chainedDistance:0.0}y";
+            reason = $"safe movement target {safeMovementDistance:0.0}y exceeds chained {actionName} reach {chainedDistance:0.0}y";
             return false;
         }
 
-        reason = $"chained En Avant can cover {safeMovementDistance:0.0}y with {currentCharges} charges";
+        reason = $"chained {actionName} can cover {safeMovementDistance:0.0}y with {currentCharges} charges";
         return true;
     }
 
@@ -341,8 +356,20 @@ internal sealed class EscapeGapCloserController(
                     requireVnavReachable: true,
                     out var decision))
                 {
-                    this.lastEscapeGapCloserSafety = decision.RiskReason;
-                    continue;
+                    if (!this.TryValidateUnsafeChainedEscapeDestination(
+                            player,
+                            ally.Position,
+                            services.TargetManager.Target as IBattleChara,
+                            safeMovementDestination,
+                            actionName,
+                            actionId,
+                            maxRange,
+                            out decision,
+                            out var chainReason))
+                    {
+                        this.lastEscapeGapCloserSafety = chainReason;
+                        continue;
+                    }
                 }
 
                 var uptimeRelayAvailable = this.TryEvaluateFriendlyEscapeUptimeRelay(
@@ -369,7 +396,9 @@ internal sealed class EscapeGapCloserController(
                     continue;
                 }
 
-                var candidateReason = uptimeRelayAvailable ? uptimeRelayReason : "ally anchor";
+                var candidateReason = IsUnsafeChainedDecision(decision)
+                    ? "chained ally anchor"
+                    : uptimeRelayAvailable ? uptimeRelayReason : "ally anchor";
                 styleCandidates.Add(dashStyleController.ScoreCandidate(
                     ally,
                     player,
@@ -421,8 +450,20 @@ internal sealed class EscapeGapCloserController(
                 requireVnavReachable: true,
                 out var decision))
             {
-                this.lastEscapeGapCloserSafety = decision.RiskReason;
-                continue;
+                if (!this.TryValidateUnsafeChainedEscapeDestination(
+                        player,
+                        ally.Position,
+                        services.TargetManager.Target as IBattleChara,
+                        safeMovementDestination,
+                        actionName,
+                        actionId,
+                        maxRange,
+                        out decision,
+                        out var chainReason))
+                {
+                    this.lastEscapeGapCloserSafety = chainReason;
+                    continue;
+                }
             }
 
             var uptimeRelayAvailable = this.TryEvaluateFriendlyEscapeUptimeRelay(
@@ -449,7 +490,9 @@ internal sealed class EscapeGapCloserController(
                 continue;
             }
 
-            var candidateReason = uptimeRelayAvailable ? uptimeRelayReason : "ally anchor";
+            var candidateReason = IsUnsafeChainedDecision(decision)
+                ? "chained ally anchor"
+                : uptimeRelayAvailable ? uptimeRelayReason : "ally anchor";
             candidates.Add(dashStyleController.ScoreCandidate(
                 ally,
                 player,
@@ -551,8 +594,20 @@ internal sealed class EscapeGapCloserController(
                     requireVnavReachable: true,
                     out var decision))
                 {
-                    this.lastEscapeGapCloserSafety = decision.RiskReason;
-                    continue;
+                    if (!this.TryValidateUnsafeChainedEscapeDestination(
+                            player,
+                            candidate,
+                            target,
+                            safeMovementDestination,
+                            actionName,
+                            actionId,
+                            maxRange,
+                            out decision,
+                            out var chainReason))
+                    {
+                        this.lastEscapeGapCloserSafety = chainReason;
+                        continue;
+                    }
                 }
 
                 styleCandidates.Add(dashStyleController.ScoreCandidate(
@@ -562,7 +617,9 @@ internal sealed class EscapeGapCloserController(
                     target,
                     safeMovementDestination,
                     decision,
-                    PositionalDashPolicy.IsActive(desiredPositional) &&
+                    IsUnsafeChainedDecision(decision)
+                        ? $"chained {actionName}"
+                        : PositionalDashPolicy.IsActive(desiredPositional) &&
                     target != null &&
                     PositionalDashPolicy.IsSatisfied(desiredPositional, candidate, target.Position, target.Rotation)
                         ? "positional Shukuchi"
@@ -598,7 +655,7 @@ internal sealed class EscapeGapCloserController(
         MobilityDecisionDiagnostics? firstFallbackDecision = null;
         var firstFallbackDestination = default(Vector3);
 
-        foreach (var candidate in this.EnumerateEscapeLocationCandidates(player.Position, maxRange, target, desiredPositional))
+        foreach (var candidate in this.EnumerateGreedyEscapeLocationCandidates(player.Position, safeMovementDestination, maxRange, target, desiredPositional))
         {
             if (!mobilityEvaluator.TryValidateDashDestination(
                 player,
@@ -614,12 +671,26 @@ internal sealed class EscapeGapCloserController(
                 requireVnavReachable: true,
                 out var decision))
             {
-                this.lastEscapeGapCloserSafety = decision.RiskReason;
-                continue;
+                if (!this.TryValidateUnsafeChainedEscapeDestination(
+                        player,
+                        candidate,
+                        target,
+                        safeMovementDestination,
+                        actionName,
+                        actionId,
+                        maxRange,
+                        out decision,
+                        out var chainReason))
+                {
+                    this.lastEscapeGapCloserSafety = chainReason;
+                    continue;
+                }
             }
 
+            var chainedLocation = IsUnsafeChainedDecision(decision);
             if (PositionalDashPolicy.IsActive(desiredPositional) &&
                 target != null &&
+                !chainedLocation &&
                 PositionalDashPolicy.IsSatisfied(desiredPositional, candidate, target.Position, target.Rotation))
             {
                 positionalCandidates!.Add(dashStyleController.ScoreCandidate(
@@ -681,7 +752,7 @@ internal sealed class EscapeGapCloserController(
         string actionName,
         Vector3 safeMovementDestination,
         float dashDistance = CombatConstants.FixedForwardGapCloserRange,
-        bool allowUnsafeChainedLanding = false)
+        bool allowUnsafeChainedLanding = true)
     {
         var player = services.ObjectTable.LocalPlayer;
         if (player == null)
@@ -761,7 +832,7 @@ internal sealed class EscapeGapCloserController(
 
         var currentCharges = ActionUse.GetCurrentCharges(actionId);
         var safeMovementDistance = Geometry.Distance2D(player.Position, safeMovementDestination);
-        if (!ShouldAllowUnsafeChainedForwardEscapeDash(safeMovementDistance, currentCharges, dashDistance, out var chainReason))
+        if (!ShouldAllowUnsafeChainedForwardEscapeDash(actionName, safeMovementDistance, currentCharges, dashDistance, out var chainReason))
         {
             this.lastEscapeGapCloserSafety = chainReason;
             return false;
@@ -814,6 +885,55 @@ internal sealed class EscapeGapCloserController(
             actionId,
             0f,
             out decision);
+
+    private bool TryValidateUnsafeChainedEscapeDestination(
+        IBattleChara player,
+        Vector3 destination,
+        IBattleChara? target,
+        Vector3 safeMovementDestination,
+        string actionName,
+        uint actionId,
+        float hopRange,
+        out MobilityDecisionDiagnostics decision,
+        out string reason)
+    {
+        var currentCharges = ActionUse.GetCurrentCharges(actionId);
+        var safeMovementDistance = Geometry.Distance2D(player.Position, safeMovementDestination);
+        if (!ShouldAllowUnsafeChainedForwardEscapeDash(actionName, safeMovementDistance, currentCharges, hopRange, out reason))
+        {
+            decision = MobilityDecisionDiagnostics.Empty;
+            return false;
+        }
+
+        var pressure = mechanicPressure();
+        if (pressure.BadForGreedyDash && !pressure.KnockbackRecoveryActive)
+        {
+            reason = pressure.FormatOptionalMovementHoldReason();
+            mobilityEvaluator.RecordIdle(MobilityIntent.Safety, actionName, reason);
+            decision = MobilityDecisionDiagnostics.Empty;
+            return false;
+        }
+
+        if (!mobilityEvaluator.TryValidateGreedyUnsafeEscapeDashDestination(
+                player,
+                destination,
+                target,
+                safeMovementDestination,
+                actionName,
+                actionId,
+                0f,
+                out decision))
+        {
+            reason = decision.RiskReason;
+            return false;
+        }
+
+        reason = "unsafe chained escape landing accepted";
+        return true;
+    }
+
+    private static bool IsUnsafeChainedDecision(MobilityDecisionDiagnostics decision)
+        => decision.SafetyReason.Contains("unsafe emergency landing", StringComparison.Ordinal);
 
     private bool TryRequestUnsafeChainedFixedEscapeDashFacing(
         IBattleChara player,
@@ -1224,27 +1344,20 @@ internal sealed class EscapeGapCloserController(
             return this.TryUseTargetEscapeAction(actionId, actionName, target, destination, safeDecision);
         }
 
-        var pressure = mechanicPressure();
-        if (pressure.BadForGreedyDash && !pressure.KnockbackRecoveryActive)
-        {
-            this.lastEscapeGapCloserSafety = pressure.FormatOptionalMovementHoldReason();
-            mobilityEvaluator.RecordIdle(MobilityIntent.Safety, actionName, this.lastEscapeGapCloserSafety);
-            return false;
-        }
-
-        if (!mobilityEvaluator.TryValidateGreedyUnsafeEscapeDashDestination(
-            player,
-            destination,
-            target,
-            safeMovementDestination,
-            actionName,
-            actionId,
-            0f,
-            out var decision))
+        if (!this.TryValidateUnsafeChainedEscapeDestination(
+                player,
+                destination,
+                target,
+                safeMovementDestination,
+                actionName,
+                actionId,
+                maxRange,
+                out var decision,
+                out var chainReason))
         {
             this.lastEscapeGapCloserSafety = decision.RiskReason == "landing is safe; normal escape validation required"
                 ? safeDecision.RiskReason
-                : decision.RiskReason;
+                : chainReason;
             return false;
         }
 
@@ -1370,12 +1483,53 @@ internal sealed class EscapeGapCloserController(
             : Positional.Any;
     }
 
+    private bool ShouldAssistSafeBossModMovement(float safeMovementDistance, bool preferCurrentBossModPressure, out string reason)
+    {
+        if (preferCurrentBossModPressure &&
+            this.HasCurrentBossModSafetyPressure(out var pressureReason))
+        {
+            reason = $"{config.CombatStyle}: BMR safety movement active ({pressureReason})";
+            return true;
+        }
+
+        return this.ShouldAssistSafeBossModMovement(safeMovementDistance, out reason);
+    }
+
     private bool ShouldAssistSafeBossModMovement(float safeMovementDistance, out string reason)
         => ShouldAssistSafeBossModMovement(
             config.CombatStyle,
             bossModMovementDiagnostics(),
             safeMovementDistance,
             out reason);
+
+    private bool HasCurrentBossModSafetyPressure(out string reason)
+    {
+        if (bossMod.TryGetForbiddenZoneCount(out var forbiddenZones, out _) &&
+            forbiddenZones > 0)
+        {
+            reason = $"forbidden zones={forbiddenZones}";
+            return true;
+        }
+
+        if (bossMod.TryGetForbiddenDirectionCount(out var forbiddenDirections, out _) &&
+            forbiddenDirections > 0)
+        {
+            reason = $"forbidden directions={forbiddenDirections}";
+            return true;
+        }
+
+        var pressure = mechanicPressure();
+        if (pressure.KnockbackSoon || pressure.KnockbackRecoveryActive)
+        {
+            reason = pressure.KnockbackRecoveryActive
+                ? "knockback recovery"
+                : "knockback soon";
+            return true;
+        }
+
+        reason = string.Empty;
+        return false;
+    }
 
     internal static bool ShouldAssistSafeBossModMovement(
         CombatStyle combatStyle,
