@@ -16,7 +16,8 @@ internal sealed class CombatHistory
 {
     // One hour at the combat sample rate; downtime is sampled slower so full duties fit without dropping early context.
     private const int MaxFrames = 14400;
-    private static readonly TimeSpan CombatRecordInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan SpecificMovementRecordInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan PassiveCombatRecordInterval = TimeSpan.FromSeconds(2.5);
     private static readonly TimeSpan DowntimeRecordInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MobilityDecisionFreshness = TimeSpan.FromMilliseconds(750);
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -185,10 +186,34 @@ internal sealed class CombatHistory
 
     private bool ShouldRecord(DateTime now, RuntimeStatus status, AoePackPositioningStatus aoe)
     {
-        var recordInterval = status.InCombat ? CombatRecordInterval : DowntimeRecordInterval;
-        return now - this.lastRecordedAt >= recordInterval ||
-               this.ShouldRecordImmediateMobilityDecision(now, status.MobilityDecision) ||
-               this.ShouldRecordPluginEvent(status, aoe);
+        var previous = this.LastFrame;
+        if (previous == null)
+        {
+            return true;
+        }
+
+        if (this.ShouldRecordImmediateMobilityDecision(now, status.MobilityDecision) ||
+            StateLifecycleChanged(previous, status))
+        {
+            return true;
+        }
+
+        if (IsUrgentBmrMechanicMovement(status) &&
+            UrgentBmrMechanicChanged(previous, status))
+        {
+            return true;
+        }
+
+        if (now - this.lastRecordedAt >= SpecificMovementRecordInterval &&
+            SpecificMovementChoiceChanged(previous, status, aoe, now))
+        {
+            return true;
+        }
+
+        var passiveInterval = status.InCombat
+            ? ResolvePassiveCombatRecordInterval(status.NextGcd)
+            : DowntimeRecordInterval;
+        return now - this.lastRecordedAt >= passiveInterval;
     }
 
     private bool ShouldRecordImmediateMobilityDecision(DateTime now, MobilityDecisionDiagnostics decision)
@@ -204,27 +229,39 @@ internal sealed class CombatHistory
         return age >= TimeSpan.Zero && age <= MobilityDecisionFreshness;
     }
 
-    private bool ShouldRecordPluginEvent(RuntimeStatus status, AoePackPositioningStatus aoe)
+    private static bool StateLifecycleChanged(CombatHistoryFrame previous, RuntimeStatus status)
     {
-        var previous = this.LastFrame;
-        if (previous == null)
-        {
-            return true;
-        }
-
         return previous.InCombat != status.InCombat ||
                previous.IsDead != status.IsDead ||
                previous.PluginEnabled != status.Enabled ||
                previous.TargetBaseId != status.TargetBaseId ||
                previous.TargetObjectId != status.TargetObjectId ||
-               previous.Movement != status.LastMovement ||
+               !StringEquals(previous.BossModActiveModule, status.BossModMovement.ActiveModule) ||
+               !StringEquals(previous.BossModActiveZoneModule, status.BossModMovement.ActiveZoneModule);
+    }
+
+    private static bool UrgentBmrMechanicChanged(CombatHistoryFrame previous, RuntimeStatus status)
+    {
+        var current = status.BossModMovement;
+        return !EqualityComparer<BossModMechanicPressure>.Default.Equals(previous.MechanicPressure, status.MechanicPressure) ||
+               !StringEquals(previous.BossModNavigationDestination, current.NavigationDestination) ||
+               !StringEquals(previous.BossModNavigationNextWaypoint, current.NavigationNextWaypoint) ||
+               !StringEquals(previous.BossModNavigationStats, current.NavigationStats) ||
+               !StringEquals(previous.BossModMovement.PlannerSteer, current.PlannerSteer) ||
+               !StringEquals(previous.BossModControllerTarget, current.ControllerTarget) ||
+               !StringEquals(previous.BossModMovementOverride, current.MovementOverride) ||
+               !StringEquals(previous.BossModHintSummary, current.HintSummary);
+    }
+
+    private static bool SpecificMovementChoiceChanged(CombatHistoryFrame previous, RuntimeStatus status, AoePackPositioningStatus aoe, DateTime now)
+    {
+        return previous.Movement != status.LastMovement ||
                previous.AutomatedMovementSuppressed != status.AutomatedMovementSuppressed ||
                !StringEquals(previous.MovementRangeStrategy, status.LastMovementRangeStrategy) ||
                !StringEquals(previous.SafetyBuffer, status.LastForbiddenZoneCushion) ||
                !FloatEquals(previous.TargetUptimeRange, status.LastTargetUptimeRange) ||
                !StringEquals(previous.TargetUptimeRangeSource, status.TargetUptimeRangeSource) ||
                !StringEquals(previous.TargetUptimeRangeReason, status.TargetUptimeRangeReason) ||
-               !EqualityComparer<BossModMechanicPressure>.Default.Equals(previous.MechanicPressure, status.MechanicPressure) ||
                previous.LastPositional != status.LastPositional ||
                !StringEquals(previous.PositionalIntentSource, status.PositionalIntentSource) ||
                !StringEquals(previous.PositionalIntentReason, status.PositionalIntentReason) ||
@@ -236,7 +273,7 @@ internal sealed class CombatHistory
                !StringEquals(previous.EscapeSafety, status.LastEscapeGapCloserSafety) ||
                !VectorEquals(previous.EscapeLanding, status.LastEscapeLanding) ||
                !GapCloserEquals(previous.GapCloser, status.GapCloser) ||
-               MobilityDecisionChanged(previous.MobilityDecision, FreshMobilityDecision(DateTime.UtcNow, status.MobilityDecision)) ||
+               MobilityDecisionChanged(previous.MobilityDecision, FreshMobilityDecision(now, status.MobilityDecision)) ||
                !StringEquals(previous.HealerCoverageReason, status.HealerCoveragePositioning.LastReason) ||
                previous.HealerCoverageInjected != status.HealerCoveragePositioning.Injected ||
                !StringEquals(previous.SurvZoneReason, status.SurvivabilityZonePositioning.LastReason) ||
@@ -246,24 +283,44 @@ internal sealed class CombatHistory
                !StringEquals(previous.ArenaEdgeReason, status.ArenaEdgeReason) ||
                !StringEquals(previous.GoalPriority, status.AoeGoalPriority) ||
                !StringEquals(previous.GoalSources, status.AoeGoalSources) ||
-               BossModMovementChanged(previous, status.BossModMovement) ||
+               BossModMovementChoiceChanged(previous, status.BossModMovement) ||
                !StringEquals(previous.ManualMovementInput, status.ManualMovementInput) ||
                FacingChanged(previous.Facing, status.Facing) ||
                RedMageMeleeChanged(previous.RedMageMeleeCombo, status.RedMageMeleeCombo) ||
                AoeChanged(previous, aoe);
     }
 
-    private static bool BossModMovementChanged(CombatHistoryFrame previous, BossModMovementDiagnostics current)
+    private static bool BossModMovementChoiceChanged(CombatHistoryFrame previous, BossModMovementDiagnostics current)
     {
-        return !StringEquals(previous.BossModActiveModule, current.ActiveModule) ||
-               !StringEquals(previous.BossModActiveZoneModule, current.ActiveZoneModule) ||
-               !StringEquals(previous.BossModNavigationDestination, current.NavigationDestination) ||
+        return !StringEquals(previous.BossModNavigationDestination, current.NavigationDestination) ||
                !StringEquals(previous.BossModNavigationNextWaypoint, current.NavigationNextWaypoint) ||
-               !StringEquals(previous.BossModNavigationStats, current.NavigationStats) ||
                !StringEquals(previous.BossModMovement.PlannerSteer, current.PlannerSteer) ||
-               !StringEquals(previous.BossModControllerTarget, current.ControllerTarget) ||
-               !StringEquals(previous.BossModMovementOverride, current.MovementOverride) ||
-               !StringEquals(previous.BossModHintSummary, current.HintSummary);
+               !StringEquals(previous.BossModControllerTarget, current.ControllerTarget);
+    }
+
+    private static bool IsUrgentBmrMechanicMovement(RuntimeStatus status)
+    {
+        if (status.MechanicPressure.PrimaryPressure != BossModMechanicPressureKind.None)
+        {
+            return true;
+        }
+
+        var movement = status.BossModMovement;
+        return movement.MovementDetails.DesiredDirection.HasValue ||
+               movement.HintDetails.ForcedMovement.HasValue ||
+               ((movement.HintDetails.GoalZones ?? 0) > 0 && (movement.HintDetails.ForbiddenZones ?? 0) > 0);
+    }
+
+    private static TimeSpan ResolvePassiveCombatRecordInterval(RsrGcdActionTimingSnapshot? nextGcd)
+    {
+        if (nextGcd == null ||
+            !float.IsFinite(nextGcd.GcdTotal) ||
+            nextGcd.GcdTotal <= 0f)
+        {
+            return PassiveCombatRecordInterval;
+        }
+
+        return TimeSpan.FromSeconds(Math.Clamp(nextGcd.GcdTotal, 1.5f, 3.5f));
     }
 
     private static bool MobilityDecisionChanged(MobilityDecisionDiagnostics previous, MobilityDecisionDiagnostics current)
