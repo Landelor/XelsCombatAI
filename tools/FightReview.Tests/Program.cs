@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Numerics;
 using System.Text.Json;
 using FightReview;
@@ -27,10 +28,13 @@ var tests = new (string Name, Action Body)[]
     ("trash pull diagnostics parsing", TrashPullDiagnosticsParsing),
     ("2D BMR pathfind center parsing", PathfindCenter2dParsing),
     ("BOM-prefixed JSONL", BomPrefixedJsonl),
+    ("gzip JSONL parsing", GzipJsonlParsing),
     ("header metadata falls back to frames", HeaderMetadataFallsBackToFrames),
     ("schema v2 rejection", SchemaV2Rejected),
     ("configuration logging defaults/reset", ConfigurationLoggingDefaultsAndReset),
     ("run-review settings snapshot captures plugin configs", RunReviewSettingsSnapshotCapturesPluginConfigs),
+    ("run-review writer emits gzip without temp file", RunReviewWriterEmitsGzipWithoutTempFile),
+    ("run-review writer prunes mixed plaintext and gzip logs", RunReviewWriterPrunesMixedLogs),
     ("run-review privacy redacts identifiers", RunReviewPrivacyRedactsIdentifiers),
     ("legacy gap closer distance config loads", LegacyGapCloserDistanceConfigLoads),
     ("target uptime range follows next GCD", TargetUptimeRangeFollowsNextGcd),
@@ -212,6 +216,23 @@ static void BomPrefixedJsonl()
     AssertEqual(2, log.Frames.Count, "BOM frame count");
 }
 
+static void GzipJsonlParsing()
+{
+    using var temp = TempDirectory.Create();
+    var path = Path.Combine(temp.Path, "schema-v3-minimal.jsonl.gz");
+    using (var stream = File.Create(path))
+    using (var gzip = new GZipStream(stream, CompressionLevel.Fastest))
+    using (var writer = new StreamWriter(gzip))
+    {
+        writer.Write(File.ReadAllText(FixturePath("schema-v3-minimal.jsonl")));
+    }
+
+    var log = XcaiLogReader.Read(path);
+    AssertEqual(3f, log.Header.DurationSeconds, "gzip duration");
+    AssertEqual(2, log.Frames.Count, "gzip frame count");
+    AssertEqual((uint)1234, log.Header.TerritoryType, "gzip territory");
+}
+
 static void HeaderMetadataFallsBackToFrames()
 {
     using var temp = TempDirectory.Create();
@@ -390,6 +411,48 @@ static void ConfigurationLoggingDefaultsAndReset()
     AssertFalse(oldLoggingConfig.FightReviewLoggingEnabled, "migration disables logging");
     AssertTrue(oldLoggingConfig.ManageSocialTurning, "migration enables social turning");
     AssertTrue(oldLoggingConfig.ManageSocialSpacing, "migration enables social spacing");
+}
+
+static void RunReviewWriterEmitsGzipWithoutTempFile()
+{
+    using var temp = TempDirectory.Create();
+    var path = Path.Combine(temp.Path, "writer.jsonl.gz");
+
+    CombatLogWriter.WriteCompressedJsonLines(path, writer =>
+    {
+        writer.WriteLine("""{"Type":"header","SchemaVersion":3,"FrameCount":0}""");
+        writer.WriteLine("""{"Type":"frame","Frame":{"T":0}}""");
+    });
+
+    AssertTrue(File.Exists(path), "compressed log exists");
+    AssertFalse(File.Exists($"{path}.tmp"), "temporary log removed");
+
+    using var stream = File.OpenRead(path);
+    using var gzip = new GZipStream(stream, CompressionMode.Decompress);
+    using var reader = new StreamReader(gzip);
+    var text = reader.ReadToEnd();
+    AssertContains("SchemaVersion", text, "compressed log content");
+    AssertContains("\"Type\":\"frame\"", text, "compressed frame content");
+}
+
+static void RunReviewWriterPrunesMixedLogs()
+{
+    using var temp = TempDirectory.Create();
+    var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    for (var i = 0; i < 102; i++)
+    {
+        var extension = i % 2 == 0 ? ".jsonl" : ".jsonl.gz";
+        var path = Path.Combine(temp.Path, $"log-{i:000}{extension}");
+        File.WriteAllText(path, "{}");
+        File.SetCreationTimeUtc(path, start.AddMinutes(i));
+    }
+
+    CombatLogWriter.PruneOldLogs(temp.Path);
+
+    var remaining = Directory.EnumerateFiles(temp.Path)
+        .Count(path => path.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) ||
+                       path.EndsWith(".jsonl.gz", StringComparison.OrdinalIgnoreCase));
+    AssertEqual(100, remaining, "mixed log retention count");
 }
 
 static void RunReviewSettingsSnapshotCapturesPluginConfigs()

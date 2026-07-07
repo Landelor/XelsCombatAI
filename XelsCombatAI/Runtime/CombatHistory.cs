@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Numerics;
 using System.Reflection;
 using System.Text;
@@ -60,6 +61,25 @@ internal sealed class CombatHistory
         this.lastRecordedMobilityDecisionAt = DateTime.MinValue;
         this.lastSeenRsrSnapshotMode = default;
         this.logScope = logScope;
+    }
+
+    public ExportSnapshot CreateExport(Configuration config, string reason)
+    {
+        var copiedFrames = new CombatHistoryFrame[this.count];
+        for (var i = 0; i < this.count; i++)
+        {
+            copiedFrames[i] = this.frames[(this.head + i) % MaxFrames]!;
+        }
+
+        return new ExportSnapshot(
+            reason,
+            copiedFrames,
+            this.combatStart,
+            this.logScope,
+            this.lastSeenRsrSnapshotMode,
+            CombatHistoryConfigSnapshot.From(config),
+            CombatLogSettingsSnapshot.CaptureRuntimeConfig(config),
+            PluginVersion());
     }
 
     public void Record(RuntimeStatus status, AoePackPositioningStatus aoe, IReadOnlyList<CombatHistoryActorSnapshot> actors)
@@ -558,81 +578,20 @@ internal sealed class CombatHistory
 
     public string BuildJsonLines(Configuration config, CombatLogSettingsSnapshot? settingsSnapshot = null)
     {
-        var sb = new StringBuilder();
-        var emittedFrames = this.BuildAnonymizedFrameLines();
-        var emittedFrameCount = emittedFrames.Count;
-        var headerAnonymizer = new CombatLogAnonymizer();
-
-        if (this.count == 0)
-        {
-            sb.AppendLine(headerAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
-                new CombatHistoryJsonHeader(
-                    Type: "header",
-                    SchemaVersion: 3,
-                    LogScope: this.logScope,
-                    PluginVersion: PluginVersion(),
-                    RunStartUtc: this.combatStart,
-                    RunEndUtc: this.combatStart,
-                    CombatStartUtc: this.combatStart,
-                    CombatEndUtc: this.combatStart,
-                    DurationSeconds: 0,
-                    FrameCount: emittedFrameCount,
-                    PlayerClassJobId: 0,
-                    TerritoryType: 0,
-                    ContentFinderConditionId: 0,
-                    BossModActiveModule: "<none>",
-                    BossModActiveZoneModule: "<none>",
-                    Config: CombatHistoryConfigSnapshot.From(config),
-                    SettingsSnapshot: settingsSnapshot,
-                    RsrSnapshotMode: this.lastSeenRsrSnapshotMode.ToString(),
-                    SourceSummary: CombatHistorySourceSummary.Empty),
-                JsonOptions)));
-            return sb.ToString();
-        }
-
-        var sourceSummary = this.BuildSourceSummary();
-        var last = this.frames[(this.head + this.count - 1) % MaxFrames]!;
-        sb.AppendLine(headerAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
-            new CombatHistoryJsonHeader(
-                Type: "header",
-                SchemaVersion: 3,
-                LogScope: this.logScope,
-                PluginVersion: PluginVersion(),
-                RunStartUtc: this.combatStart,
-                RunEndUtc: last.TimestampUtc,
-                CombatStartUtc: this.combatStart,
-                CombatEndUtc: last.TimestampUtc,
-                DurationSeconds: last.T,
-                FrameCount: emittedFrameCount,
-                PlayerClassJobId: this.PlayerClassJobId,
-                TerritoryType: this.TerritoryType,
-                ContentFinderConditionId: this.ContentFinderConditionId,
-                BossModActiveModule: this.BossModActiveModule,
-                BossModActiveZoneModule: this.BossModActiveZoneModule,
-                Config: CombatHistoryConfigSnapshot.From(config),
-                SettingsSnapshot: settingsSnapshot,
-                RsrSnapshotMode: this.lastSeenRsrSnapshotMode.ToString(),
-                SourceSummary: sourceSummary),
-            JsonOptions)));
-
-        foreach (var emittedFrame in emittedFrames)
-        {
-            sb.AppendLine(emittedFrame);
-        }
-
-        return sb.ToString();
+        using var writer = new StringWriter(CultureInfo.InvariantCulture);
+        this.CreateExport(config, "fight").WriteJsonLines(writer, settingsSnapshot);
+        return writer.ToString();
     }
 
-    private List<string> BuildAnonymizedFrameLines()
+    private static int CountAnonymizedFrameLines(IReadOnlyList<CombatHistoryFrame> sourceFrames)
     {
-        var result = new List<string>();
-        var outputAnonymizer = new CombatLogAnonymizer();
         var signatureAnonymizer = new CombatLogAnonymizer();
         CombatHistoryFrame? previous = null;
         string? previousSignature = null;
-        for (var i = 0; i < this.count; i++)
+        var emitted = 0;
+        for (var i = 0; i < sourceFrames.Count; i++)
         {
-            var frame = this.frames[(this.head + i) % MaxFrames]!;
+            var frame = sourceFrames[i];
             var motion = CombatHistoryMotionSnapshot.From(frame, previous);
             var signatureFrame = frame with { TimestampUtc = DateTime.MinValue, T = 0f };
             var signature = signatureAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
@@ -643,7 +602,36 @@ internal sealed class CombatHistory
                 JsonOptions));
             if (previousSignature == null || !signature.Equals(previousSignature, StringComparison.Ordinal))
             {
-                result.Add(outputAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
+                emitted++;
+                previousSignature = signature;
+            }
+
+            previous = frame;
+        }
+
+        return emitted;
+    }
+
+    private static void WriteAnonymizedFrameLines(TextWriter writer, IReadOnlyList<CombatHistoryFrame> sourceFrames)
+    {
+        var outputAnonymizer = new CombatLogAnonymizer();
+        var signatureAnonymizer = new CombatLogAnonymizer();
+        CombatHistoryFrame? previous = null;
+        string? previousSignature = null;
+        for (var i = 0; i < sourceFrames.Count; i++)
+        {
+            var frame = sourceFrames[i];
+            var motion = CombatHistoryMotionSnapshot.From(frame, previous);
+            var signatureFrame = frame with { TimestampUtc = DateTime.MinValue, T = 0f };
+            var signature = signatureAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
+                new CombatHistoryJsonFrame(
+                    Type: "frame",
+                    Frame: signatureFrame,
+                    Motion: motion),
+                JsonOptions));
+            if (previousSignature == null || !signature.Equals(previousSignature, StringComparison.Ordinal))
+            {
+                writer.WriteLine(outputAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
                     new CombatHistoryJsonFrame(
                         Type: "frame",
                         Frame: frame,
@@ -654,8 +642,6 @@ internal sealed class CombatHistory
 
             previous = frame;
         }
-
-        return result;
     }
 
     private static void AppendIfChanged<T>(StringBuilder sb, string label, T current, T? previous) where T : struct
@@ -773,6 +759,17 @@ internal sealed class CombatHistory
 
     private CombatHistorySourceSummary BuildSourceSummary()
     {
+        var orderedFrames = new CombatHistoryFrame[this.count];
+        for (var i = 0; i < this.count; i++)
+        {
+            orderedFrames[i] = this.frames[(this.head + i) % MaxFrames]!;
+        }
+
+        return BuildSourceSummary(orderedFrames);
+    }
+
+    private static CombatHistorySourceSummary BuildSourceSummary(IReadOnlyList<CombatHistoryFrame> sourceFrames)
+    {
         var positionalRsr = 0;
         var positionalNone = 0;
         var aoeRsr = 0;
@@ -797,9 +794,9 @@ internal sealed class CombatHistory
         var trueNorthLocal = 0;
         var trueNorthNone = 0;
 
-        for (var i = 0; i < this.count; i++)
+        for (var i = 0; i < sourceFrames.Count; i++)
         {
-            var frame = this.frames[(this.head + i) % MaxFrames]!;
+            var frame = sourceFrames[i];
             if (frame.PositionalIntentSource.Equals("RSR reflected", StringComparison.Ordinal))
             {
                 positionalRsr++;
@@ -910,7 +907,7 @@ internal sealed class CombatHistory
         }
 
         return new CombatHistorySourceSummary(
-            this.count,
+            sourceFrames.Count,
             positionalRsr,
             positionalNone,
             aoeRsr,
@@ -963,6 +960,118 @@ internal sealed class CombatHistory
         }
 
         return "<none>";
+    }
+
+    internal sealed class ExportSnapshot(
+        string reason,
+        IReadOnlyList<CombatHistoryFrame> frames,
+        DateTime combatStartUtc,
+        string logScope,
+        StateCommandType lastSeenRsrSnapshotMode,
+        CombatHistoryConfigSnapshot config,
+        JsonElement xcaiRuntimeConfig,
+        string pluginVersion)
+    {
+        public string Reason { get; } = reason;
+        public bool HasFrames => frames.Count > 0;
+        public int FrameCount => frames.Count;
+        public float DurationSeconds => this.LastFrame?.T ?? 0f;
+        public DateTime CombatStartUtc => combatStartUtc;
+        public CombatHistoryFrame? LastFrame => frames.Count == 0 ? null : frames[^1];
+        public uint PlayerClassJobId => this.FirstNonZero(frame => frame.PlayerClassJobId);
+        public uint TerritoryType => this.FirstNonZero(frame => frame.TerritoryType);
+        public uint ContentFinderConditionId => this.FirstNonZero(frame => frame.ContentFinderConditionId);
+        public uint LastTargetBaseId => this.LastFrame?.TargetBaseId ?? 0;
+        public JsonElement XcaiRuntimeConfig { get; } = xcaiRuntimeConfig;
+
+        public void WriteJsonLines(TextWriter writer, CombatLogSettingsSnapshot? settingsSnapshot = null)
+        {
+            var emittedFrameCount = CountAnonymizedFrameLines(frames);
+            var headerAnonymizer = new CombatLogAnonymizer();
+
+            if (frames.Count == 0)
+            {
+                writer.WriteLine(headerAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
+                    new CombatHistoryJsonHeader(
+                        Type: "header",
+                        SchemaVersion: 3,
+                        LogScope: logScope,
+                        PluginVersion: pluginVersion,
+                        RunStartUtc: combatStartUtc,
+                        RunEndUtc: combatStartUtc,
+                        CombatStartUtc: combatStartUtc,
+                        CombatEndUtc: combatStartUtc,
+                        DurationSeconds: 0,
+                        FrameCount: emittedFrameCount,
+                        PlayerClassJobId: 0,
+                        TerritoryType: 0,
+                        ContentFinderConditionId: 0,
+                        BossModActiveModule: "<none>",
+                        BossModActiveZoneModule: "<none>",
+                        Config: config,
+                        SettingsSnapshot: settingsSnapshot,
+                        RsrSnapshotMode: lastSeenRsrSnapshotMode.ToString(),
+                        SourceSummary: CombatHistorySourceSummary.Empty),
+                    JsonOptions)));
+                return;
+            }
+
+            var sourceSummary = BuildSourceSummary(frames);
+            var last = frames[^1];
+            writer.WriteLine(headerAnonymizer.AnonymizeRecord(JsonSerializer.Serialize(
+                new CombatHistoryJsonHeader(
+                    Type: "header",
+                    SchemaVersion: 3,
+                    LogScope: logScope,
+                    PluginVersion: pluginVersion,
+                    RunStartUtc: combatStartUtc,
+                    RunEndUtc: last.TimestampUtc,
+                    CombatStartUtc: combatStartUtc,
+                    CombatEndUtc: last.TimestampUtc,
+                    DurationSeconds: last.T,
+                    FrameCount: emittedFrameCount,
+                    PlayerClassJobId: this.PlayerClassJobId,
+                    TerritoryType: this.TerritoryType,
+                    ContentFinderConditionId: this.ContentFinderConditionId,
+                    BossModActiveModule: this.LastNonNone(frame => frame.BossModActiveModule),
+                    BossModActiveZoneModule: this.LastNonNone(frame => frame.BossModActiveZoneModule),
+                    Config: config,
+                    SettingsSnapshot: settingsSnapshot,
+                    RsrSnapshotMode: lastSeenRsrSnapshotMode.ToString(),
+                    SourceSummary: sourceSummary),
+                JsonOptions)));
+
+            WriteAnonymizedFrameLines(writer, frames);
+        }
+
+        private uint FirstNonZero(Func<CombatHistoryFrame, uint> selector)
+        {
+            for (var i = 0; i < frames.Count; i++)
+            {
+                var value = selector(frames[i]);
+                if (value != 0)
+                {
+                    return value;
+                }
+            }
+
+            return 0;
+        }
+
+        private string LastNonNone(Func<CombatHistoryFrame, string> selector)
+        {
+            for (var i = frames.Count - 1; i >= 0; i--)
+            {
+                var value = selector(frames[i]);
+                if (!string.IsNullOrWhiteSpace(value) &&
+                    !value.Equals("<none>", StringComparison.Ordinal))
+                {
+                    return value;
+                }
+            }
+
+            return "<none>";
+        }
     }
 
     private sealed record CombatHistoryJsonHeader(
@@ -1022,7 +1131,7 @@ internal sealed class CombatHistory
         }
     }
 
-    private sealed record CombatHistoryConfigSnapshot(
+    internal sealed record CombatHistoryConfigSnapshot(
         bool PickAoeTarget,
         bool KeepTrashTarget,
         bool ManagePositionals,

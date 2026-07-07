@@ -85,7 +85,7 @@ internal static class ProgramMain
 XCAI Fight Review
 
 Usage:
-  dotnet run --project tools/FightReview -- --xcai <xcai.jsonl> [--out <dir>]
+  dotnet run --project tools/FightReview -- --xcai <xcai.jsonl|xcai.jsonl.gz> [--out <dir>]
 
 Outputs:
   agent.improvement.json

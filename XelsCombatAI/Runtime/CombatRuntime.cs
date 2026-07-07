@@ -471,6 +471,7 @@ internal sealed class CombatRuntime(
         {
             this.FlushCombatHistory("plugin disposed");
         }
+        combatLogWriter.WaitForPendingExports();
 
         if (config.Enabled)
         {
@@ -660,7 +661,7 @@ internal sealed class CombatRuntime(
         }
 
         this.combatHistorySaved = true;
-        combatLogWriter.WriteFight(this.combatHistory, config, reason);
+        combatLogWriter.EnqueueFight(this.combatHistory.CreateExport(config, reason));
         this.combatHistory.Reset();
         this.combatHistorySaved = false;
         this.combatHistoryActive = false;

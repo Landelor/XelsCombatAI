@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 
 namespace FightReview;
@@ -10,7 +11,8 @@ internal static class XcaiLogReader
         var frames = new List<XcaiFrame>();
         var lineNumber = 0;
 
-        foreach (var rawLine in File.ReadLines(path))
+        using var reader = OpenText(path);
+        while (reader.ReadLine() is { } rawLine)
         {
             lineNumber++;
             var line = rawLine.TrimStart('\uFEFF');
@@ -49,6 +51,17 @@ internal static class XcaiLogReader
 
         header = NormalizeHeader(header, frames);
         return new XcaiLog(Path.GetFullPath(path), header, frames);
+    }
+
+    private static StreamReader OpenText(string path)
+    {
+        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (path.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
+        {
+            return new StreamReader(new GZipStream(stream, CompressionMode.Decompress));
+        }
+
+        return new StreamReader(stream);
     }
 
     private static XcaiHeader NormalizeHeader(XcaiHeader header, IReadOnlyList<XcaiFrame> frames)

@@ -27,11 +27,14 @@ internal sealed record CombatLogSettingsSnapshot(
         => Capture(config, configDirectory, (ex, message) => log.Verbose(ex, message));
 
     internal static CombatLogSettingsSnapshot Capture(Configuration config, string configDirectory, Action<Exception, string>? logError)
+        => Capture(CaptureRuntimeConfig(config), configDirectory, logError);
+
+    internal static CombatLogSettingsSnapshot Capture(JsonElement xcaiRuntimeConfig, string configDirectory, Action<Exception, string>? logError)
     {
         var configRoot = ResolveConfigRoot(configDirectory);
         var plugins = new List<CombatLogPluginSettingsSnapshot>
         {
-            CaptureXcai(config, configRoot, logError),
+            CaptureXcai(xcaiRuntimeConfig, configRoot, logError),
             CaptureFileBackedPlugin("BossModReborn", configRoot, ["BossModReborn.json"], ["BossModReborn"], logError),
             CaptureFileBackedPlugin("RotationSolver", configRoot, ["RotationSolver.json", "RotationSolverReborn.json"], ["RotationSolver", "RotationSolverReborn"], logError)
         };
@@ -42,7 +45,10 @@ internal sealed record CombatLogSettingsSnapshot(
             plugins);
     }
 
-    private static CombatLogPluginSettingsSnapshot CaptureXcai(Configuration config, string configRoot, Action<Exception, string>? logError)
+    internal static JsonElement CaptureRuntimeConfig(Configuration config)
+        => CombatLogPrivacy.RedactSettings(JsonSerializer.SerializeToElement(config, JsonOptions));
+
+    private static CombatLogPluginSettingsSnapshot CaptureXcai(JsonElement runtimeConfig, string configRoot, Action<Exception, string>? logError)
     {
         var files = new List<CombatLogSettingsFileSnapshot>();
         var configFile = Path.Combine(configRoot, "XelsCombatAI.json");
@@ -54,7 +60,7 @@ internal sealed record CombatLogSettingsSnapshot(
         return new CombatLogPluginSettingsSnapshot(
             "XelsCombatAI",
             "captured",
-            CombatLogPrivacy.RedactSettings(JsonSerializer.SerializeToElement(config, JsonOptions)),
+            runtimeConfig,
             files);
     }
 

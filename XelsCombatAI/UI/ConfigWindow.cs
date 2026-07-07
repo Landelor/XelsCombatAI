@@ -552,7 +552,7 @@ internal sealed class ConfigWindow : Window, IDisposable
             this.config.FightReviewLoggingEnabled,
             this.defaultConfig.FightReviewLoggingEnabled,
             v => this.config.FightReviewLoggingEnabled = v,
-            "Saves one JSONL log for the current duty or fallback combat.\nKeeps logging when movement control is disabled.\nDowntime is sampled slower to keep logging lightweight.");
+            "Saves one compressed JSONL log for the current duty or fallback combat.\nKeeps logging when movement control is disabled.\nDowntime is sampled slower to keep logging lightweight.");
         ImGui.Unindent(8f);
         ImGui.Spacing();
 
