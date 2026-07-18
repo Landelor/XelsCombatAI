@@ -29,7 +29,7 @@ Out of combat, the plugin stops managing movement entirely and hands control bac
 Add the following URL to Dalamud's custom plugin repositories:
 
 ```
-https://raw.githubusercontent.com/Xeltor/XelsCombatAI/master/pluginmaster.json
+https://raw.githubusercontent.com/Landelor/XelsCombatAI/master/pluginmaster.json
 ```
 
 ## Commands
