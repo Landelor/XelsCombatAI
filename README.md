@@ -32,6 +32,16 @@ Add the following URL to Dalamud's custom plugin repositories:
 https://raw.githubusercontent.com/Landelor/XelsCombatAI/master/pluginmaster.json
 ```
 
+### ankhito-main testing builds
+
+The `ankhito-main` branch (decision overlay, run-review logging, party intent coordination) is published from a separate feed so it doesn't affect the stable install above. Use it instead of, not alongside, the stable feed — both list the same `InternalName` and installing both will conflict:
+
+```
+https://raw.githubusercontent.com/Landelor/XelsCombatAI/master/pluginmaster-ankhito-main.json
+```
+
+This feed is testing-exclusive, so enable Dalamud's "Get plugin testing builds" option.
+
 ## Commands
 
 | Command | Description |
