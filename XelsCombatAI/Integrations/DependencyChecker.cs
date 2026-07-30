@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace XelsCombatAI.Integrations;
@@ -8,6 +9,14 @@ internal sealed class DependencyChecker(
     BossModIpc bossMod,
     RotationSolverIpc rotationSolver)
 {
+    // Dalamud's own auto-update sweep only runs once the client is idle (see AutoUpdateManager),
+    // so IsAutoUpdateComplete can stay false indefinitely if the player never leaves duty/combat
+    // after login. Only trust it as a startup gate for a bounded window, so XCAI can't get stuck
+    // waiting forever (FFX-13).
+    private static readonly TimeSpan AutoUpdateSettleTimeout = TimeSpan.FromSeconds(45);
+
+    private readonly DateTime createdAtUtc = DateTime.UtcNow;
+
     public bool DependenciesAvailable(out string missing, bool forceRefresh = false)
     {
         _ = forceRefresh;
@@ -70,7 +79,8 @@ internal sealed class DependencyChecker(
 
     public bool CanProbeDependencies(out string waitingReason)
     {
-        if (!services.PluginInterface.IsAutoUpdateComplete)
+        if (!services.PluginInterface.IsAutoUpdateComplete &&
+            DateTime.UtcNow - this.createdAtUtc < AutoUpdateSettleTimeout)
         {
             waitingReason = "Dalamud plugin updates are still settling";
             return false;

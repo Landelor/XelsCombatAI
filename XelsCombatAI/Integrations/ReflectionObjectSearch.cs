@@ -9,6 +9,13 @@ namespace XelsCombatAI.Integrations;
 
 internal static class ReflectionObjectSearch
 {
+    // Dalamud's own auto-update sweep only runs once the client is idle, so IsAutoUpdateComplete
+    // can stay false indefinitely if the player never leaves duty/combat after login. Only avoid
+    // reflecting into InstalledPlugins for a bounded startup window, so callers (e.g. Rotation
+    // Solver detection) can't be starved forever (FFX-13).
+    private static readonly TimeSpan AutoUpdateSettleTimeout = TimeSpan.FromSeconds(45);
+    private static readonly DateTime LoadedAtUtc = DateTime.UtcNow;
+
     public static object? FindLoadedPlugin(IDalamudPluginInterface pluginInterface, string typeFullName, int maxDepth, params string[] pluginNames)
     {
         foreach (var plugin in EnumerateLoadedPlugins(pluginInterface, pluginNames))
@@ -35,7 +42,7 @@ internal static class ReflectionObjectSearch
 
     public static IEnumerable<object> EnumerateLoadedPlugins(IDalamudPluginInterface pluginInterface, params string[] pluginNames)
     {
-        if (!pluginInterface.IsAutoUpdateComplete)
+        if (!pluginInterface.IsAutoUpdateComplete && DateTime.UtcNow - LoadedAtUtc < AutoUpdateSettleTimeout)
         {
             yield break;
         }
