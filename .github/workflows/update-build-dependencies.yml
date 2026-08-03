@@ -23,7 +23,7 @@ jobs:
       - name: Checkout plugin
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ankhito-main
           fetch-depth: 0
 
       - name: Setup .NET
