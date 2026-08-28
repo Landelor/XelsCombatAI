@@ -969,8 +969,14 @@ internal sealed class AoePackPositioningController(
             return true;
         }
 
-        if (this.bossModEncounterActive || this.bossLikeCombatActive)
+        if (this.bossLikeCombatActive)
         {
+            // Note: intentionally not also checking the raw bossModEncounterActive flag here.
+            // In duties, BossMod almost always has *some* module loaded (per-pack trash
+            // sub-modules or the zone module) even during ordinary trash pulls, so gating on
+            // it in addition to bossLikeCombatActive silently blocked Henched for legitimate
+            // trash packs inside instances. bossLikeCombatActive already folds the raw flag
+            // in via ShouldUseBossModuleContext while still deferring to packLikeTrashContext.
             this.rsrRestoreStatus = "boss combat active; Henched skipped";
             this.rsrLastRestoreStatus = "boss combat active; Henched skipped";
             return false;
