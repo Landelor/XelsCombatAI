@@ -59,6 +59,9 @@ internal sealed class AoePackPositioningController(
     private bool lastInjected;
     private ulong lastBestPrimaryId;
     private bool rsrHenchedActive;
+    private DateTime rsrHenchedActivatedAt = DateTime.MinValue;
+    private DateTime combatActiveSince = DateTime.MinValue;
+    private DateTime nextSettleDeferLogAt = DateTime.MinValue;
     private bool bossModEncounterActive;
     private bool bmrMoveRequested;
     private bool bmrMoveImminent;
@@ -122,6 +125,16 @@ internal sealed class AoePackPositioningController(
     private const float LongRangeCasterPackFollowMinDistance = 14f;
     private const float LongRangeCasterPackFollowMaxDistance = 20f;
     private const float LongRangeCasterPackFollowSlack = 4f;
+    // How long combat context (BossMod module list, target set) must have been continuously
+    // active before we trust it enough to flip RSR into Henched. Right after a duty pull,
+    // BossMod's module/target state is still settling for the first few frames, and switching
+    // Henched on before that settles causes it to immediately flip again as the state corrects.
+    private static readonly TimeSpan RsrCombatSettleWindow = TimeSpan.FromMilliseconds(600);
+    // Minimum time Henched must stay engaged before a "soft" (context-derived, not a hard stop
+    // like leaving combat or disabling the plugin) reason is allowed to revert it. Prevents the
+    // on/off/on flicker reported when bossLikeCombatActive or GCD-availability briefly flaps
+    // during the first moments of a pull.
+    private static readonly TimeSpan RsrHenchedMinDwell = TimeSpan.FromMilliseconds(500);
 
     public AoePackPositioningStatus Status
     {
@@ -220,6 +233,9 @@ internal sealed class AoePackPositioningController(
         this.bmrMoveImminent = false;
         this.bossLikeCombatActive = false;
         this.trashContextActive = false;
+        this.combatActiveSince = DateTime.MinValue;
+        this.rsrHenchedActivatedAt = DateTime.MinValue;
+        this.nextSettleDeferLogAt = DateTime.MinValue;
         this.lastPriorityTargetCount = 0;
         this.lastInjectedCandidate = default;
         this.lastInjectedHits = 0;
@@ -250,7 +266,7 @@ internal sealed class AoePackPositioningController(
         this.lastPackEngagementGoalUpdatedAt = DateTime.MinValue;
         this.lastTargetSwitchAt = DateTime.MinValue;
         this.trashPullState.Reset();
-        this.RestoreRsrIfNeeded();
+        this.RestoreRsrIfNeeded("controller reset");
         rotationSolverActions.Reset();
     }
 
@@ -264,8 +280,9 @@ internal sealed class AoePackPositioningController(
             this.lastReason = "disabled";
             this.bossLikeCombatActive = false;
             this.trashContextActive = false;
+            this.combatActiveSince = DateTime.MinValue;
             this.trashPullState.Reset("disabled");
-            this.RestoreRsrIfNeeded();
+            this.RestoreRsrIfNeeded("plugin disabled");
             return;
         }
 
@@ -274,14 +291,20 @@ internal sealed class AoePackPositioningController(
             this.lastReason = "not active in combat";
             this.bossLikeCombatActive = false;
             this.trashContextActive = false;
+            this.combatActiveSince = DateTime.MinValue;
             this.trashPullState.Reset("not active in combat");
-            this.RestoreRsrIfNeeded();
+            this.RestoreRsrIfNeeded("left combat");
             return;
+        }
+
+        if (this.combatActiveSince == DateTime.MinValue)
+        {
+            this.combatActiveSince = DateTime.UtcNow;
         }
 
         if (!this.EnsureResolved(hints.GetType()))
         {
-            this.RestoreRsrIfNeeded();
+            this.RestoreRsrIfNeeded("BossMod hints unresolved");
             return;
         }
 
@@ -362,14 +385,14 @@ internal sealed class AoePackPositioningController(
             }
         }
 
-        if (bossModuleContext && this.rsrHenchedActive)
+        if (bossModuleContext && this.rsrHenchedActive && this.HasHenchedMinDwellElapsed())
         {
-            this.RestoreRsrIfNeeded();
+            this.RestoreRsrIfNeeded("boss-like combat detected");
         }
 
         if (shouldYieldToMechanicSafety)
         {
-            this.RestoreRsrIfNeeded();
+            this.RestoreRsrIfNeeded("BossMod mechanic safety active");
             this.ClearAoeCandidateGoal();
             this.ClearPackEngagementGoal();
             this.lastAction = null;
@@ -389,9 +412,9 @@ internal sealed class AoePackPositioningController(
         var isTargetCenteredCircle = action?.IsTargetCenteredCircle == true ||
                                      action != null && action.Shape == RsrAoeShape.Circle && action.Range > action.EffectRange + 3f && !action.IsTargetArea;
 
-        if (!hasAoeAction && this.rsrHenchedActive && this.ShouldRestoreRsrAfterNoAction(reason, shouldUseRsrTargetControl))
+        if (!hasAoeAction && this.rsrHenchedActive && this.HasHenchedMinDwellElapsed() && this.ShouldRestoreRsrAfterNoAction(reason, shouldUseRsrTargetControl))
         {
-            this.RestoreRsrIfNeeded();
+            this.RestoreRsrIfNeeded("no upcoming AoE action");
         }
 
         if (!config.ManageMovement)
@@ -405,7 +428,7 @@ internal sealed class AoePackPositioningController(
 
             if (!config.KeepTrashTargetSelected && !config.PickBetterAoeTarget)
             {
-                this.RestoreRsrIfNeeded();
+                this.RestoreRsrIfNeeded("movement management disabled");
             }
 
             this.lastReason = "movement management disabled";
@@ -416,7 +439,7 @@ internal sealed class AoePackPositioningController(
         {
             if (!config.KeepTrashTargetSelected && !config.PickBetterAoeTarget)
             {
-                this.RestoreRsrIfNeeded();
+                this.RestoreRsrIfNeeded("manual movement suppression active");
             }
 
             this.lastReason = "manual movement suppression active";
@@ -458,15 +481,15 @@ internal sealed class AoePackPositioningController(
         }
         if (!config.KeepTrashTargetSelected && !config.PickBetterAoeTarget)
         {
-            this.RestoreRsrIfNeeded();
+            this.RestoreRsrIfNeeded("trash targeting features disabled");
         }
 
         // --- Common early-exit for non-AoE actions ---
         if (!hasAoeAction || action == null)
         {
-            if (!hasAoeAction && this.ShouldRestoreRsrAfterNoAction(reason, shouldUseRsrTargetControl))
+            if (!hasAoeAction && this.HasHenchedMinDwellElapsed() && this.ShouldRestoreRsrAfterNoAction(reason, shouldUseRsrTargetControl))
             {
-                this.RestoreRsrIfNeeded();
+                this.RestoreRsrIfNeeded("no upcoming AoE action");
             }
 
             if (!holdOptionalPackMovement &&
@@ -675,7 +698,7 @@ internal sealed class AoePackPositioningController(
                     this.InjectCentroidHold(hints, pathfindBounds, targets, action, inAoeSituation, contributions);
             }
             else if (!config.KeepTrashTargetSelected && !config.PickBetterAoeTarget)
-                this.RestoreRsrIfNeeded();
+                this.RestoreRsrIfNeeded("no meaningful AoE improvement and trash targeting disabled");
             return;
         }
 
@@ -725,7 +748,7 @@ internal sealed class AoePackPositioningController(
                     this.InjectCentroidHold(hints, pathfindBounds, targets, action, inAoeSituation, contributions);
             }
             else if (!config.KeepTrashTargetSelected && !config.PickBetterAoeTarget)
-                this.RestoreRsrIfNeeded();
+                this.RestoreRsrIfNeeded("BMR goal zone list unavailable and trash targeting disabled");
             return;
         }
 
@@ -982,6 +1005,21 @@ internal sealed class AoePackPositioningController(
             return false;
         }
 
+        if (!this.IsCombatStateSettled())
+        {
+            this.rsrRestoreStatus = "combat state settling; Henched deferred";
+            this.rsrLastRestoreStatus = "combat state settling; Henched deferred";
+            var now = DateTime.UtcNow;
+            if (now >= this.nextSettleDeferLogAt)
+            {
+                this.nextSettleDeferLogAt = now.AddSeconds(2);
+                services.Log.Verbose(
+                    $"RSR Henched deferred: combat context still settling ({(now - this.combatActiveSince).TotalMilliseconds:F0}ms since combat start, need {RsrCombatSettleWindow.TotalMilliseconds:F0}ms).");
+            }
+
+            return false;
+        }
+
         try
         {
             var snapshot = rotationSolverIpc.TryGetCurrentState(services.Log);
@@ -1005,6 +1043,9 @@ internal sealed class AoePackPositioningController(
             }
 
             this.rsrHenchedActive = true;
+            this.rsrHenchedActivatedAt = DateTime.UtcNow;
+            services.Log.Verbose(
+                $"RSR Henched engaged (snapshot={snapshot.Value} -> restoreOnExit={this.rsrSnapshotMode}; bossLikeCombatActive={this.bossLikeCombatActive}, bossModEncounterActive={this.bossModEncounterActive}).");
             return true;
         }
         catch (Exception ex)
@@ -1014,6 +1055,17 @@ internal sealed class AoePackPositioningController(
             services.Log.Verbose(ex, "Could not set Rotation Solver Reborn Henched mode.");
             return false;
         }
+    }
+
+    private bool IsCombatStateSettled()
+    {
+        return this.combatActiveSince != DateTime.MinValue &&
+               DateTime.UtcNow - this.combatActiveSince >= RsrCombatSettleWindow;
+    }
+
+    private bool HasHenchedMinDwellElapsed()
+    {
+        return DateTime.UtcNow - this.rsrHenchedActivatedAt >= RsrHenchedMinDwell;
     }
 
     private bool BossLikeTargetActive(IReadOnlyList<TargetSnapshot> priorityTargets)
@@ -2121,7 +2173,7 @@ internal sealed class AoePackPositioningController(
 
     private readonly record struct PackMotion(Vector2 Direction, float Speed);
 
-    private void RestoreRsrIfNeeded()
+    private void RestoreRsrIfNeeded(string reason = "context change")
     {
         if (!this.rsrHenchedActive)
         {
@@ -2134,18 +2186,21 @@ internal sealed class AoePackPositioningController(
             {
                 this.rsrRestoreStatus = $"restored {this.rsrSnapshotMode}";
                 this.rsrLastRestoreStatus = $"snapshot {this.rsrSnapshotMode} restored";
+                services.Log.Verbose(
+                    $"RSR Henched released ({reason}) after {(DateTime.UtcNow - this.rsrHenchedActivatedAt).TotalMilliseconds:F0}ms; restored to {this.rsrSnapshotMode}.");
             }
             else
             {
                 this.rsrRestoreStatus = "restore unavailable";
                 this.rsrLastRestoreStatus = $"restore {this.rsrSnapshotMode} unavailable";
+                services.Log.Verbose($"RSR Henched release requested ({reason}) but RestoreMode IPC was unavailable.");
             }
         }
         catch (Exception ex)
         {
             this.rsrRestoreStatus = "restore failed";
             this.rsrLastRestoreStatus = $"restore {this.rsrSnapshotMode} failed";
-            services.Log.Verbose(ex, "Could not restore Rotation Solver Reborn mode.");
+            services.Log.Verbose(ex, $"Could not restore Rotation Solver Reborn mode ({reason}).");
         }
         finally
         {
