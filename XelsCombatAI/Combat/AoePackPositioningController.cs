@@ -987,74 +987,13 @@ internal sealed class AoePackPositioningController(
 
     private bool ApplyRsrHenched()
     {
-        if (this.rsrHenchedActive)
-        {
-            return true;
-        }
-
-        if (this.bossLikeCombatActive)
-        {
-            // Note: intentionally not also checking the raw bossModEncounterActive flag here.
-            // In duties, BossMod almost always has *some* module loaded (per-pack trash
-            // sub-modules or the zone module) even during ordinary trash pulls, so gating on
-            // it in addition to bossLikeCombatActive silently blocked Henched for legitimate
-            // trash packs inside instances. bossLikeCombatActive already folds the raw flag
-            // in via ShouldUseBossModuleContext while still deferring to packLikeTrashContext.
-            this.rsrRestoreStatus = "boss combat active; Henched skipped";
-            this.rsrLastRestoreStatus = "boss combat active; Henched skipped";
-            return false;
-        }
-
-        if (!this.IsCombatStateSettled())
-        {
-            this.rsrRestoreStatus = "combat state settling; Henched deferred";
-            this.rsrLastRestoreStatus = "combat state settling; Henched deferred";
-            var now = DateTime.UtcNow;
-            if (now >= this.nextSettleDeferLogAt)
-            {
-                this.nextSettleDeferLogAt = now.AddSeconds(2);
-                services.Log.Verbose(
-                    $"RSR Henched deferred: combat context still settling ({(now - this.combatActiveSince).TotalMilliseconds:F0}ms since combat start, need {RsrCombatSettleWindow.TotalMilliseconds:F0}ms).");
-            }
-
-            return false;
-        }
-
-        try
-        {
-            var snapshot = rotationSolverIpc.TryGetCurrentState(services.Log);
-            if (snapshot == null)
-            {
-                this.rsrRestoreStatus = "snapshot unavailable";
-                this.rsrLastRestoreStatus = "snapshot unavailable";
-                return false;
-            }
-
-            // Never restore to Henched or Off — both indicate an unreliable snapshot; default to Auto.
-            this.rsrSnapshotMode = (snapshot.Value == StateCommandType.Henched || snapshot.Value == StateCommandType.Off)
-                ? StateCommandType.Auto
-                : snapshot.Value;
-            this.rsrRestoreStatus = $"snapshot {snapshot.Value} -> restore {this.rsrSnapshotMode}";
-            if (!rotationSolverIpc.SetHenched())
-            {
-                this.rsrRestoreStatus = "set Henched unavailable";
-                this.rsrLastRestoreStatus = "set Henched unavailable";
-                return false;
-            }
-
-            this.rsrHenchedActive = true;
-            this.rsrHenchedActivatedAt = DateTime.UtcNow;
-            services.Log.Verbose(
-                $"RSR Henched engaged (snapshot={snapshot.Value} -> restoreOnExit={this.rsrSnapshotMode}; bossLikeCombatActive={this.bossLikeCombatActive}, bossModEncounterActive={this.bossModEncounterActive}).");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            this.rsrRestoreStatus = "set Henched failed";
-            this.rsrLastRestoreStatus = "set Henched failed";
-            services.Log.Verbose(ex, "Could not set Rotation Solver Reborn Henched mode.");
-            return false;
-        }
+        // FFX-16: users reported that flipping Rotation Solver Reborn into its Henched
+        // operating mode interfered with RSR's normal operation, so this plugin no longer
+        // ever changes RSR's mode. rsrHenchedActive is never set to true elsewhere, so this
+        // keeps every downstream Henched-gated branch on its "not active" path.
+        this.rsrRestoreStatus = "Henched mode switching disabled";
+        this.rsrLastRestoreStatus = "Henched mode switching disabled";
+        return false;
     }
 
     private bool IsCombatStateSettled()
