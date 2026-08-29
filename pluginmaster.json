@@ -4,7 +4,7 @@
     "Name": "Xel's Combat AI",
     "InternalName": "XelsCombatAI",
     "AssemblyVersion": "2.20.10.0",
-    "TestingAssemblyVersion": "2.2.1.8",
+    "TestingAssemblyVersion": "2.2.1.9",
     "Description": "Tired of manually babysitting your BossMod settings mid-fight? XCAI handles your positioning, distances, and Ley Lines automatically so you can focus on not dying. Includes the decision overlay, run-review logging/FightReview tooling, party intent coordination, and combined BossMod advisory movement goals. Results may vary on the not dying part.",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
@@ -20,7 +20,7 @@
     "LastUpdate": 0,
     "DownloadLinkInstall": "https://github.com/Landelor/XelsCombatAI/releases/download/v2.20.10/XelsCombatAI.zip",
     "DownloadLinkUpdate": "https://github.com/Landelor/XelsCombatAI/releases/download/v2.20.10/XelsCombatAI.zip",
-    "DownloadLinkTesting": "https://github.com/Landelor/XelsCombatAI/releases/download/v2.2.1.8-pre/XelsCombatAI.zip",
+    "DownloadLinkTesting": "https://github.com/Landelor/XelsCombatAI/releases/download/v2.2.1.9-pre/XelsCombatAI.zip",
     "RepoUrl": "https://github.com/Landelor/XelsCombatAI",
     "IconUrl": "https://raw.githubusercontent.com/Landelor/XelsCombatAI/ankhito-main/XelsCombatAI/images/icon.png",
     "Tags": [
