@@ -437,7 +437,7 @@ internal sealed class ConfigWindow : Window, IDisposable
             this.config.TankKeepFrontConeAwayFromParty,
             this.defaultConfig.TankKeepFrontConeAwayFromParty,
             v => this.config.TankKeepFrontConeAwayFromParty = v,
-            "Tanks only: prefers safe tanking spots where the current target's frontal cone or cone tankbuster would hit the fewest visible party members.\nBossMod forbidden zones still decide what is safe.");
+            "Tanks only: prefers safe tanking spots where the current target's frontal cone or cone tankbuster would hit the fewest visible party members.\nBossMod forbidden zones still decide what is safe.\nDoes not stop BossMod from moving you out of the cone itself; use 'Ignore tank-front cone movement' for that.");
         changed |= this.Checkbox(
             "Target nearby lost trash aggro",
             this.config.TankTargetLostTrashAggro,

@@ -616,7 +616,7 @@ internal sealed class TankBehaviorController(
 
         contributions.Add(new(
             this.coneAwayFromPartyGoal,
-            pressure.TankbusterSoon ? BossModGoalPriority.DefensiveMechanic : BossModGoalPriority.PartyUtility,
+            BossModGoalPriority.DefensiveMechanic,
             "Tank cone away from party"));
         this.LastReason = pressure.TankbusterSoon
             ? "tankbuster soon: cone away from party"
