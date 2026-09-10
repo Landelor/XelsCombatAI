@@ -77,6 +77,7 @@ internal sealed record RuntimeStatus(
     RedMageMeleeComboStatus RedMageMeleeCombo,
     string ManualMovementInput,
     bool AutomatedMovementSuppressed,
+    string AutomatedMovementSuppressionReason,
     FacingStatus Facing,
     MobilityDecisionDiagnostics MobilityDecision,
     string LastGapCloserSafety,

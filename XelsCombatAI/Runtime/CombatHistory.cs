@@ -115,6 +115,7 @@ internal sealed class CombatHistory
             TargetRadius: status.TargetRadius,
             Movement: status.LastMovement,
             AutomatedMovementSuppressed: status.AutomatedMovementSuppressed,
+            AutomatedMovementSuppressionReason: status.AutomatedMovementSuppressionReason,
             MovementRangeStrategy: status.LastMovementRangeStrategy,
             SafetyBuffer: status.LastForbiddenZoneCushion,
             TargetUptimeRange: status.LastTargetUptimeRange,
@@ -277,6 +278,7 @@ internal sealed class CombatHistory
     {
         return previous.Movement != status.LastMovement ||
                previous.AutomatedMovementSuppressed != status.AutomatedMovementSuppressed ||
+               !StringEquals(previous.AutomatedMovementSuppressionReason, status.AutomatedMovementSuppressionReason) ||
                !StringEquals(previous.MovementRangeStrategy, status.LastMovementRangeStrategy) ||
                !StringEquals(previous.SafetyBuffer, status.LastForbiddenZoneCushion) ||
                !FloatEquals(previous.TargetUptimeRange, status.LastTargetUptimeRange) ||
@@ -472,6 +474,7 @@ internal sealed class CombatHistory
             AppendIfChanged(sb, "TargetRadius", FormatFloat(frame.TargetRadius), prev == null ? null : FormatFloat(prev.TargetRadius));
             AppendIfChanged(sb, "Move", frame.Movement, prev?.Movement);
             AppendIfChanged(sb, "Suppressed", frame.AutomatedMovementSuppressed, prev?.AutomatedMovementSuppressed);
+            AppendIfChanged(sb, "SuppressedReason", frame.AutomatedMovementSuppressionReason, prev?.AutomatedMovementSuppressionReason);
             AppendIfChanged(sb, "ManualInput", frame.ManualMovementInput, prev?.ManualMovementInput);
             AppendIfChanged(sb, "Facing", FormatFacing(frame.Facing), prev == null ? null : FormatFacing(prev.Facing));
             AppendIfChanged(sb, "RedMageMelee", FormatRedMageMelee(frame.RedMageMeleeCombo), prev == null ? null : FormatRedMageMelee(prev.RedMageMeleeCombo));

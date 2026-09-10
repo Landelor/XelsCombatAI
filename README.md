@@ -73,6 +73,8 @@ While you are casting, advisory movement goals are suppressed so comfort, uptime
 
 **Disable auto-face when I move** turns off the game's Auto-face target option while movement input is active, then restores your previous value after manual movement ends.
 
+**Pause movement without a BossMod module** stops all automatic movement, positioning, and gap closers while BossMod Reborn has no module loaded for the current duty or fight, such as unsupported or brand-new content. It does not pause for ordinary dungeon trash, which BossMod tracks with its own generic trash module. Off by default.
+
 **Follow party facing during downtime** turns roughly toward nearby party members when the target is gone or BossMod reports downtime, without changing facing during manual input, casting, animation lock, or BossMod movement pressure.
 
 **Avoid exact player stacks** lightly prefers a nearby safe offset when you are almost exactly overlapping a visible player party member. During mechanics, it waits until BossMod reports your current position safe, yields to active BossMod movement, and avoids breaking up intentional party clumps.

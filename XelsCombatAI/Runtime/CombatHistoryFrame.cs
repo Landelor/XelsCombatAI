@@ -26,6 +26,7 @@ internal sealed record CombatHistoryFrame(
     // Movement
     bool? Movement,
     bool AutomatedMovementSuppressed,
+    string AutomatedMovementSuppressionReason,
     string? MovementRangeStrategy,
     string? SafetyBuffer,
     float TargetUptimeRange,

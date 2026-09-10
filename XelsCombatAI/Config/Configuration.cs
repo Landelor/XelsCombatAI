@@ -38,6 +38,7 @@ public sealed class Configuration : IPluginConfiguration
 
     public bool Enabled { get; set; } = false;
     public bool ManageMovement { get; set; } = true;
+    public bool PauseMovementWithoutBossModModule { get; set; } = false;
     public bool RespectManualMovement { get; set; } = true;
     public bool DisableAutoFaceTargetDuringManualMovement { get; set; } = false;
     public bool ManageSocialTurning { get; set; } = true;
@@ -417,6 +418,7 @@ public sealed class Configuration : IPluginConfiguration
         this.DisableAutoFaceTargetDuringManualMovement = false;
         this.ManageForbiddenZoneDistance = true;
         this.PreferredForbiddenZoneDistance = DefaultPreferredForbiddenZoneDistance;
+        this.PauseMovementWithoutBossModModule = false;
         this.UseRedMageMeleeComboMovement = false;
         this.ManagePictomancerStarryMuse = true;
         this.UsePictomancerStarryMuseSmudge = true;
@@ -431,6 +433,7 @@ public sealed class Configuration : IPluginConfiguration
     {
         this.Enabled = false;
         this.ManageMovement = true;
+        this.PauseMovementWithoutBossModModule = false;
         this.RespectManualMovement = true;
         this.DisableAutoFaceTargetDuringManualMovement = false;
         this.ManageSocialTurning = true;

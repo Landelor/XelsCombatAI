@@ -147,7 +147,7 @@ internal sealed class PictomancerStarryMusePositioningController : IBossModGoalZ
 
         if (automatedMovementSuppressed())
         {
-            this.SetInactive("manual movement suppression active");
+            this.SetInactive("automated movement suppressed");
             return;
         }
 

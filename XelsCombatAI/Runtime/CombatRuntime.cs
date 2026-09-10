@@ -63,7 +63,12 @@ internal sealed class CombatRuntime(
     private bool combatHistorySaved;
     private bool combatHistoryActive;
 
-    public bool AutomatedMovementSuppressed => DateTime.UtcNow < this.manualMovementSuppressUntil;
+    public bool AutomatedMovementSuppressed =>
+        DateTime.UtcNow < this.manualMovementSuppressUntil || this.missingBossModModuleSuppressionActive;
+
+    public string AutomatedMovementSuppressionReason { get; private set; } = "not suppressed";
+
+    private bool missingBossModModuleSuppressionActive;
 
     public void OnFrameworkUpdate(IFramework framework)
     {
@@ -136,6 +141,8 @@ internal sealed class CombatRuntime(
             this.wasInCombat = false;
             this.wasDead = false;
             this.manualMovementSuppressUntil = DateTime.MinValue;
+            this.missingBossModModuleSuppressionActive = false;
+            this.AutomatedMovementSuppressionReason = "not suppressed";
             autoFaceTargetOptionController.Update(manualMovementRequested);
             return;
         }
@@ -236,6 +243,8 @@ internal sealed class CombatRuntime(
     private void ResetRuntimeCache(bool resetBossModHook)
     {
         this.manualMovementSuppressUntil = DateTime.MinValue;
+        this.missingBossModModuleSuppressionActive = false;
+        this.AutomatedMovementSuppressionReason = "not suppressed";
         autoFaceTargetOptionController.Restore();
         this.dependencyGraceUntil = DateTime.MinValue;
         mechanicPressure.Reset();
@@ -360,6 +369,7 @@ internal sealed class CombatRuntime(
             redMageMeleeComboController.Status,
             manualMovement.Status,
             this.AutomatedMovementSuppressed,
+            this.AutomatedMovementSuppressionReason,
             facingController.Status,
             mobilityDecisionEvaluator.LastDecision,
             gapCloserController.LastGapCloserSafety,
@@ -575,10 +585,22 @@ internal sealed class CombatRuntime(
 
     private bool ShouldSuppressAutomatedMovement(DateTime now, bool manualMovementRequested)
     {
+        this.missingBossModModuleSuppressionActive =
+            config.PauseMovementWithoutBossModModule && !mechanicPressure.Current.BMRHasActiveModule;
+        if (this.missingBossModModuleSuppressionActive)
+        {
+            this.AutomatedMovementSuppressionReason = "no BossMod module for current content";
+        }
+
         if (!config.RespectManualMovement)
         {
             this.manualMovementSuppressUntil = DateTime.MinValue;
-            return false;
+            if (!this.missingBossModModuleSuppressionActive)
+            {
+                this.AutomatedMovementSuppressionReason = "not suppressed";
+            }
+
+            return this.missingBossModModuleSuppressionActive;
         }
 
         if (manualMovementRequested)
@@ -591,7 +613,13 @@ internal sealed class CombatRuntime(
             }
         }
 
-        return now < this.manualMovementSuppressUntil;
+        var manualSuppressionActive = now < this.manualMovementSuppressUntil;
+        if (!this.missingBossModModuleSuppressionActive)
+        {
+            this.AutomatedMovementSuppressionReason = manualSuppressionActive ? "manual movement suppression active" : "not suppressed";
+        }
+
+        return manualSuppressionActive || this.missingBossModModuleSuppressionActive;
     }
 
     private void HandleDisabled(bool flushCombatHistory = true)

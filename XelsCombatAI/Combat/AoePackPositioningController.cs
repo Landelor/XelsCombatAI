@@ -439,10 +439,10 @@ internal sealed class AoePackPositioningController(
         {
             if (!config.KeepTrashTargetSelected && !config.PickBetterAoeTarget)
             {
-                this.RestoreRsrIfNeeded("manual movement suppression active");
+                this.RestoreRsrIfNeeded("automated movement suppressed");
             }
 
-            this.lastReason = "manual movement suppression active";
+            this.lastReason = "automated movement suppressed";
             return;
         }
 

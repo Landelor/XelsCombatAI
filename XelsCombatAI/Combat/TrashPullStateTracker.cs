@@ -262,7 +262,7 @@ internal sealed class TrashPullStateTracker
         if (observation.ManualSuppressed)
         {
             nextPhase = TrashPullPhase.Disrupted;
-            return "manual movement suppression active";
+            return "automated movement suppressed";
         }
 
         if (observation.BmrSafetyPressure)

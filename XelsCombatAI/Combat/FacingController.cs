@@ -394,7 +394,7 @@ internal sealed class FacingController(
 
         if (suppressAutomatedMovement)
         {
-            reason = "manual movement suppression active";
+            reason = "automated movement suppressed";
             return false;
         }
 

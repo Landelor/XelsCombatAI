@@ -173,7 +173,7 @@ internal sealed class HealerAoePositioningController(
 
         if (automatedMovementSuppressed())
         {
-            this.lastReason = "manual movement suppression active";
+            this.lastReason = "automated movement suppressed";
             return;
         }
 

@@ -227,6 +227,13 @@ internal sealed class ConfigWindow : Window, IDisposable
             ImGui.BeginDisabled();
 
         changed |= this.Checkbox(
+            "Pause movement without a BossMod module",
+            this.config.PauseMovementWithoutBossModModule,
+            this.defaultConfig.PauseMovementWithoutBossModModule,
+            v => this.config.PauseMovementWithoutBossModModule = v,
+            "Pauses automatic movement while BossMod Reborn has no module loaded for the current content, such as unsupported duties or fights.\nOther movement-driven automation stays paused too, since it shares the same movement suppression.",
+            movementDisabledTooltip);
+        changed |= this.Checkbox(
             "Avoid exact player stacks",
             this.config.ManageSocialSpacing,
             this.defaultConfig.ManageSocialSpacing,

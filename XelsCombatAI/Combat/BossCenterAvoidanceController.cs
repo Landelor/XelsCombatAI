@@ -95,7 +95,7 @@ internal sealed class BossCenterAvoidanceController(
 
         if (automatedMovementSuppressed())
         {
-            this.lastReason = "manual movement suppression active";
+            this.lastReason = "automated movement suppressed";
             this.lastOverlay = null;
             return;
         }

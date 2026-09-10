@@ -175,7 +175,7 @@ internal sealed class SurvivabilityZonePositioningController : IBossModGoalZoneC
 
         if (automatedMovementSuppressed())
         {
-            this.SetInactive("manual movement suppression active");
+            this.SetInactive("automated movement suppressed");
             return;
         }
 
