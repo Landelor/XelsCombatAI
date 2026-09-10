@@ -6,9 +6,8 @@ WORKSPACE_DIR="${XELS_WORKSPACE_DIR:-$ROOT/..}"
 PLUGIN_PROJECT="$ROOT/XelsCombatAI/XelsCombatAI.csproj"
 TOOL_PROJECT="$ROOT/tools/FightReview/FightReview.csproj"
 TOOL_TEST_PROJECT="$ROOT/tools/FightReview.Tests/FightReview.Tests.csproj"
-FEED_REPO_DIR="${XELS_DALAMUD_REPO_DIR:-$WORKSPACE_DIR/XelsDalamudRepo}"
 REFERENCES_DIR="${XCAI_REFERENCES_DIR:-$WORKSPACE_DIR/XelsCombatAIReferences}"
-PACKAGE_SCRIPT="$FEED_REPO_DIR/scripts/package-plugin.py"
+PACKAGE_SCRIPT="$ROOT/scripts/package-release.sh"
 PACKAGE_OUT="$ROOT/artifacts"
 
 RUN_TOOLS=1
@@ -27,7 +26,7 @@ Options:
   --skip-plugin      Build and test only FightReview tooling.
   --skip-tool-tests  Build FightReview but do not run FightReview.Tests.
   --format           Verify C# formatting.
-  --package          Build the release zip with XelsDalamudRepo/scripts/package-plugin.py.
+  --package          Build the release zip with scripts/package-release.sh.
   -h, --help         Show this help text.
 EOF
 }
@@ -150,14 +149,8 @@ if [[ "$RUN_FORMAT" -eq 1 ]]; then
 fi
 
 if [[ "$RUN_PACKAGE" -eq 1 ]]; then
-  [[ -f "$PACKAGE_SCRIPT" ]] || fail "Reusable package script was not found at '$PACKAGE_SCRIPT'. Clone XelsDalamudRepo in the workspace, set XELS_DALAMUD_REPO_DIR, or set XELS_WORKSPACE_DIR."
-  rm -rf "$PACKAGE_OUT"
-  run python "$PACKAGE_SCRIPT" \
-    --project "$PLUGIN_PROJECT" \
-    --configuration Release \
-    --internal-name XelsCombatAI \
-    --output-dir "$PACKAGE_OUT" \
-    --no-build
+  [[ -f "$PACKAGE_SCRIPT" ]] || fail "Package script was not found at '$PACKAGE_SCRIPT'."
+  run "$PACKAGE_SCRIPT"
 
   printf '\n+ validate packaged runtime dependencies\n'
   python - "$PACKAGE_OUT/XelsCombatAI.zip" <<'PY'

@@ -85,14 +85,16 @@ A change is not aligned if it primarily:
 - `XelsCombatAI/Services/` - injected Dalamud service container/wrappers.
 - `XelsCombatAI/Models/` - small shared enums and simple types.
 - `XelsCombatAI/GlobalUsings.cs` - global imports for internal XCAI namespaces.
-- `scripts/test-and-build.sh` - local validation helper. Its `--package` mode delegates to the reusable package script from `XelsDalamudRepo`.
-- `.github/workflows/validate.yml` - thin wrapper calling reusable validation from `XelsPlugins/XelsDalamudRepo`.
-- `.github/workflows/publish-testing.yml` - thin wrapper calling reusable manual testing publication from `XelsPlugins/XelsDalamudRepo`.
-- `.github/workflows/release.yml` - thin wrapper calling reusable manual stable release automation from `XelsPlugins/XelsDalamudRepo`.
-- The active plugin feed lives in `XelsPlugins/XelsDalamudRepo`; do not add a local `pluginmaster.json` to this repository.
+- `scripts/test-and-build.sh` - local validation helper for building the plugin and FightReview tooling.
+- `scripts/package-release.sh` - builds the Release configuration and packages `artifacts/XelsCombatAI.zip`, matching what `.github/workflows/prerelease.yml` and `release.yml` run in CI.
+- `.github/workflows/validate.yml` - builds the plugin on pull requests and pushes to `ankhito-main`.
+- `.github/workflows/bump-and-prerelease.yml` - bumps the patch version, tags a `vX.Y.Z-pre` testing prerelease, builds, and publishes it on every push to `ankhito-main` (except `[skip ci]` bump commits).
+- `.github/workflows/prerelease.yml` - tag-push fallback that builds and publishes a prerelease when a `vX.Y.Z-pre` tag is pushed outside the bump workflow.
+- `.github/workflows/promote-stable.yml` - manually promotes the latest tested prerelease to stable, tags `vX.Y.Z`, builds, and publishes the stable release.
+- `.github/workflows/release.yml` - tag-push fallback that builds and publishes a stable release when a `vX.Y.Z` tag is pushed outside the promote workflow.
+- The plugin feed is self-hosted at `pluginmaster.json` in this repository; there is no external feed repository.
 - `../XelsCombatAI.code-workspace` - workspace file that opens this repo with sibling references.
 - `../XelsCombatAIReferences/` - default sibling folder for build and API reference clones. Set `XCAI_REFERENCES_DIR` to use a different location.
-- `../XelsDalamudRepo/` - default sibling checkout for package/feed tooling. Set `XELS_DALAMUD_REPO_DIR` to use a different location.
 
 ## Build And Validation
 
@@ -102,7 +104,7 @@ Use these commands from the repository root:
 dotnet restore XelsCombatAI/XelsCombatAI.csproj
 dotnet build XelsCombatAI/XelsCombatAI.csproj -c Debug -p:EnableWindowsTargeting=true
 dotnet build XelsCombatAI/XelsCombatAI.csproj -c Release -p:EnableWindowsTargeting=true
-scripts/test-and-build.sh --skip-tools --package
+scripts/package-release.sh
 dotnet format XelsCombatAI/XelsCombatAI.csproj --verify-no-changes
 ```
 
@@ -110,13 +112,13 @@ Notes:
 
 - The project targets `net10.0-windows8.0` through `Dalamud.NET.Sdk/15.0.0`.
 - On Linux, set `DALAMUD_HOME` to a directory containing Dalamud dev assemblies before building.
-- The default workspace root is the parent folder of this repo. Set `XELS_WORKSPACE_DIR` if this repo is not cloned beside `XelsCombatAIReferences` and `XelsDalamudRepo`.
+- The default workspace root is the parent folder of this repo. Set `XELS_WORKSPACE_DIR` if this repo is not cloned beside `XelsCombatAIReferences`.
 - Builds reference ECommons at `$XCAI_REFERENCES_DIR/ECommons/ECommons/ECommons.csproj`, defaulting to `$XELS_WORKSPACE_DIR/XelsCombatAIReferences/ECommons/ECommons/ECommons.csproj`.
 - `tools/FightReview` builds against BossMod Reborn at `$XCAI_REFERENCES_DIR/BossmodReborn/BossMod/BossModReborn.csproj`, defaulting to `$XELS_WORKSPACE_DIR/XelsCombatAIReferences/BossmodReborn/BossMod/BossModReborn.csproj`.
 - Run `scripts/update-build-dependencies.sh` after cloning or when build reference checkouts are missing. Set `XCAI_REFERENCES_DIR` first if references should live somewhere other than `$XELS_WORKSPACE_DIR/XelsCombatAIReferences`.
-- `tools/FightReview.Tests` is a custom executable test harness, not a `dotnet test` project. The reusable validation workflow skips it; run `scripts/test-and-build.sh` when tool or review-log behavior changes.
+- `tools/FightReview.Tests` is a custom executable test harness, not a `dotnet test` project; run `scripts/test-and-build.sh` when tool or review-log behavior changes.
 - Run `dotnet restore` when dependency, SDK, target framework, or project-file changes could affect restore output.
-- Run `scripts/test-and-build.sh --skip-tools --package` for release/package changes or when packaging behavior may have changed. This requires `XelsDalamudRepo` cloned beside this repo, or `XELS_DALAMUD_REPO_DIR` set to that checkout.
+- Run `scripts/package-release.sh` for release/package changes or when packaging behavior may have changed.
 - Run `dotnet format --verify-no-changes` for broad C# edits when the local SDK supports it. If it cannot run cleanly because of environment issues, report that explicitly.
 - Before finishing code changes, run the most relevant available validation command and report any command that could not be run.
 
@@ -264,30 +266,29 @@ Examples:
 
 ## Release And Metadata
 
-Direct commits to `main` are allowed for solo/agent work when appropriate; use pull requests when review or staging helps.
+Direct commits to `ankhito-main` are allowed for solo/agent work when appropriate; use pull requests when review or staging helps.
 
-Testing builds are published only by manually running `.github/workflows/publish-testing.yml`. Testing releases use unique prerelease tags like `vX.Y.Z-testing.N` and may only update central feed testing fields:
+The plugin feed is self-hosted in this repository at `pluginmaster.json`, served via `https://raw.githubusercontent.com/Landelor/XelsCombatAI/ankhito-main/pluginmaster.json`. There is no external feed repository; `XelsPlugins/XelsDalamudRepo` no longer exists.
+
+Every push to `ankhito-main` (except version-bump commits, tagged `[skip ci]`) is automatically bumped, tagged as a `vX.Y.Z-pre` testing prerelease, built, and published by `.github/workflows/bump-and-prerelease.yml` in a single run. That workflow updates only testing feed fields in `pluginmaster.json`:
 
 - `TestingAssemblyVersion`
-- `TestingDalamudApiLevel`
 - `DownloadLinkTesting`
 
-Testing and release feed updates require the `XELS_DALAMUD_FEED_TOKEN` Actions secret to be available to this repository. The token must have contents write access to `XelsPlugins/XelsDalamudRepo`.
-Generated release notes belong on GitHub release and prerelease pages, not in `pluginmaster.json` changelog fields. The custom plugin feed should only carry version, API, and public download metadata.
-
-Stable releases are published only by manually running `.github/workflows/release.yml`. Stable releases use immutable `vX.Y.Z` tags and may update central feed stable fields:
+Stable releases are published only by manually running `.github/workflows/promote-stable.yml`, which reads the current `TestingAssemblyVersion`, updates stable feed fields, commits, pushes an immutable `vX.Y.Z` tag, then builds and publishes the stable GitHub release in the same run. It updates only stable feed fields in `pluginmaster.json`:
 
 - `AssemblyVersion`
 - `DownloadLinkInstall`
 - `DownloadLinkUpdate`
 
-Do not manually edit versions unless explicitly instructed. Do not use timestamp versions or CI run numbers as stable public versions. Do not publish to the official Dalamud repo.
+`.github/workflows/prerelease.yml` and `release.yml` are tag-push triggered fallbacks for publishing from a manually pushed `vX.Y.Z-pre`/`vX.Y.Z` tag (for example, a tag pushed with a personal token outside CI). Tags pushed by Actions using `secrets.GITHUB_TOKEN` do not retrigger other workflows, so the bump and promote workflows build and publish inline rather than depending on these tag triggers.
 
-The active custom feed is `XelsPlugins/XelsDalamudRepo`. Keep this repository listed in that repo's `repos.txt`. Do not add, update, or restore a local `pluginmaster.json`; feed entries are generated centrally.
+Do not manually edit versions unless explicitly instructed; let the bump and promote workflows manage `XelsCombatAI.csproj`'s `<Version>` and `pluginmaster.json`. Do not use timestamp versions or CI run numbers as stable public versions. Do not publish to the official Dalamud repo.
+Generated release notes belong on GitHub release and prerelease pages, not in `pluginmaster.json` changelog fields. `pluginmaster.json` should only carry version, API, and public download metadata.
 
-When changing plugin description, tags, icon URL, name, or Dalamud API metadata, check `XelsCombatAI/XelsCombatAI.json` and the generated feed output.
+When changing plugin description, tags, icon URL, name, or Dalamud API metadata, update both `XelsCombatAI/XelsCombatAI.json` and `pluginmaster.json` together.
 
-The reusable release workflow uses `XelsPlugins/XelsDalamudRepo/scripts/package-plugin.py` and writes `artifacts/XelsCombatAI.zip`. Local packaging should use the same script through `scripts/test-and-build.sh --skip-tools --package`. Treat `artifacts/`, `bin/`, and `obj/` as generated output.
+Release packaging uses `scripts/package-release.sh`, which builds the Release configuration and zips the published output as `artifacts/XelsCombatAI.zip`. Treat `artifacts/`, `bin/`, and `obj/` as generated output.
 
 ## External References And Generated Files
 

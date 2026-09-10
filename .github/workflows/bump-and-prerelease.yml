@@ -1,0 +1,82 @@
+name: Bump Version and Pre-release
+
+on:
+  push:
+    branches: [ankhito-main]
+
+permissions:
+  contents: write
+
+jobs:
+  bump-and-prerelease:
+    # Skip if this is a version bump commit (avoids retriggering itself)
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    env:
+      DALAMUD_HOME: /tmp/dalamud
+      XCAI_REFERENCES_DIR: ${{ github.workspace }}/XelsCombatAIReferences
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ankhito-main
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Compute new version
+        id: version
+        run: |
+          CURRENT=$(grep -oP '(?<=<Version>)[^<]+' XelsCombatAI/XelsCombatAI.csproj)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          PATCH=$((PATCH + 1))
+          NEW="$MAJOR.$MINOR.$PATCH"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEW-pre" >> "$GITHUB_OUTPUT"
+
+      - name: Update version files
+        run: |
+          NEW="${{ steps.version.outputs.new }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          REPO="${{ github.repository }}"
+          TESTING_URL="https://github.com/${REPO}/releases/download/${TAG}/XelsCombatAI.zip"
+
+          sed -i "s|<Version>[^<]*</Version>|<Version>$NEW</Version>|" XelsCombatAI/XelsCombatAI.csproj
+          sed -i "s|\"TestingAssemblyVersion\": \"[^\"]*\"|\"TestingAssemblyVersion\": \"$NEW.0\"|" pluginmaster.json
+          sed -i "s|\"DownloadLinkTesting\": \"[^\"]*\"|\"DownloadLinkTesting\": \"$TESTING_URL\"|" pluginmaster.json
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add XelsCombatAI/XelsCombatAI.csproj pluginmaster.json
+          git commit -m "chore: bump version to ${{ steps.version.outputs.tag }} [skip ci]"
+          git tag ${{ steps.version.outputs.tag }}
+          git push origin ankhito-main
+          git push origin ${{ steps.version.outputs.tag }}
+
+      # Tags pushed with GITHUB_TOKEN do not trigger other workflows, so the
+      # build and publish steps run inline here instead of relying on
+      # prerelease.yml's tag trigger.
+      - name: Checkout ECommons
+        uses: actions/checkout@v4
+        with:
+          repository: NightmareXIV/ECommons
+          path: XelsCombatAIReferences/ECommons
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Download Dalamud
+        run: |
+          wget https://goatcorp.github.io/dalamud-distrib/stg/latest.zip -O /tmp/dalamud.zip
+          unzip /tmp/dalamud.zip -d "${{ env.DALAMUD_HOME }}"
+
+      - name: Build package
+        run: scripts/package-release.sh
+
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: artifacts/XelsCombatAI.zip
+          prerelease: true

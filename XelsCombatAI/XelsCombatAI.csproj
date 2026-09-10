@@ -2,6 +2,7 @@
   <PropertyGroup>
     <Authors>xeltor</Authors>
     <Company></Company>
+    <Version>2.21.0</Version>
     <Description>Human-like BossMod Reborn movement and positioning policy for a custom Dalamud plugin feed.</Description>
     <PackageProjectUrl>https://github.com/Landelor/XelsCombatAI</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Landelor/XelsCombatAI</RepositoryUrl>

@@ -1,36 +1,42 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      release_type:
-        description: Release type
-        required: true
-        default: auto
-        type: choice
-        options:
-          - auto
-          - patch
-          - minor
-          - major
-      dry_run:
-        description: Dry run without publishing
-        required: true
-        default: true
-        type: boolean
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
   release:
-    uses: XelsPlugins/XelsDalamudRepo/.github/workflows/plugin-release.yml@main
-    with:
-      plugin_project_path: XelsCombatAI/XelsCombatAI.csproj
-      feed_repo: XelsPlugins/XelsDalamudRepo
-      release_type: ${{ inputs.release_type }}
-      dry_run: ${{ inputs.dry_run }}
-      dotnet_version: 10.0.x
-      internal_name: XelsCombatAI
-    secrets:
-      feed_token: ${{ secrets.XELS_DALAMUD_FEED_TOKEN }}
+    if: "!endsWith(github.ref_name, '-pre')"
+    runs-on: ubuntu-latest
+    env:
+      DALAMUD_HOME: /tmp/dalamud
+      XCAI_REFERENCES_DIR: ${{ github.workspace }}/XelsCombatAIReferences
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout ECommons
+        uses: actions/checkout@v4
+        with:
+          repository: NightmareXIV/ECommons
+          path: XelsCombatAIReferences/ECommons
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Download Dalamud
+        run: |
+          wget https://goatcorp.github.io/dalamud-distrib/stg/latest.zip -O /tmp/dalamud.zip
+          unzip /tmp/dalamud.zip -d "${{ env.DALAMUD_HOME }}"
+
+      - name: Build package
+        run: scripts/package-release.sh
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/XelsCombatAI.zip

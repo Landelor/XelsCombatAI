@@ -1,15 +1,16 @@
-name: Validate
+name: Pre-release
 
 on:
-  pull_request:
   push:
-    branches: [ankhito-main]
+    tags:
+      - "v*-pre"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build:
+  prerelease:
+    if: endsWith(github.ref_name, '-pre')
     runs-on: ubuntu-latest
     env:
       DALAMUD_HOME: /tmp/dalamud
@@ -32,5 +33,11 @@ jobs:
           wget https://goatcorp.github.io/dalamud-distrib/stg/latest.zip -O /tmp/dalamud.zip
           unzip /tmp/dalamud.zip -d "${{ env.DALAMUD_HOME }}"
 
-      - name: Build
-        run: dotnet build XelsCombatAI/XelsCombatAI.csproj -c Release -p:EnableWindowsTargeting=true
+      - name: Build package
+        run: scripts/package-release.sh
+
+      - name: Upload pre-release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/XelsCombatAI.zip
+          prerelease: true

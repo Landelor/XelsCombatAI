@@ -1,0 +1,81 @@
+name: Promote to Stable
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    env:
+      DALAMUD_HOME: /tmp/dalamud
+      XCAI_REFERENCES_DIR: ${{ github.workspace }}/XelsCombatAIReferences
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ankhito-main
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Read testing version
+        id: version
+        run: |
+          TESTING=$(grep -oP '(?<="TestingAssemblyVersion": ")[^"]+' pluginmaster.json)
+          if [ -z "$TESTING" ]; then
+            echo "No TestingAssemblyVersion found in pluginmaster.json — nothing to promote"
+            exit 1
+          fi
+          VERSION="${TESTING%.0}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "assembly_version=$TESTING" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          REPO="${{ github.repository }}"
+          echo "stable_url=https://github.com/${REPO}/releases/download/v$VERSION/XelsCombatAI.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Update pluginmaster.json for stable
+        run: |
+          ASSEMBLY_VERSION="${{ steps.version.outputs.assembly_version }}"
+          STABLE_URL="${{ steps.version.outputs.stable_url }}"
+
+          sed -i "s|\"AssemblyVersion\": \"[^\"]*\"|\"AssemblyVersion\": \"$ASSEMBLY_VERSION\"|" pluginmaster.json
+          sed -i "s|\"DownloadLinkInstall\": \"[^\"]*\"|\"DownloadLinkInstall\": \"$STABLE_URL\"|" pluginmaster.json
+          sed -i "s|\"DownloadLinkUpdate\": \"[^\"]*\"|\"DownloadLinkUpdate\": \"$STABLE_URL\"|" pluginmaster.json
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pluginmaster.json
+          git commit -m "chore: promote ${{ steps.version.outputs.tag }} to stable [skip ci]"
+          git tag ${{ steps.version.outputs.tag }}
+          git push origin ankhito-main
+          git push origin ${{ steps.version.outputs.tag }}
+
+      # Tags pushed with GITHUB_TOKEN do not trigger other workflows, so the
+      # build and publish steps run inline here instead of relying on
+      # release.yml's tag trigger.
+      - name: Checkout ECommons
+        uses: actions/checkout@v4
+        with:
+          repository: NightmareXIV/ECommons
+          path: XelsCombatAIReferences/ECommons
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Download Dalamud
+        run: |
+          wget https://goatcorp.github.io/dalamud-distrib/stg/latest.zip -O /tmp/dalamud.zip
+          unzip /tmp/dalamud.zip -d "${{ env.DALAMUD_HOME }}"
+
+      - name: Build package
+        run: scripts/package-release.sh
+
+      - name: Publish stable release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: artifacts/XelsCombatAI.zip

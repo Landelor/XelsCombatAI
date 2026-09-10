@@ -40,10 +40,10 @@ Out of combat, the plugin stops managing movement entirely and hands control bac
 Add the following URL to Dalamud's custom plugin repositories:
 
 ```
-https://raw.githubusercontent.com/Landelor/XelsCombatAI/master/pluginmaster.json
+https://raw.githubusercontent.com/Landelor/XelsCombatAI/ankhito-main/pluginmaster.json
 ```
 
-Stable and testing builds are published manually. Testing builds require Dalamud's plugin testing versions option.
+Testing builds are published automatically after every push to `ankhito-main`. Stable builds are promoted manually from the latest tested testing build. Testing builds require Dalamud's plugin testing versions option.
 
 ## Commands
 
