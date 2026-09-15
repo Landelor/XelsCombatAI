@@ -67,7 +67,12 @@ internal sealed class AoePackPositioningController(
     private bool bmrMoveImminent;
     private bool bossLikeCombatActive;
     private bool trashContextActive;
-    private StateCommandType rsrSnapshotMode;
+    // FFX-16 disabled the only writer of this field (see ApplyRsrHenched below), so it now
+    // always holds this explicit default. It stays because RestoreRsrIfNeeded, Status, and the
+    // combat-history export pipeline still read it and are expected to resume using it if/when
+    // Henched switching is reinstated. Explicit initializer keeps CS0649 from flagging it as an
+    // accidentally-unassigned field (FFX-11).
+    private StateCommandType rsrSnapshotMode = StateCommandType.Off;
     private int lastPriorityTargetCount;
     private Vector2 lastInjectedCandidate;
     private int lastInjectedHits;
