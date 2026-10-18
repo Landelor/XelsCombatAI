@@ -37,6 +37,7 @@ public sealed class Configuration : IPluginConfiguration
     public int Version { get; set; } = 28;
 
     public bool Enabled { get; set; } = false;
+    public bool AutoManageEnabledWithBossModModule { get; set; } = false;
     public bool ManageMovement { get; set; } = true;
     public bool PauseMovementWithoutBossModModule { get; set; } = false;
     public bool RespectManualMovement { get; set; } = true;
@@ -432,6 +433,7 @@ public sealed class Configuration : IPluginConfiguration
     internal void ResetAll()
     {
         this.Enabled = false;
+        this.AutoManageEnabledWithBossModModule = false;
         this.ManageMovement = true;
         this.PauseMovementWithoutBossModModule = false;
         this.RespectManualMovement = true;

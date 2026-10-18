@@ -65,6 +65,8 @@ Open the settings window with `/xcai config` or through the Dalamud plugin list.
 
 **General** — Toggle the plugin, command chat messages, and reset settings.
 
+**Automatically enable/disable with BossMod module** turns the plugin on when BossMod Reborn loads a module (including dungeon trash) and off again when no module is active. Manually toggling the plugin is respected until the next module load or unload. Off by default.
+
 ### Movement tab
 
 **Movement** — Control automatic movement, social facing and spacing, manual movement pause, auto-face behavior during manual movement, movement timing, danger-zone spacing, healer party coverage, defensive ground effects, Passage of Arms, and weak edge-avoidance preferences.

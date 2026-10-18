@@ -122,6 +122,36 @@ internal sealed class BossModIpc
         return this.gate.IsOpen && this.IsIpcReady();
     }
 
+    /// <summary>
+    /// Reads whether BossMod Reborn currently has an active module, independent of
+    /// XCAI's own enable state or preset lifecycle. Used only to decide whether XCAI
+    /// should automatically enable/disable itself; never gates movement or preset writes.
+    /// </summary>
+    public bool TryGetHasActiveModule(out bool hasActiveModule)
+    {
+        hasActiveModule = false;
+        if (!this.EnsureSubscribers() || this.hasActiveModule is not { } subscriber)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!subscriber.HasFunction)
+            {
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            this.LogRecoverableFailure(ex, "Could not check BossMod active-module IPC readiness.");
+            return false;
+        }
+
+        hasActiveModule = this.Invoke(subscriber, () => subscriber.InvokeFunc());
+        return true;
+    }
+
     public bool SetActive(string presetName)
     {
         if (!this.IsAvailable() || this.setActivePreset is not { } subscriber)

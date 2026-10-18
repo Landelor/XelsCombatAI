@@ -58,6 +58,8 @@ internal sealed class CombatRuntime(
     private DateTime manualMovementSuppressUntil = DateTime.MinValue;
     private DateTime dependencyGraceUntil = DateTime.MinValue;
     private DateTime nextRuntimeErrorLog = DateTime.MinValue;
+    private DateTime nextAutoEnableCheck = DateTime.MinValue;
+    private bool? lastObservedBossModModuleActive;
     private string? lastMissingDependencies;
     private readonly CombatHistory combatHistory = new();
     private bool combatHistorySaved;
@@ -94,6 +96,8 @@ internal sealed class CombatRuntime(
         _ = framework;
         jobRangeProvider.Tick();
         var now = DateTime.UtcNow;
+
+        this.UpdateAutoEnableWithBossModModule(now);
 
         var combatEngagement = CombatEngagementDetector.Detect(services);
         if (!config.Enabled)
@@ -581,6 +585,45 @@ internal sealed class CombatRuntime(
 
         return this.dependencyGraceUntil != DateTime.MinValue &&
                now < this.dependencyGraceUntil;
+    }
+
+    private void UpdateAutoEnableWithBossModModule(DateTime now)
+    {
+        if (!config.AutoManageEnabledWithBossModModule)
+        {
+            return;
+        }
+
+        if (now < this.nextAutoEnableCheck)
+        {
+            return;
+        }
+
+        this.nextAutoEnableCheck = now.AddMilliseconds(250);
+
+        if (!bossMod.TryGetHasActiveModule(out var hasActiveModule))
+        {
+            return;
+        }
+
+        var previous = this.lastObservedBossModModuleActive;
+        this.lastObservedBossModModuleActive = hasActiveModule;
+        if (previous == hasActiveModule)
+        {
+            return;
+        }
+
+        if (hasActiveModule)
+        {
+            if (!config.Enabled)
+            {
+                this.SetEnabled(true);
+            }
+        }
+        else if (config.Enabled)
+        {
+            this.SetEnabled(false, warn: false);
+        }
     }
 
     private bool ShouldSuppressAutomatedMovement(DateTime now, bool manualMovementRequested)

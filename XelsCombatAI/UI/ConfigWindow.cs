@@ -184,6 +184,12 @@ internal sealed class ConfigWindow : Window, IDisposable
         var changed = false;
 
         this.DrawEnabledCheckbox();
+        changed |= this.Checkbox(
+            "Automatically enable/disable with BossMod module",
+            this.config.AutoManageEnabledWithBossModModule,
+            this.defaultConfig.AutoManageEnabledWithBossModModule,
+            v => this.config.AutoManageEnabledWithBossModModule = v,
+            "Enables Xel's Combat AI when BossMod Reborn loads a module (including dungeon trash) and disables it again when no module is active.\nManually toggling the plugin is respected until the next time a module loads or unloads.");
         ImGui.Spacing();
 
         this.DrawSectionHeader("Chat");

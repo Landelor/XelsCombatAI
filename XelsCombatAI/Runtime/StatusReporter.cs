@@ -23,6 +23,7 @@ internal static class StatusReporter
 
         AppendSection(builder, "Runtime");
         Append(builder, "Enabled", status.Enabled);
+        Append(builder, "AutoManageEnabledWithBossModModule", config.AutoManageEnabledWithBossModModule);
         Append(builder, "InCombat", status.InCombat);
         Append(builder, "IsDead", status.IsDead);
         Append(builder, "PlayerClassJobId", status.PlayerClassJobId);
